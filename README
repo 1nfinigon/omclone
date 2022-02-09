@@ -1,6 +1,9 @@
 # omclone
 A runner of Opus Magnum solutions with a UI that will help long tape solves.
 
+Before compiling, you should rename "default_paths_SAMPLE.txt" to "default_paths.txt"
+and edit the correct path to your Opus Magnum puzzle/solution folder into it.
+
 Code is heavily influenced by omsim (https://github.com/ianh/omsim).
 
 Enable feature "color-eye" for improved error reporting. Right now most errors hard crash.
