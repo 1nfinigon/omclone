@@ -295,23 +295,33 @@ impl EventHandler for MyMiniquadApp {
                 Loaded(loaded) => {
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
-                        ui.add(egui::Slider::new(&mut loaded.curr_timestep, 0..=loaded.max_timestep).text("Timestep"));
+                        ui.add(egui::Slider::new(&mut loaded.curr_timestep, 0..=loaded.max_timestep)
+                            .text("Timestep"));
                         ui.horizontal(|ui| {
                             if ui.button("-1").clicked() {
-                                loaded.curr_timestep -= 1;
+                                if loaded.curr_timestep > 0 {
+                                    loaded.curr_timestep -= 1;
+                                }
                             }
                             if ui.button("+1").clicked() {
-                                loaded.curr_timestep += 1;
+                                if loaded.curr_timestep < loaded.max_timestep {
+                                    loaded.curr_timestep += 1;
+                                }
                             }
                         });
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
-                        let marker = " ".repeat(loaded.curr_timestep)+"V";
-                        ui.add(egui::Label::new(egui::RichText::new(marker).monospace()));
+                        let marker = " ".repeat(loaded.curr_timestep+3)+"V"+
+                        &(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
+                        ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
 
-                        for a in &loaded.base_world.arms{
+                        for (a_num, a) in loaded.base_world.arms.iter().enumerate(){
                             let mut text = a.instruction_tape.to_string();
-                            ui.add(egui::TextEdit::singleline(&mut text).code_editor());
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{:02}",a_num));
+                                ui.add(egui::TextEdit::singleline(&mut text)
+                                    .code_editor().desired_width(f32::INFINITY));
+                            });
                         }
                     });
                 }
@@ -338,7 +348,9 @@ impl EventHandler for MyMiniquadApp {
                             let sol = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
                             println!("Check: {:?}", sol.stats);
                             let init = parser::puzzle_prep(puzzle, sol).unwrap();
-                        
+                            for (a_num, a) in init.arms.iter().enumerate(){
+                                println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
+                            }
                             let world = World::setup_sim(&init).unwrap();
                             let mut test_world = world.clone();
 

@@ -79,8 +79,8 @@ impl Instr {
     pub fn to_str(&self) -> &'static str {
         use Instr::*;
         match self {
-            RotateClockwise         => &"a",
-            RotateCounterClockwise  => &"d",
+            RotateClockwise         => &"d",
+            RotateCounterClockwise  => &"a",
             Extend                  => &"w",
             Retract                 => &"s",
             Grab                    => &"r",
@@ -890,11 +890,11 @@ impl World {
                     }
                     let mut rot_tmp = normalize_dir(original.rot - arm.rot + 3) - 3;
                     while rot_tmp > 0 {
-                        reset_vec.push(RotateClockwise);
+                        reset_vec.push(RotateCounterClockwise);
                         rot_tmp -= 1;
                     }
                     while rot_tmp < 0 {
-                        reset_vec.push(RotateCounterClockwise);
+                        reset_vec.push(RotateClockwise);
                         rot_tmp += 1;
                     }
                     arm.rot = original.rot;
