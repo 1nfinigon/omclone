@@ -40,20 +40,20 @@ impl Instr {
     pub fn to_byte(&self) -> u8 {
         use Instr::*;
         match self {
-            RotateClockwise => b'R',
-            RotateCounterClockwise => b'r',
-            Extend => b'E',
-            Retract => b'e',
-            Grab => b'G',
-            Drop => b'g',
-            PivotClockwise => b'P',
-            PivotCounterClockwise => b'p',
-            Forward => b'A',
-            Back => b'a',
-            Repeat => b'C',
-            Reset => b'X',
-            Noop => b'O',
-            Empty => b' ',
+            RotateClockwise         => b'R',
+            RotateCounterClockwise  => b'r',
+            Extend                  => b'E',
+            Retract                 => b'e',
+            Grab                    => b'G',
+            Drop                    => b'g',
+            PivotClockwise          => b'P',
+            PivotCounterClockwise   => b'p',
+            Forward                 => b'A',
+            Back                    => b'a',
+            Repeat                  => b'C',
+            Reset                   => b'X',
+            Noop                    => b'O',
+            Empty                   => b' ',
         }
     }
     pub fn from_byte(input: u8) -> Result<Self> {
@@ -76,6 +76,25 @@ impl Instr {
             _ => Err(eyre!("Illegal instruction byte")),
         }
     }
+    pub fn to_str(&self) -> &'static str {
+        use Instr::*;
+        match self {
+            RotateClockwise         => &"a",
+            RotateCounterClockwise  => &"d",
+            Extend                  => &"w",
+            Retract                 => &"s",
+            Grab                    => &"r",
+            Drop                    => &"f",
+            PivotClockwise          => &"e",
+            PivotCounterClockwise   => &"q",
+            Forward                 => &"g",
+            Back                    => &"t",
+            Repeat                  => &"C",
+            Reset                   => &"X",
+            Noop                    => &"O",
+            Empty                   => &" ",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +114,13 @@ impl Tape {
         } else {
             Empty
         }
+    }
+    pub fn to_string(&self) -> String{
+        let mut output = " ".repeat(self.first);
+        for i in &self.instructions{
+            output += i.to_str();
+        }
+        output
     }
 }
 
@@ -787,38 +813,52 @@ impl World {
                 instructions.push(instr);
                 curr += 1;
             }
+            let mut basic_move = |instr: Instr|->Result<()>{
+                match instr{
+                    Extend => {
+                        if arm_type == Piston && arm.len < 3 {
+                            arm.len += 1;
+                        }
+                    }
+                    Retract => {
+                        if arm_type == Piston && arm.len > 1 {
+                            arm.len -= 1;
+                        }
+                    }
+                    RotateCounterClockwise => {
+                        arm.rot += 1;
+                    }
+                    RotateClockwise => {
+                        arm.rot -= 1;
+                    }
+                    Grab => arm.grabbing = true,
+                    Drop => arm.grabbing = false,
+                    Forward => {
+                        let track_data = track_map.get(&arm.pos)
+                            .ok_or(eyre!("Forward movement not on track (preprocess)"))?;
+                        arm.pos += track_data.plus.unwrap_or_default();
+                        track_steps += 1;
+                    }
+                    Back => {
+                        let track_data = track_map.get(&arm.pos)
+                            .ok_or(eyre!("Backward movement not on track (preprocess)"))?;
+                        arm.pos += track_data.minus.unwrap_or_default();
+                        track_steps -= 1;
+                    }
+                    PivotCounterClockwise | PivotClockwise | Empty => {}
+                    Reset | Repeat | Noop => {bail!("Instruction {:?} not basic move!",instr);}
+                }
+                Ok(())
+            };
             match instr {
-                Extend => {
-                    if arm_type == Piston && arm.len < 3 {
-                        arm.len += 1;
-                    }
+                Extend|Retract|
+                RotateCounterClockwise|RotateClockwise|
+                Grab|Drop|
+                Forward|Back|
+                PivotCounterClockwise|PivotClockwise|
+                Empty => {
+                    basic_move(instr)?;
                 }
-                Retract => {
-                    if arm_type == Piston && arm.len > 1 {
-                        arm.len -= 1;
-                    }
-                }
-                RotateCounterClockwise => {
-                    arm.rot += 1;
-                }
-                RotateClockwise => {
-                    arm.rot -= 1;
-                }
-                Grab => arm.grabbing = true,
-                Drop => arm.grabbing = false,
-                Forward => {
-                    let track_data = track_map.get(&arm.pos)
-                        .ok_or(eyre!("Forward movement not on track (preprocess)"))?;
-                    arm.pos += track_data.plus.unwrap_or_default();
-                    track_steps += 1;
-                }
-                Back => {
-                    let track_data = track_map.get(&arm.pos)
-                        .ok_or(eyre!("Backward movement not on track (preprocess)"))?;
-                    arm.pos += track_data.minus.unwrap_or_default();
-                    track_steps -= 1;
-                }
-                PivotCounterClockwise | PivotClockwise | Empty => {}
 
                 Repeat => {
                     let rep_len = curr - last_repeat;
@@ -827,16 +867,13 @@ impl World {
                         curr += 1;
                     } else {
                         for i in 0..rep_len {
-                            ensure!(
-                                i == 0
-                                    || old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
+                            ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
                                 "Repeat instruction overlaps with {:?} on {}/{}/{}",
-                                instructions[curr + i],
-                                curr,
-                                last_repeat,
-                                i
+                                instructions[curr + i],curr,last_repeat,i
                             );
-                            instructions.push(instructions[last_repeat + i]);
+                            let copied_instr = instructions[last_repeat + i];
+                            instructions.push(copied_instr);
+                            basic_move(copied_instr)?;
                         }
                         last_repeat = curr;
                         curr += rep_len;
@@ -860,6 +897,7 @@ impl World {
                         reset_vec.push(RotateCounterClockwise);
                         rot_tmp += 1;
                     }
+                    arm.rot = original.rot;
                     // look for a path forward on the track that's shorter than
                     // the path backward.
                     if track_steps > 0 {

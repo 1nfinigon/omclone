@@ -305,6 +305,15 @@ impl EventHandler for MyMiniquadApp {
                             }
                         });
                     });
+                    egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
+                        let marker = " ".repeat(loaded.curr_timestep)+"V";
+                        ui.add(egui::Label::new(egui::RichText::new(marker).monospace()));
+
+                        for a in &loaded.base_world.arms{
+                            let mut text = a.instruction_tape.to_string();
+                            ui.add(egui::TextEdit::singleline(&mut text).code_editor());
+                        }
+                    });
                 }
                 NotLoaded(dat) => {
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
@@ -333,7 +342,7 @@ impl EventHandler for MyMiniquadApp {
                             let world = World::setup_sim(&init).unwrap();
                             let mut test_world = world.clone();
 
-                            while !test_world.run_step().unwrap() {
+                            while !test_world.run_step().unwrap_or(true) {
                                 if test_world.timestep % 100 == 0{
                                     println!("Initial sim step {:03}", test_world.timestep);
                                 }
