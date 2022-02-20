@@ -26,7 +26,8 @@ fn main() -> Result<()> {
     let init = parser::puzzle_prep(puzzle, sol)?;
 
     let mut world = sim::World::setup_sim(&init)?;
-    /*while !world.run_step()? {
+    /*while !world.is_complete() {
+        world.run_step()?
         let stats = world.get_stats();
         println!("Step {:03}", stats.cycles);
     }

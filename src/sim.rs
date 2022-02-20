@@ -76,23 +76,43 @@ impl Instr {
             _ => Err(eyre!("Illegal instruction byte")),
         }
     }
-    pub fn to_str(&self) -> &'static str {
+    pub fn to_char(&self) -> char {
         use Instr::*;
         match self {
-            RotateClockwise         => &"d",
-            RotateCounterClockwise  => &"a",
-            Extend                  => &"w",
-            Retract                 => &"s",
-            Grab                    => &"r",
-            Drop                    => &"f",
-            PivotClockwise          => &"e",
-            PivotCounterClockwise   => &"q",
-            Forward                 => &"g",
-            Back                    => &"t",
-            Repeat                  => &"C",
-            Reset                   => &"X",
-            Noop                    => &"O",
-            Empty                   => &" ",
+            RotateClockwise         => 'd',
+            RotateCounterClockwise  => 'a',
+            Extend                  => 'w',
+            Retract                 => 's',
+            Grab                    => 'r',
+            Drop                    => 'f',
+            PivotClockwise          => 'e',
+            PivotCounterClockwise   => 'q',
+            Forward                 => 'g',
+            Back                    => 't',
+            Repeat                  => 'C',
+            Reset                   => 'X',
+            Noop                    => 'O',
+            Empty                   => ' ',
+        }
+    }
+    pub fn from_char(input: char) -> Option<Self> {
+        use Instr::*;
+        match input {
+             'd' =>  Some(RotateClockwise       ),
+             'a' =>  Some(RotateCounterClockwise),
+             'w' =>  Some(Extend                ),
+             's' =>  Some(Retract               ),
+             'r' =>  Some(Grab                  ),
+             'f' =>  Some(Drop                  ),
+             'e' =>  Some(PivotClockwise        ),
+             'q' =>  Some(PivotCounterClockwise ),
+             'g' =>  Some(Forward               ),
+             't' =>  Some(Back                  ),
+             'C' =>  Some(Repeat                ),
+             'X' =>  Some(Reset                 ),
+             'O' =>  Some(Noop                  ),
+             ' ' =>  Some(Empty                 ),
+             _ => None
         }
     }
 }
@@ -106,7 +126,7 @@ impl Tape {
     pub fn get(&self, timestep: usize, loop_len: usize) -> Instr {
         use Instr::Empty;
         if timestep >= self.first {
-            let after_first = timestep - self.first as usize;
+            let after_first = timestep - self.first;
             *self
                 .instructions
                 .get(after_first % loop_len)
@@ -118,9 +138,17 @@ impl Tape {
     pub fn to_string(&self) -> String{
         let mut output = " ".repeat(self.first);
         for i in &self.instructions{
-            output += i.to_str();
+            output.push(i.to_char());
         }
         output
+    }
+    pub fn modify_and_string(&mut self) -> String{
+        while self.instructions.get(0).unwrap_or(&Instr::Noop) == &Instr::Empty
+        {
+            self.first += 1;
+            self.instructions.remove(0);
+        }
+        self.to_string()
     }
 }
 
@@ -130,23 +158,23 @@ pub fn normalize_dir(r: Rot) -> Rot {
 
 pub fn pos_to_rot(input: Pos) -> Result<Rot> {
     match (input.x, input.y) {
-        (1, 0) => Ok(0),
-        (0, 1) => Ok(1),
+        ( 1, 0) => Ok(0),
+        ( 0, 1) => Ok(1),
         (-1, 1) => Ok(2),
         (-1, 0) => Ok(3),
-        (0, -1) => Ok(4),
-        (1, -1) => Ok(5),
+        ( 0,-1) => Ok(4),
+        ( 1,-1) => Ok(5),
         _ => Err(eyre!("Invalid position converted to rotation: {}", input)),
     }
 }
 pub fn offset(n: i32, angle: Rot) -> Pos {
     match normalize_dir(angle) {
-        0 => Pos::new(n, 0),
-        1 => Pos::new(0, n),
+        0 => Pos::new( n, 0),
+        1 => Pos::new( 0, n),
         2 => Pos::new(-n, n),
         3 => Pos::new(-n, 0),
-        4 => Pos::new(0, -n),
-        5 => Pos::new(n, -n),
+        4 => Pos::new( 0,-n),
+        5 => Pos::new( n,-n),
         _ => panic!("Invalid Rotation"),
     }
 }
@@ -156,11 +184,11 @@ pub fn rot_to_pos(angle: Rot) -> Pos {
 pub fn rotate(pos: Pos, angle: Rot) -> Pos {
     match normalize_dir(angle) {
         0 => pos, //  ( pos.x      ,       pos.y)
-        1 => Pos::new(-pos.y, pos.x + pos.y),
-        2 => Pos::new(-pos.x - pos.y, pos.x),
-        3 => Pos::new(-pos.x, -pos.y),
-        4 => Pos::new(pos.y, -pos.x - pos.y),
-        5 => Pos::new(pos.x + pos.y, -pos.x),
+        1 => Pos::new(      -pos.y , pos.x+pos.y),
+        2 => Pos::new(-pos.x-pos.y , pos.x      ),
+        3 => Pos::new(-pos.x       ,      -pos.y),
+        4 => Pos::new(       pos.y ,-pos.x-pos.y),
+        5 => Pos::new( pos.x+pos.y ,-pos.x      ),
         _ => panic!("Invalid Rotation"),
     }
 }
@@ -516,9 +544,7 @@ impl World {
                 HeldStill
             }
             Forward => {
-                let track_data = self
-                    .track_map
-                    .get(&arm.pos)
+                let track_data = self.track_map.get(&arm.pos)
                     .ok_or(eyre!("Forward movement not on track"))?;
                 track_data.plus.map_or(HeldStill, |x| {
                     arm.pos += x;
@@ -526,9 +552,7 @@ impl World {
                 })
             }
             Back => {
-                let track_data = self
-                    .track_map
-                    .get(&arm.pos)
+                let track_data = self.track_map.get(&arm.pos)
                     .ok_or(eyre!("Backward movement not on track"))?;
                 track_data.minus.map_or(HeldStill, |x| {
                     arm.pos += x;
@@ -728,7 +752,7 @@ impl World {
     }
 
     //returns true if the solution is fully solved
-    pub fn run_step(&mut self) -> Result<bool> {
+    pub fn run_step(&mut self) -> Result<()> {
         for a in 0..self.arms.len() {
             self.do_instruction(a, self.timestep)?;
         }
@@ -737,14 +761,18 @@ impl World {
         self.move_atoms()?;
         self.process_glyphs();
         self.atoms.moves.clear();
+        self.timestep += 1;
+        Ok(())
+    }
+
+    pub fn is_complete(&self) -> bool{
         let mut all_outputs_full = true;
         for g in &self.glyphs {
             if let GlyphType::Output(_, i) = g.glyph_type {
                 all_outputs_full &= (i == 0);
             }
         }
-        self.timestep += 1;
-        Ok(all_outputs_full)
+        all_outputs_full
     }
 }
 

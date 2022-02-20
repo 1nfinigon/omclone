@@ -1,6 +1,6 @@
-use miniquad::{*,graphics::*};
+use miniquad::*;
 use crate::{sim::*, parser};
-#[cfg(feature = "color_eyre")]
+/*#[cfg(feature = "color_eyre")]
 use color_eyre::{
     eyre::{bail, ensure, eyre},
     Result,
@@ -9,7 +9,7 @@ use color_eyre::{
 use simple_eyre::{
     eyre::{bail, ensure, eyre},
     Result,
-};
+};*/
 type GFXPos = [f32;2];
 use std::f32::consts::PI;
 fn pos_to_xy(input: &Pos) -> GFXPos{
@@ -19,6 +19,97 @@ fn pos_to_xy(input: &Pos) -> GFXPos{
 }
 fn rot_to_angle(r: Rot) -> f32{
     (-r as f32)*PI/3.
+}
+
+use core::ops::Range;
+struct TapeBuffer<'a>{
+    tape_ref: &'a mut Tape,
+    timestep_ref: &'a mut usize,
+    force_reload: &'a mut bool,
+    held_str: String
+}
+impl AsRef<str> for TapeBuffer<'_>{
+    fn as_ref(&self) -> &str {
+        self.held_str.as_str()
+    }
+}
+//Note: this implementation assumes all characters in the string are ASCII/1 byte long
+//It should be fine with non-ASCII attempted inserts, which will be removed as invalid instructions
+impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
+    fn is_mutable(&self) -> bool {
+        true
+    }
+    fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
+        let tape = &mut self.tape_ref;
+        let instr_map = text.chars().map(|x| Instr::from_char(x));
+        let mut insert_extra_empties = 0;
+        if char_index < tape.first{
+            insert_extra_empties = tape.first-char_index;
+            tape.first = char_index;
+        }
+        let splice_index = char_index-tape.first;
+        // Insert backwards so that you're always inserting at the same point
+        // I don't expect large amounts of text so the O(n^2) algorithm
+        // should be better than the O(n) splice+collect which allocates a new vec
+        let mut inserted = 0;
+        for instr_maybe in instr_map.rev(){
+            if let Some(instr) = instr_maybe{
+                tape.instructions.insert(splice_index, instr);
+                inserted += 1;
+            }
+        }
+        if inserted < insert_extra_empties{
+            for _ in insert_extra_empties..inserted{
+                tape.instructions.insert(inserted, Instr::Empty);
+            }
+        }
+        self.held_str = tape.modify_and_string();
+        *self.timestep_ref = splice_index+inserted;
+        *self.force_reload = true;
+        inserted
+    }
+    fn delete_char_range(&mut self, char_range: Range<usize>) {
+        let tape = &mut self.tape_ref;
+        if char_range.end <= tape.first{
+            tape.first -= char_range.end - char_range.start;
+        } else {
+            let start = if char_range.start < tape.first{
+                tape.first = char_range.start;
+                0
+            } else {
+                char_range.start-tape.first
+            };
+            let end = char_range.end-tape.first;
+            tape.instructions.drain(start..end);
+        }
+        self.held_str = tape.modify_and_string();
+        *self.force_reload = true;
+        if *self.timestep_ref > char_range.end{
+            *self.timestep_ref -= char_range.len();
+        } else if *self.timestep_ref > char_range.start{
+            *self.timestep_ref = char_range.start;
+        }
+    }
+
+    fn clear(&mut self) {
+        self.tape_ref.instructions.clear();
+        self.tape_ref.first = 0;
+        self.held_str = self.tape_ref.modify_and_string();
+        *self.force_reload = true;
+    }
+    fn replace(&mut self, text: &str) {
+        self.tape_ref.instructions.clear();
+        self.tape_ref.first = 0;
+        self.insert_text(text, 0);
+        self.held_str = self.tape_ref.modify_and_string();
+        *self.force_reload = true;
+    }
+    fn take(&mut self) -> String {
+        let s = self.as_ref().to_owned();
+        self.clear();
+        *self.force_reload = true;
+        s
+    }
 }
 
 type Vert = [f32;2];
@@ -212,15 +303,19 @@ impl EventHandler for MyMiniquadApp {
 
         if let Loaded(loaded) = &mut self.app_state{
             if loaded.last_timestep > loaded.curr_timestep{
-                let mut new_world = loaded.base_world.clone();
-                for _ in 0..loaded.curr_timestep{
-                    new_world.run_step().unwrap();
-                }
-                loaded.last_timestep = loaded.curr_timestep;
-                loaded.last_world = new_world;
-            } else if loaded.last_timestep < loaded.curr_timestep{
-                for _ in loaded.last_timestep..loaded.curr_timestep{
-                    loaded.last_world.run_step().unwrap();
+                loaded.last_timestep = 0;
+                loaded.last_world = loaded.base_world.clone();
+            }
+            if loaded.last_timestep < loaded.curr_timestep{
+                for time in loaded.last_timestep..loaded.curr_timestep{
+                    if loaded.last_world.run_step().is_err(){
+                        loaded.last_world = loaded.base_world.clone();
+                        for _ in 0..time{
+                            loaded.last_world.run_step().unwrap();
+                        }
+                        loaded.curr_timestep = time;
+                        break;
+                    }
                 }
                 loaded.last_timestep = loaded.curr_timestep;
             }
@@ -295,8 +390,14 @@ impl EventHandler for MyMiniquadApp {
                 Loaded(loaded) => {
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
-                        ui.add(egui::Slider::new(&mut loaded.curr_timestep, 0..=loaded.max_timestep)
-                            .text("Timestep"));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Slider::new(&mut loaded.curr_timestep, 0..=loaded.max_timestep)
+                                .show_value(false));
+                            ui.add(egui::DragValue::new(&mut loaded.curr_timestep)
+                                .clamp_range(0..=loaded.max_timestep)
+                                .speed(0.1));
+                            ui.label("Timestep");
+                        });
                         ui.horizontal(|ui| {
                             if ui.button("-1").clicked() {
                                 if loaded.curr_timestep > 0 {
@@ -308,6 +409,11 @@ impl EventHandler for MyMiniquadApp {
                                     loaded.curr_timestep += 1;
                                 }
                             }
+                            let min_size = loaded.base_world.arms.iter()
+                                .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                            ui.label("Loop length: ");
+                            ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
+                                .clamp_range(min_size..=usize::MAX));
                         });
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
@@ -315,14 +421,22 @@ impl EventHandler for MyMiniquadApp {
                         &(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                         ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
 
-                        for (a_num, a) in loaded.base_world.arms.iter().enumerate(){
-                            let mut text = a.instruction_tape.to_string();
+                        let mut force_reload = false;
+                        for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
+                            let text = a.instruction_tape.to_string();
+                            let mut text_buf = TapeBuffer{
+                                tape_ref: &mut a.instruction_tape,
+                                timestep_ref: &mut loaded.curr_timestep,
+                                force_reload: &mut force_reload,
+                                held_str: text
+                            };
                             ui.horizontal(|ui| {
                                 ui.label(format!("{:02}",a_num));
-                                ui.add(egui::TextEdit::singleline(&mut text)
+                                ui.add(egui::TextEdit::singleline(&mut text_buf)
                                     .code_editor().desired_width(f32::INFINITY));
                             });
                         }
+                        if force_reload {loaded.last_timestep = usize::MAX};
                     });
                 }
                 NotLoaded(dat) => {
@@ -354,7 +468,12 @@ impl EventHandler for MyMiniquadApp {
                             let world = World::setup_sim(&init).unwrap();
                             let mut test_world = world.clone();
 
-                            while !test_world.run_step().unwrap_or(true) {
+                            while !test_world.is_complete() {
+                                let res = test_world.run_step();
+                                if let Err(e) = res{
+                                    println!("test world error: {:?}", e);
+                                    break;
+                                }
                                 if test_world.timestep % 100 == 0{
                                     println!("Initial sim step {:03}", test_world.timestep);
                                 }
