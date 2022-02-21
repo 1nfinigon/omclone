@@ -24,8 +24,8 @@ fn rot_to_angle(r: Rot) -> f32{
 use core::ops::Range;
 struct TapeBuffer<'a>{
     tape_ref: &'a mut Tape,
-    timestep_ref: &'a mut usize,
     force_reload: &'a mut bool,
+    tape_mode: bool,
     held_str: String
 }
 impl AsRef<str> for TapeBuffer<'_>{
@@ -41,54 +41,53 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
     }
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         let tape = &mut self.tape_ref;
-        let instr_map = text.chars().map(|x| Instr::from_char(x));
-        let mut insert_extra_empties = 0;
-        if char_index < tape.first{
-            insert_extra_empties = tape.first-char_index;
+        let instr_mapped:Vec<Instr> = text.chars().filter_map(|x| Instr::from_char(x)).collect();
+        let inserted = instr_mapped.len();
+
+        let empty_extension = if char_index < tape.first{
+            let tmp = tape.first-char_index;
             tape.first = char_index;
-        }
+            tmp
+        } else {
+            0
+        };
+        let instr_chain = instr_mapped.into_iter().chain(std::iter::repeat(Instr::Empty).take(empty_extension));
         let splice_index = char_index-tape.first;
-        // Insert backwards so that you're always inserting at the same point
-        // I don't expect large amounts of text so the O(n^2) algorithm
-        // should be better than the O(n) splice+collect which allocates a new vec
-        let mut inserted = 0;
-        for instr_maybe in instr_map.rev(){
-            if let Some(instr) = instr_maybe{
-                tape.instructions.insert(splice_index, instr);
-                inserted += 1;
-            }
-        }
-        if inserted < insert_extra_empties{
-            for _ in insert_extra_empties..inserted{
-                tape.instructions.insert(inserted, Instr::Empty);
-            }
-        }
+        let splice_range = if self.tape_mode {
+            splice_index..usize::min(splice_index+text.len(),tape.instructions.len())
+        } else {
+            splice_index..splice_index
+        };
+        tape.instructions.splice(splice_range,instr_chain);
+
         self.held_str = tape.modify_and_string();
-        *self.timestep_ref = splice_index+inserted;
         *self.force_reload = true;
         inserted
     }
     fn delete_char_range(&mut self, char_range: Range<usize>) {
         let tape = &mut self.tape_ref;
-        if char_range.end <= tape.first{
-            tape.first -= char_range.end - char_range.start;
+        if self.tape_mode{
+            for x in char_range{
+                if x >= tape.first{
+                    tape.instructions[x-tape.first] = Instr::Empty;
+                }
+            }
         } else {
-            let start = if char_range.start < tape.first{
-                tape.first = char_range.start;
-                0
+            if char_range.end <= tape.first{
+                tape.first -= char_range.end - char_range.start;
             } else {
-                char_range.start-tape.first
-            };
-            let end = char_range.end-tape.first;
-            tape.instructions.drain(start..end);
+                let start = if char_range.start < tape.first{
+                    tape.first = char_range.start;
+                    0
+                } else {
+                    char_range.start-tape.first
+                };
+                let end = char_range.end-tape.first;
+                tape.instructions.drain(start..end);
+            }
         }
         self.held_str = tape.modify_and_string();
         *self.force_reload = true;
-        if *self.timestep_ref > char_range.end{
-            *self.timestep_ref -= char_range.len();
-        } else if *self.timestep_ref > char_range.start{
-            *self.timestep_ref = char_range.start;
-        }
     }
 
     fn clear(&mut self) {
@@ -221,6 +220,7 @@ struct Loaded{
     last_world: World,
     last_timestep: usize,
     camera: CameraSetup,
+    tape_mode: bool,
 }
 enum AppState{
     NotLoaded(NotLoaded),Loaded(Loaded) 
@@ -417,6 +417,7 @@ impl EventHandler for MyMiniquadApp {
                         });
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
+                        ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
                         let marker = " ".repeat(loaded.curr_timestep+3)+"V"+
                         &(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                         ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
@@ -426,14 +427,18 @@ impl EventHandler for MyMiniquadApp {
                             let text = a.instruction_tape.to_string();
                             let mut text_buf = TapeBuffer{
                                 tape_ref: &mut a.instruction_tape,
-                                timestep_ref: &mut loaded.curr_timestep,
                                 force_reload: &mut force_reload,
+                                tape_mode: loaded.tape_mode,
                                 held_str: text
                             };
                             ui.horizontal(|ui| {
                                 ui.label(format!("{:02}",a_num));
-                                ui.add(egui::TextEdit::singleline(&mut text_buf)
-                                    .code_editor().desired_width(f32::INFINITY));
+                                let text_output = egui::TextEdit::singleline(&mut text_buf)
+                                    .code_editor().desired_width(f32::INFINITY)
+                                    .show(ui);
+                                if let Some(cursor) = text_output.cursor_range{
+                                    loaded.curr_timestep = cursor.primary.ccursor.index;
+                                }
                             });
                         }
                         if force_reload {loaded.last_timestep = usize::MAX};
@@ -485,6 +490,7 @@ impl EventHandler for MyMiniquadApp {
                                 max_timestep: test_world.timestep as usize,
                                 last_world: world,
                                 last_timestep: 0,
+                                tape_mode: false,
                                 camera,
                             };
                             new_state = Some(Loaded(new_loaded));

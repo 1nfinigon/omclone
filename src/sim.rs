@@ -1,4 +1,4 @@
-#![allow(dead_code,unused_parens)]
+#![allow(unused_parens)]
 use bitflags::bitflags;
 #[cfg(feature = "color_eyre")]
 use color_eyre::{
