@@ -100,20 +100,17 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         self.tape_ref.instructions.clear();
         self.tape_ref.first = 0;
         self.insert_text(text, 0);
-        self.held_str = self.tape_ref.modify_and_string();
-        *self.force_reload = true;
     }
     fn take(&mut self) -> String {
         let s = self.as_ref().to_owned();
         self.clear();
-        *self.force_reload = true;
         s
     }
 }
 
 type Vert = [f32;2];
 //Vertex format: (x, y)
-//note: 1 hex pre-scaling ~= -1 to +1
+//note: 1 hex has inner radius of 1/diameter of 2.
 fn setup_bonds(ctx: &mut Context) -> Bindings{
     const BOND_VERT_BUF: [Vert;4] = [
         [ 0.,-0.1,],
@@ -152,6 +149,48 @@ fn setup_arms(ctx: &mut Context) -> Bindings{
     }
 }
 
+type UvVert = [f32;4];
+//(x, y), (u, v)
+const GLYPH_COUNT:usize = 13;
+fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
+    const GLYPH_VERT_BUF: [UvVert;4] = [
+        [-3.,-3.,    0., 1.],
+        [-3., 3.,    0., 0.],
+        [ 3.,-3.,    1., 1.],
+        [ 3., 3.,    1., 0.]];
+    const GLYPH_INDEX_BUF: [u16;6] = [
+        0, 1, 2,
+        1, 2, 3];
+    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &GLYPH_VERT_BUF);
+    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &GLYPH_INDEX_BUF);
+    let glyph_list:[&[u8];GLYPH_COUNT] = [
+        include_bytes!("../images/Ani.png"),
+        include_bytes!("../images/Bonder.png"),
+        include_bytes!("../images/Calcification.png"),
+        include_bytes!("../images/Dispersion.png"),
+        include_bytes!("../images/Disposal.png"),
+        include_bytes!("../images/Duplication.png"),
+        include_bytes!("../images/Equilibrium.png"),
+        include_bytes!("../images/Multibond.png"),
+        include_bytes!("../images/Projection.png"),
+        include_bytes!("../images/Purification.png"),
+        include_bytes!("../images/Triplex.png"),
+        include_bytes!("../images/Unbonder.png"),
+        include_bytes!("../images/Unification.png"),
+    ];
+    glyph_list.map(|byte_data| -> Bindings{
+        use image::io::Reader as ImageReader;
+        use image::ImageFormat::Png;
+        use std::io::Cursor;
+        let img = ImageReader::with_format(Cursor::new(byte_data),Png).decode().unwrap().into_rgba8();
+        let texture = Texture::from_rgba8(ctx, 256, 256, &img);
+        Bindings {
+            vertex_buffers: vec![vb],
+            index_buffer,
+            images:vec![texture],
+        }
+    })
+}
 const CIRCLE_VERT_COUNT:usize = 20;
 fn setup_circle(ctx: &mut Context) -> Bindings{
     let mut verts = [[0.;2];CIRCLE_VERT_COUNT+1];
@@ -177,6 +216,7 @@ struct ShapeStore{
     arm_bindings: Bindings,
     circle_bindings: Bindings,
     bond_bindings: Bindings,
+    glyph_bindings: [Bindings;GLYPH_COUNT],
 }
 struct NotLoaded{
     base: String,
@@ -230,13 +270,21 @@ use AppState::*;
 pub struct MyMiniquadApp {
     egui_mq: egui_miniquad::EguiMq,
     pipeline: Pipeline,
+    pipeline_glyphs: Pipeline,
     shapes: ShapeStore,
     app_state: AppState,
 }
 
 #[repr(C)]
-struct MyUniforms{
+struct BasicUniforms{
     color: [f32;3],
+    offset: GFXPos,
+    world_offset: GFXPos,
+    angle: f32,
+    scale: f32,
+}
+#[repr(C)]
+struct UvUniforms{
     offset: GFXPos,
     world_offset: GFXPos,
     angle: f32,
@@ -276,10 +324,44 @@ impl MyMiniquadApp {
             ],
             shader,
         );
+        
+        let shader_meta_uv = ShaderMeta {
+            images: vec!["tex".to_string()],
+            uniforms: UniformBlockLayout {
+                uniforms: vec![
+                    UniformDesc::new("offset", UniformType::Float2),
+                    UniformDesc::new("world_offset", UniformType::Float2),
+                    UniformDesc::new("angle", UniformType::Float1),
+                    UniformDesc::new("scale", UniformType::Float1),
+                    ],
+            },
+        };
+        const V_UV_SHADE: &str = include_str!("uv_vert.vs");
+        const F_UV_SHADE: &str = include_str!("uv_frag.fs");
+        let shader_uv = Shader::new(ctx, V_UV_SHADE, F_UV_SHADE, shader_meta_uv).unwrap();
+        use miniquad::graphics::*;
+        let pipeline_glyphs = Pipeline::with_params(
+            ctx,
+            &[BufferLayout::default()],
+            &[
+                VertexAttribute::new("local_pos", VertexFormat::Float2),
+                VertexAttribute::new("uv", VertexFormat::Float2),
+            ],
+            shader_uv,
+            PipelineParams{
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha))
+                ),
+                ..Default::default()
+            }
+        );
         let shapes = ShapeStore{
             arm_bindings: setup_arms(ctx),
             circle_bindings: setup_circle(ctx),
             bond_bindings: setup_bonds(ctx),
+            glyph_bindings: setup_glyphs(ctx),
         };
         
         let (base_str, puzzle_str, solution_str) = get_default_path_strs();
@@ -289,7 +371,7 @@ impl MyMiniquadApp {
         let app_state = AppState::NotLoaded(NotLoaded{base, puzzle, solution});
         Self {
             egui_mq: egui_miniquad::EguiMq::new(ctx),
-            pipeline,shapes,app_state
+            pipeline,pipeline_glyphs,shapes,app_state
         }
     }
 }
@@ -333,7 +415,7 @@ impl EventHandler for MyMiniquadApp {
                     let bond = atom.connections[r];
                     if bond == Bonds::NORMAL{
                         let angle = rot_to_angle(r as Rot);
-                        ctx.apply_uniforms(&MyUniforms {
+                        ctx.apply_uniforms(&BasicUniforms {
                             color, offset, world_offset, angle, scale
                         });
                         ctx.draw(0, 4, 1);
@@ -364,7 +446,7 @@ impl EventHandler for MyMiniquadApp {
                 };
                 let offset = pos_to_xy(&atom.pos);
                 let angle = 0.;
-                ctx.apply_uniforms(&MyUniforms {
+                ctx.apply_uniforms(&BasicUniforms {
                     color, offset, world_offset, angle, scale
                 });
                 ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
@@ -375,11 +457,38 @@ impl EventHandler for MyMiniquadApp {
                 let offset = pos_to_xy(&arm.pos);
                 for r in (0..6).step_by(arm.angles_between_arm() as usize) {
                     let angle = rot_to_angle(arm.rot+r);
-                    ctx.apply_uniforms(&MyUniforms {
+                    ctx.apply_uniforms(&BasicUniforms {
                         color, offset, world_offset, angle, scale
                     });
                     ctx.draw((arm.len-1)*3, 3, 1);
                 }
+            }
+            ctx.apply_pipeline(&self.pipeline_glyphs);
+            for glyph in world.glyphs.iter(){
+                let offset = pos_to_xy(&glyph.pos);
+                let angle = rot_to_angle(glyph.rot);
+                use GlyphType::*;
+                let i = match glyph.glyph_type{
+                    Animismus => 0,
+                    Bonding => 1,
+                    Calcification => 2,
+                    Dispersion => 3,
+                    Disposal => 4,
+                    Duplication => 5,
+                    Equilibrium => 6,
+                    MultiBond => 7,
+                    Projection => 8,
+                    Purification => 9,
+                    TriplexBond => 10,
+                    Unbonding => 11,
+                    Unification => 12,
+                    _ => continue,
+                };
+                ctx.apply_bindings(&self.shapes.glyph_bindings[i]);
+                ctx.apply_uniforms(&UvUniforms {
+                    offset, world_offset, angle, scale
+                });
+                ctx.draw(0, 6, 1);
             }
         }
         ctx.end_render_pass();

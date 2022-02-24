@@ -108,9 +108,9 @@ impl Instr {
              'q' =>  Some(PivotCounterClockwise ),
              'g' =>  Some(Forward               ),
              't' =>  Some(Back                  ),
-             'C' =>  Some(Repeat                ),
-             'X' =>  Some(Reset                 ),
-             'O' =>  Some(Noop                  ),
+             //'C' =>  Some(Repeat                ),
+             //'X' =>  Some(Reset                 ),
+             //'O' =>  Some(Noop                  ),
              ' ' =>  Some(Empty                 ),
              _ => None
         }

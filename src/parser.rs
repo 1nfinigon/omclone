@@ -419,7 +419,9 @@ pub fn puzzle_prep(puzzle: FullPuzzle, soln: FullSolution) -> Result<InitialWorl
                     .ok_or(eyre!("Track data not found on track glyph"))?;
                 glyphs.push(Glyph {glyph_type: GlyphType::Track(tracks), pos: p.pos, rot: p.rot });
             }
-            TConduit => {}
+            TConduit => {
+                //TODO: Everything conduit-related
+            }
         }
     }
     Ok(InitialWorld { glyphs, arms })

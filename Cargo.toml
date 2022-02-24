@@ -25,6 +25,7 @@ rustc-hash = "1.1"
 egui = "0.16.0"
 miniquad = { version = "=0.3.0-alpha.43" }
 egui-miniquad = "0.8.0"
+image = "0.24.1"
 
 color-eyre = {version = "0.6", optional = true}
 simple-eyre = "0.3"
