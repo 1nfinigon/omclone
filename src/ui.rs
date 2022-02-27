@@ -131,8 +131,8 @@ fn setup_bonds(ctx: &mut Context) -> Bindings{
 
 fn setup_arms(ctx: &mut Context) -> Bindings{
     const ARM_VERT_BUF: [Vert;5] = [
-        [ 0.,-0.8,],
-        [ 0., 0.8,],
+        [ 0.,-0.4,],
+        [ 0., 0.4,],
         [ 2., 0.,],
         [ 4., 0.,],
         [ 6., 0.,]];
@@ -440,7 +440,6 @@ impl EventHandler for MyMiniquadApp {
             let world = &loaded.last_world;
             let scale = loaded.camera.scale;
             let world_offset = loaded.camera.offset;
-            let inv_scale= 1./scale;
             ctx.apply_pipeline(&self.pipeline_tracks);
             let (track_binds, track_index_count) = &loaded.track_binds;
             ctx.apply_bindings(track_binds);//Hex grid
@@ -451,11 +450,14 @@ impl EventHandler for MyMiniquadApp {
 
             ctx.apply_pipeline(&self.pipeline_glyphs);
             ctx.apply_bindings(&self.shapes.glyph_bindings[13]);//Hex grid
-            let y_factor = (60.0f32).to_radians().sin()*4.;
-            for x in 0..(inv_scale.ceil() as i32){
-                for y in 0..(inv_scale.ceil() as i32){
-                    let offset = [0.3-inv_scale*3.+(x as f32*6.0),
-                                  0.1-inv_scale*y_factor/2.+(y as f32*y_factor)];
+            let y_factor = f32::sqrt(3.)*2.0;
+            let inv_scale= 1./scale;
+            let base_x = ((-inv_scale-world_offset[0])/2.0).ceil()*2.0;
+            let base_y = ((-inv_scale-world_offset[1])/y_factor).ceil()*y_factor;
+            for x in 0..(inv_scale/3.0).ceil() as i32 +1{
+                for y in 0..(inv_scale/y_factor).ceil() as i32 *2+1{
+                    let offset = [base_x+(x as f32*6.0),
+                                  base_y+(y as f32*y_factor)];
                     ctx.apply_uniforms(&UvUniforms {
                         offset, world_offset, angle:0., scale
                     });
