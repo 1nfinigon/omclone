@@ -110,7 +110,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
 
 type Vert = [f32;2];
 //Vertex format: (x, y)
-//note: 1 hex has inner radius of 1/diameter of 2.
+//note: 1 hex has inner radius of 1 (width of 2).
 fn setup_bonds(ctx: &mut Context) -> Bindings{
     const BOND_VERT_BUF: [Vert;4] = [
         [ 0.,-0.1,],
@@ -149,9 +149,34 @@ fn setup_arms(ctx: &mut Context) -> Bindings{
     }
 }
 
+fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> (Bindings, usize){
+    let mut verts_vec:Vec<GFXPos> = Vec::new();
+    let mut index_vec:Vec<u16> = Vec::new();
+    let mut curr_index = 0;
+    for (center_pos, track_data) in track{
+        //Every minus is matched by a positive so only need one
+        if let Some(plus) = &track_data.plus{
+            verts_vec.push(pos_to_xy(center_pos));
+            index_vec.push(curr_index);
+            curr_index += 1;
+            verts_vec.push(pos_to_xy(&(center_pos+plus)));
+            index_vec.push(curr_index);
+            curr_index += 1;
+        }
+    }
+
+    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &verts_vec);
+    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &index_vec);
+    (Bindings {
+        vertex_buffers: vec![vb],
+        index_buffer,
+        images: vec![],
+    }, index_vec.len())
+}
+
 type UvVert = [f32;4];
 //(x, y), (u, v)
-const GLYPH_COUNT:usize = 13;
+const GLYPH_COUNT:usize = 14;
 fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
     const GLYPH_VERT_BUF: [UvVert;4] = [
         [-3.,-3.,    0., 1.],
@@ -177,6 +202,7 @@ fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
         include_bytes!("../images/Triplex.png"),
         include_bytes!("../images/Unbonder.png"),
         include_bytes!("../images/Unification.png"),
+        include_bytes!("../images/HexGrid.png"),
     ];
     glyph_list.map(|byte_data| -> Bindings{
         use image::io::Reader as ImageReader;
@@ -261,6 +287,7 @@ struct Loaded{
     last_timestep: usize,
     camera: CameraSetup,
     tape_mode: bool,
+    track_binds: (Bindings, usize),
 }
 enum AppState{
     NotLoaded(NotLoaded),Loaded(Loaded) 
@@ -271,6 +298,7 @@ pub struct MyMiniquadApp {
     egui_mq: egui_miniquad::EguiMq,
     pipeline: Pipeline,
     pipeline_glyphs: Pipeline,
+    pipeline_tracks: Pipeline,
     shapes: ShapeStore,
     app_state: AppState,
 }
@@ -319,9 +347,7 @@ impl MyMiniquadApp {
         let pipeline = Pipeline::new(
             ctx,
             &[BufferLayout::default()],
-            &[
-                VertexAttribute::new("local_pos", VertexFormat::Float2),
-            ],
+            &[VertexAttribute::new("local_pos", VertexFormat::Float2)],
             shader,
         );
         
@@ -357,6 +383,16 @@ impl MyMiniquadApp {
                 ..Default::default()
             }
         );
+        let pipeline_tracks = Pipeline::with_params(
+            ctx,
+            &[BufferLayout::default()],
+            &[VertexAttribute::new("local_pos", VertexFormat::Float2)],
+            shader,
+            PipelineParams{
+                primitive_type:PrimitiveType::Lines,
+                ..Default::default()
+            }
+        );
         let shapes = ShapeStore{
             arm_bindings: setup_arms(ctx),
             circle_bindings: setup_circle(ctx),
@@ -371,7 +407,7 @@ impl MyMiniquadApp {
         let app_state = AppState::NotLoaded(NotLoaded{base, puzzle, solution});
         Self {
             egui_mq: egui_miniquad::EguiMq::new(ctx),
-            pipeline,pipeline_glyphs,shapes,app_state
+            pipeline,pipeline_glyphs,pipeline_tracks,shapes,app_state
         }
     }
 }
@@ -402,11 +438,58 @@ impl EventHandler for MyMiniquadApp {
                 loaded.last_timestep = loaded.curr_timestep;
             }
             let world = &loaded.last_world;
-            ctx.apply_pipeline(&self.pipeline);
-
             let scale = loaded.camera.scale;
             let world_offset = loaded.camera.offset;
+            let inv_scale= 1./scale;
+            ctx.apply_pipeline(&self.pipeline_tracks);
+            let (track_binds, track_index_count) = &loaded.track_binds;
+            ctx.apply_bindings(track_binds);//Hex grid
+            ctx.apply_uniforms(&BasicUniforms {
+                color:[1., 1., 1.], offset:[0.,0.], world_offset, angle:0., scale
+            });
+            ctx.draw(0, *track_index_count as i32, 1);
 
+            ctx.apply_pipeline(&self.pipeline_glyphs);
+            ctx.apply_bindings(&self.shapes.glyph_bindings[13]);//Hex grid
+            let y_factor = (60.0f32).to_radians().sin()*4.;
+            for x in 0..(inv_scale.ceil() as i32){
+                for y in 0..(inv_scale.ceil() as i32){
+                    let offset = [0.3-inv_scale*3.+(x as f32*6.0),
+                                  0.1-inv_scale*y_factor/2.+(y as f32*y_factor)];
+                    ctx.apply_uniforms(&UvUniforms {
+                        offset, world_offset, angle:0., scale
+                    });
+                    ctx.draw(0, 6, 1);
+                }
+            }
+            for glyph in world.glyphs.iter(){
+                let offset = pos_to_xy(&glyph.pos);
+                let angle = rot_to_angle(glyph.rot);
+                use GlyphType::*;
+                let i = match glyph.glyph_type{
+                    Animismus       => 0,
+                    Bonding         => 1,
+                    Calcification   => 2,
+                    Dispersion      => 3,
+                    Disposal        => 4,
+                    Duplication     => 5,
+                    Equilibrium     => 6,
+                    MultiBond       => 7,
+                    Projection      => 8,
+                    Purification    => 9,
+                    TriplexBond     => 10,
+                    Unbonding       => 11,
+                    Unification     => 12,
+                    _ => continue,
+                };
+                ctx.apply_bindings(&self.shapes.glyph_bindings[i]);
+                ctx.apply_uniforms(&UvUniforms {
+                    offset, world_offset, angle, scale
+                });
+                ctx.draw(0, 6, 1);
+            }
+
+            ctx.apply_pipeline(&self.pipeline);
             ctx.apply_bindings(&self.shapes.bond_bindings);
             for (_,atom) in world.atoms.atom_map.iter() {
                 let color = [1., 1., 1.];
@@ -426,15 +509,20 @@ impl EventHandler for MyMiniquadApp {
             for (_,atom) in world.atoms.atom_map.iter() {
                 use AtomType::*;
                 let color = match atom.atom_type{
-                    Salt => [0.8, 0.8, 0.8],
-                    Air => [0.4, 0.4, 1.],
+                    Salt  => [0.8, 0.8, 0.8],
+                    Air   => [0., 1., 1.],
                     Earth => [0., 1., 0.],
-                    Fire => [1., 0., 0.],
+                    Fire  => [1., 0., 0.],
                     Water => [0., 0., 1.],
                     Vitae => [1., 0.6, 0.6],
-                    Mors => [0.4, 0., 0.],
+                    Mors  => [0.4, 0., 0.],
                     Quicksilver => [1.,1.,1.],
-                    Gold| Silver| Copper| Iron| Tin| Lead => [1., 1., 0.2],
+                    Gold => [1., 1., 0.2],
+                    Silver => [0.3, 0.3, 0.3],
+                    Copper => [0.8, 0.4, 0.1],
+                    Iron => [0.2, 0.2, 0.2],
+                    Tin => [0.4, 0.4, 0.2],
+                    Lead => [0.3, 0.3, 0.3],
                     Quintessence => {
                         let t = ((miniquad::date::now()/2.).fract() as f32)*PI*2.;
                         let colorize = |o:f32|->f32 {
@@ -463,38 +551,10 @@ impl EventHandler for MyMiniquadApp {
                     ctx.draw((arm.len-1)*3, 3, 1);
                 }
             }
-            ctx.apply_pipeline(&self.pipeline_glyphs);
-            for glyph in world.glyphs.iter(){
-                let offset = pos_to_xy(&glyph.pos);
-                let angle = rot_to_angle(glyph.rot);
-                use GlyphType::*;
-                let i = match glyph.glyph_type{
-                    Animismus => 0,
-                    Bonding => 1,
-                    Calcification => 2,
-                    Dispersion => 3,
-                    Disposal => 4,
-                    Duplication => 5,
-                    Equilibrium => 6,
-                    MultiBond => 7,
-                    Projection => 8,
-                    Purification => 9,
-                    TriplexBond => 10,
-                    Unbonding => 11,
-                    Unification => 12,
-                    _ => continue,
-                };
-                ctx.apply_bindings(&self.shapes.glyph_bindings[i]);
-                ctx.apply_uniforms(&UvUniforms {
-                    offset, world_offset, angle, scale
-                });
-                ctx.draw(0, 6, 1);
-            }
         }
         ctx.end_render_pass();
-        
+        let mut do_loading = false;
         self.egui_mq.run(ctx, |egui_ctx|{
-            let mut new_state = None;
             match &mut self.app_state{
                 Loaded(loaded) => {
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
@@ -568,50 +628,54 @@ impl EventHandler for MyMiniquadApp {
                             ui.text_edit_singleline(&mut dat.solution);
                         });
                         if ui.button("Load").clicked() {
-                            use std::{fs::File, io::BufReader, path::Path};
-                            let base_path = Path::new(&dat.base);
-                            let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
-                            let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
-                            let f_sol = File::open(base_path.join(&dat.solution)).unwrap();
-                            let sol = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
-                            println!("Check: {:?}", sol.stats);
-                            let init = parser::puzzle_prep(puzzle, sol).unwrap();
-                            for (a_num, a) in init.arms.iter().enumerate(){
-                                println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
-                            }
-                            let world = World::setup_sim(&init).unwrap();
-                            let mut test_world = world.clone();
-
-                            while !test_world.is_complete() {
-                                let res = test_world.run_step();
-                                if let Err(e) = res{
-                                    println!("test world error: {:?}", e);
-                                    break;
-                                }
-                                if test_world.timestep % 100 == 0{
-                                    println!("Initial sim step {:03}", test_world.timestep);
-                                }
-                            }
-                            let camera = CameraSetup::process(&test_world);
-                            let new_loaded = Loaded{
-                                base_world: world.clone(),
-                                curr_timestep: 0,
-                                max_timestep: test_world.timestep as usize,
-                                last_world: world,
-                                last_timestep: 0,
-                                tape_mode: false,
-                                camera,
-                            };
-                            new_state = Some(Loaded(new_loaded));
+                            do_loading = true;
                         }
                     });
                 }
             };
-            if let Some(s) = new_state{
-                self.app_state = s;
-            }
         });
         self.egui_mq.draw(ctx);
+        if do_loading{
+            if let NotLoaded(dat) = &mut self.app_state{
+                use std::{fs::File, io::BufReader, path::Path};
+                let base_path = Path::new(&dat.base);
+                let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
+                let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
+                let f_sol = File::open(base_path.join(&dat.solution)).unwrap();
+                let sol = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
+                println!("Check: {:?}", sol.stats);
+                let init = parser::puzzle_prep(puzzle, sol).unwrap();
+                for (a_num, a) in init.arms.iter().enumerate(){
+                    println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
+                }
+                let world = World::setup_sim(&init).unwrap();
+                let mut test_world = world.clone();
+
+                while !test_world.is_complete() {
+                    let res = test_world.run_step();
+                    if let Err(e) = res{
+                        println!("test world error: {:?}", e);
+                        break;
+                    }
+                    if test_world.timestep % 100 == 0{
+                        println!("Initial sim step {:03}", test_world.timestep);
+                    }
+                }
+                let camera = CameraSetup::process(&test_world);
+                let track_binds = setup_tracks(ctx, &test_world.track_map);
+                let new_loaded = Loaded{
+                    base_world: world.clone(),
+                    curr_timestep: 0,
+                    max_timestep: test_world.timestep as usize,
+                    last_world: world,
+                    last_timestep: 0,
+                    tape_mode: false,
+                    camera,
+                    track_binds,
+                };
+                self.app_state = Loaded(new_loaded);
+            }
+        }
 
         // Draw things in front of egui here
 

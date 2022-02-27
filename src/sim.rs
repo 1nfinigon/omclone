@@ -354,7 +354,7 @@ pub struct TrackMapData {
     pub minus: Option<Pos>,
     pub plus: Option<Pos>,
 }
-
+pub type TrackMap = FxHashMap<Pos, TrackMapData>;
 #[derive(Debug, Clone)]
 pub struct World {
     pub timestep: u64,
@@ -363,7 +363,7 @@ pub struct World {
     pub glyphs: Vec<Glyph>,
     pub arms: Vec<Arm>,
     pub repeat_length: usize,
-    pub track_map: FxHashMap<Pos, TrackMapData>,
+    pub track_map: TrackMap,
     pub cost: i32,
     pub instruction_count: i32,
 }
@@ -778,7 +778,7 @@ impl World {
 
 //Setup stuff
 impl World {
-    fn add_track(track_map: &mut FxHashMap<Pos, TrackMapData>, g: &Glyph) -> Result<()> {
+    fn add_track(track_map: &mut TrackMap, g: &Glyph) -> Result<()> {
         let track_pos = {
             if let GlyphType::Track(t) = &g.glyph_type {
                 t
@@ -824,7 +824,7 @@ impl World {
     //returns the length of the tape (repetition size)
     fn normalize_instructions(
         original: &mut Arm,
-        track_map: &FxHashMap<Pos, TrackMapData>,
+        track_map: &TrackMap,
     ) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
