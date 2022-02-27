@@ -591,8 +591,8 @@ impl EventHandler for MyMiniquadApp {
                                 let f = File::create("output.solution").unwrap();
                                 let mut writer = BufWriter::new(f);
                                 let base = &loaded.base_world;
-                                let tape_list:Vec<&Tape> = base.arms.iter().map(|a| &a.instruction_tape).collect();
-                                parser::replace_tapes(&mut loaded.solution, &tape_list, base.repeat_length);
+                                let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
+                                parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
                                 if !loaded.solution.solution_name.contains("omclone"){
                                     loaded.solution.solution_name += "(omclone)";
                                 }

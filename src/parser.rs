@@ -317,15 +317,13 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     }
     return Ok(solution_output);
 }
-pub fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
+pub fn replace_tapes<'a>(sol: &mut FullSolution, mut tapes: impl Iterator<Item=&'a Tape>, loop_len: usize) -> Result<()>{
     //Warning: Assumes the tapes are in order with their solution's arms
-    let mut tape_id = 0;
     let mut found_first = false;
     for part in &mut sol.part_list{
         if let TArm(_) = part.part_type{
             part.instructions.clear();
-            let tape = tapes[tape_id];
-            tape_id += 1;
+            let tape = tapes.next().ok_or(eyre!("Not enough tapes in iterator"))?;
             let mut step = tape.first as i32;
             for &instr in &tape.instructions{
                 if instr != Instr::Empty{
@@ -340,6 +338,8 @@ pub fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
             }
         }
     }
+    ensure!(tapes.next().is_none(),"Excess tapes in iterator");
+    Ok(())
 }
 pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
     write_int(f, 7)?;
