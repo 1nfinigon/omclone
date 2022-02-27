@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::sim::*;
 
 #[cfg(feature = "color_eyre")]
@@ -14,7 +13,7 @@ use simple_eyre::{
 
 use num_traits::FromPrimitive;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Write};
 
 type AllowedParts = u64;
 /*use bitflags::bitflags;
@@ -56,9 +55,6 @@ fn expect_arr<const N: usize>(f: &mut impl Read, expected: [u8; N]) -> Result<()
     );
     Ok(())
 }
-fn expect<const N: usize>(f: &mut impl Read, expected: impl Into<[u8; N]>) -> Result<()> {
-    expect_arr(f, expected.into())
-}
 fn expect_byte(f: &mut impl Read, expected: u8) -> Result<()> {
     expect_arr(f, expected.to_le_bytes())
 }
@@ -74,7 +70,6 @@ fn parse_byte(f: &mut impl Read) -> Result<u8> {
     f.read_exact(&mut dat)?;
     Ok(dat[0])
 }
-
 fn parse_int(f: &mut impl Read) -> Result<i32> {
     let mut dat = [0u8; 4];
     f.read_exact(&mut dat)?;
@@ -96,11 +91,16 @@ fn parse_bytepos(f: &mut impl Read) -> Result<Pos> {
     Ok(Pos::new(x, y))
 }
 
-fn parse_var_int(f: &mut impl Read) -> Result<u8> {
-    //I'm just gonna assert that strings with length >128 (0x7F) are illegal
-    let dat = parse_byte(f)?;
-    ensure!(dat < 127, "Parsed string too large! {}", dat);
-    Ok(dat)
+fn parse_var_int(f: &mut impl Read) -> Result<usize> {
+    let mut acc = 0;
+    loop{
+        let dat = parse_byte(f)?;
+        acc *= 0x80;
+        acc += (dat&0x7F) as usize;
+        if dat&0x80 == 0{
+            return Ok(acc)
+        }
+    }
 }
 fn parse_str(f: &mut impl Read) -> Result<String> {
     let length = parse_var_int(f)?;
@@ -108,6 +108,33 @@ fn parse_str(f: &mut impl Read) -> Result<String> {
     f.read_exact(&mut dat)?;
     //Have to re-wrap to convert to anyhow error
     Ok(String::from_utf8(dat)?)
+}
+
+fn write_arr<const N: usize>(f: &mut impl Write, data: [u8; N]) -> Result<()> {
+    let mut result = f.write(&data)?;
+    ensure!(
+        result == N,
+        "Tried to write {:?} ({:?} bytes) but only got {:?}",
+        data, N, result
+    );
+    Ok(())
+}
+fn write_byte(f: &mut impl Write, n: u8) -> Result<()>{
+    write_arr(f, n.to_le_bytes())
+}
+fn write_int(f: &mut impl Write, n: i32) -> Result<()>{
+    write_arr(f, n.to_le_bytes())
+}
+fn write_pos(f: &mut impl Write, p: Pos) -> Result<()>{
+    write_int(f, p.x)?;
+    write_int(f, p.y)
+}
+fn write_str(f: &mut impl Write, s: &str) -> Result<()> {
+    //Instead of writing a byte, should write a var_int
+    ensure!(s.len() < 128, "Write string {:?} too long {:?} > 127", s, s.len());
+    write_byte(f, s.len() as u8)?;
+    f.write(s.as_bytes())?;
+    Ok(())
 }
 
 pub struct FullSolution {
@@ -134,6 +161,24 @@ fn parse_stats(f: &mut impl Read) -> Result<Option<SolutionStats>> {
     }
 }
 
+fn write_stats(f: &mut impl Write, stats: Option<SolutionStats>) -> Result<()> {
+    match stats{
+        None => write_int(f, 0)?,
+        Some(stats) => {
+            write_int(f, 1)?;
+            write_int(f, 0)?;
+            write_int(f, stats.cycles)?;
+            write_int(f, 1)?;
+            write_int(f, stats.cost)?;
+            write_int(f, 2)?;
+            write_int(f, stats.area)?;
+            write_int(f, 3)?;
+            write_int(f, stats.instructions)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum PartType {
     TGlyph(GlyphType),
@@ -150,42 +195,73 @@ struct Part {
     pos: Pos,
     arm_size: i32,
     rot: i32,
-    input_output_index: u32,
-    instructions: Vec<(u32, Instr)>,
+    input_output_index: i32,
+    instructions: Vec<(i32, Instr)>,
     tracks: Option<Vec<Pos>>,
-    arm_index: u32,
+    arm_index: i32,
     //conduit stuff here
 }
 fn name_to_part_type(name: String) -> Result<PartType> {
     use ArmType::*;
     use GlyphType::*;
     Ok(match name.as_str() {
-        "glyph-calcification" => TGlyph(Calcification),
+        "glyph-calcification"  => TGlyph(Calcification),
         "glyph-life-and-death" => TGlyph(Animismus),
-        "glyph-projection" => TGlyph(Projection),
-        "glyph-dispersion" => TGlyph(Dispersion),
-        "glyph-purification" => TGlyph(Purification),
-        "glyph-duplication" => TGlyph(Duplication),
-        "glyph-unification" => TGlyph(Unification),
-        "bonder" => TGlyph(Bonding),
-        "unbonder" => TGlyph(Unbonding),
-        "bonder-prisma" => TGlyph(TriplexBond),
-        "bonder-speed" => TGlyph(MultiBond),
-        "glyph-disposal" => TGlyph(Disposal),
-        "glyph-marker" => TGlyph(Equilibrium),
-        "arm1" => TArm(PlainArm),
-        "arm2" => TArm(DoubleArm),
-        "arm3" => TArm(TripleArm),
-        "arm6" => TArm(HexArm),
-        "piston" => TArm(Piston),
-        "baron" => TArm(VanBerlo),
-        "track" => TTrack,
-        "input" => TInput,
-        "out-std" => TOutput,
-        "out-rep" => TOutputRep,
-        "pipe" => TConduit,
-        _ => bail!("Arm/Glyph name not recognized"),
+        "glyph-projection"     => TGlyph(Projection),
+        "glyph-dispersion"     => TGlyph(Dispersion),
+        "glyph-purification"   => TGlyph(Purification),
+        "glyph-duplication"    => TGlyph(Duplication),
+        "glyph-unification"    => TGlyph(Unification),
+        "bonder"               => TGlyph(Bonding),
+        "unbonder"             => TGlyph(Unbonding),
+        "bonder-prisma"        => TGlyph(TriplexBond),
+        "bonder-speed"         => TGlyph(MultiBond),
+        "glyph-disposal"       => TGlyph(Disposal),
+        "glyph-marker"         => TGlyph(Equilibrium),
+        "arm1"                 => TArm(PlainArm),
+        "arm2"                 => TArm(DoubleArm),
+        "arm3"                 => TArm(TripleArm),
+        "arm6"                 => TArm(HexArm),
+        "piston"               => TArm(Piston),
+        "baron"                => TArm(VanBerlo),
+        "track"                => TTrack,
+        "input"                => TInput,
+        "out-std"              => TOutput,
+        "out-rep"              => TOutputRep,
+        "pipe"                 => TConduit,
+        _                      => bail!("Arm/Glyph {:?} not recognized", name),
     })
+}
+fn part_type_to_name(part: &PartType) -> &'static str {
+    use ArmType::*;
+    use GlyphType::*;
+    match part {
+        TGlyph(Calcification) => "glyph-calcification",
+        TGlyph(Animismus)     => "glyph-life-and-death",
+        TGlyph(Projection)    => "glyph-projection",
+        TGlyph(Dispersion)    => "glyph-dispersion",
+        TGlyph(Purification)  => "glyph-purification",
+        TGlyph(Duplication)   => "glyph-duplication",
+        TGlyph(Unification)   => "glyph-unification",
+        TGlyph(Bonding)       => "bonder",
+        TGlyph(Unbonding)     => "unbonder",
+        TGlyph(TriplexBond)   => "bonder-prisma",
+        TGlyph(MultiBond)     => "bonder-speed",
+        TGlyph(Disposal)      => "glyph-disposal",
+        TGlyph(Equilibrium)   => "glyph-marker",
+        TArm(PlainArm)        => "arm1",
+        TArm(DoubleArm)       => "arm2",
+        TArm(TripleArm)       => "arm3",
+        TArm(HexArm)          => "arm6",
+        TArm(Piston)          => "piston",
+        TArm(VanBerlo)        => "baron",
+        TTrack                => "track",
+        TInput                => "input",
+        TOutput               => "out-std",
+        TOutputRep            => "out-rep",
+        TConduit              => "pipe",
+        _                     => bail!("Illegal part type {:?} in write attempt!", part),
+    }
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     expect_int(f, 7)?;
@@ -204,11 +280,11 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         let pos = parse_pos(f)?;
         let arm_size = parse_int(f)?;
         let rot = parse_int(f)?;
-        let input_output_index = parse_int(f)? as u32;
+        let input_output_index = parse_int(f)?;
         let instruction_count = parse_int(f)?;
         let mut instructions = Vec::new();
         for _ in 0..instruction_count {
-            let instr_pos = parse_int(f)? as u32;
+            let instr_pos = parse_int(f)? as i32;
             let action = parse_byte(f)?;
             instructions.push((instr_pos, Instr::from_byte(action)?));
         }
@@ -222,7 +298,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         } else {
             None
         };
-        let arm_index = parse_int(f)? as u32;
+        let arm_index = parse_int(f)?;
         /*TODO: Conduits
         if (byte_string_is(part->name, "pipe")) {
             part->conduit_id = read_uint32(&b);
@@ -243,6 +319,73 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         });
     }
     return Ok(solution_output);
+}
+fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
+    //Warning: Assumes the tapes are in order with their solution's arms
+    let mut tape_id = 0;
+    let mut found_first = false;
+    for part in &mut sol.part_list{
+        if let TArm(_) = part.part_type{
+            part.instructions.clear();
+            let tape = tapes[tape_id];
+            tape_id += 1;
+            let mut step = tape.first as i32;
+            for &instr in &tape.instructions{
+                if instr != Instr::Empty{
+                    part.instructions.push((step,instr));
+                }
+                step += 1;
+            }
+            let target_loop = (loop_len+tape.first) as i32;
+            if !found_first && step < target_loop{
+                part.instructions.push((target_loop-1,Instr::Noop));
+                found_first = true;
+            }
+        }
+    }
+}
+fn write_solution(f: &mut impl Write, sol: FullSolution) -> Result<()>{
+    write_int(f, 7)?;
+    write_str(f, &sol.puzzle_name)?;
+    write_str(f, &sol.solution_name)?;
+    let stats = write_stats(f, sol.stats)?;
+    write_int(f, sol.part_list.len() as i32);
+    for part in sol.part_list {
+        write_str(f, part_type_to_name(&part.part_type))?;
+        write_byte(f, 1)?;
+        write_pos(f, part.pos)?;
+        write_int(f, part.arm_size)?;
+        write_int(f, part.rot)?;
+        write_int(f, part.input_output_index)?;
+        write_int(f, part.instructions.len() as i32)?;
+        for (instr_pos, instr) in part.instructions {
+            write_int(f, instr_pos)?;
+            write_byte(f, instr.to_byte())?;
+        }
+        if let Some(tracks) = part.tracks {
+            ensure!(part.part_type == PartType::TTrack, "Tracks on non-track piece");
+            write_int(f, tracks.len() as i32)?;
+            for t in tracks {
+                write_pos(f, t)?;
+            }
+        }
+        write_int(f, part.arm_index)?;
+        /*TODO: Conduits
+        if (byte_string_is(part->name, "pipe")) {
+            part->conduit_id = read_uint32(&b);
+            part->number_of_conduit_hexes = read_uint32(&b);
+            if (part->number_of_conduit_hexes > 9999) {
+                free_solution_file(solution);
+                return 0;
+            }
+            part->conduit_hexes = calloc(part->number_of_conduit_hexes, sizeof(struct solution_hex_offset));
+            for (uint32_t j = 0; j < part->number_of_conduit_hexes; ++j) {
+                part->conduit_hexes[j].offset[0] = read_int32(&b);
+                part->conduit_hexes[j].offset[1] = read_int32(&b);
+            }
+        }*/
+    }
+    Ok(())
 }
 
 pub struct FullPuzzle {
@@ -344,7 +487,7 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     };
     Ok(puzzle_output)
 }
-fn process_instructions(input: &[(u32, Instr)]) -> Result<Tape> {
+fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
     let mut first = usize::MAX; //A giant value
     let mut instructions = Vec::new();
     for &(pos, instr) in input {
