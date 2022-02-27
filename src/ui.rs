@@ -229,7 +229,6 @@ fn setup_circle(ctx: &mut Context) -> Bindings{
         indices[i*3+1] = (i) as u16;
         indices[i*3+2] = ((i+1)%CIRCLE_VERT_COUNT) as u16;
     }
-    println!("{:?} \n\n {:?}",verts,indices);
     let vertex_buffer = Buffer::immutable(ctx, BufferType::VertexBuffer, &verts);
     let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &indices);
     Bindings {
@@ -288,6 +287,7 @@ struct Loaded{
     camera: CameraSetup,
     tape_mode: bool,
     track_binds: (Bindings, usize),
+    solution: parser::FullSolution,
 }
 enum AppState{
     NotLoaded(NotLoaded),Loaded(Loaded) 
@@ -585,6 +585,20 @@ impl EventHandler for MyMiniquadApp {
                             ui.label("Loop length: ");
                             ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
+                            ui.separator();
+                            if ui.button("Save").clicked() {
+                                use std::{fs::File, io::BufWriter, io::prelude::*};
+                                let f = File::create("output.solution").unwrap();
+                                let mut writer = BufWriter::new(f);
+                                let base = &loaded.base_world;
+                                let tape_list:Vec<&Tape> = base.arms.iter().map(|a| &a.instruction_tape).collect();
+                                parser::replace_tapes(&mut loaded.solution, &tape_list, base.repeat_length);
+                                if !loaded.solution.solution_name.contains("omclone"){
+                                    loaded.solution.solution_name += "(omclone)";
+                                }
+                                parser::write_solution(&mut writer, &loaded.solution).unwrap();
+                                writer.flush().unwrap();
+                            }
                         });
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
@@ -644,9 +658,9 @@ impl EventHandler for MyMiniquadApp {
                 let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
                 let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
                 let f_sol = File::open(base_path.join(&dat.solution)).unwrap();
-                let sol = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
-                println!("Check: {:?}", sol.stats);
-                let init = parser::puzzle_prep(puzzle, sol).unwrap();
+                let solution = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
+                println!("Check: {:?}", solution.stats);
+                let init = parser::puzzle_prep(&puzzle, &solution).unwrap();
                 for (a_num, a) in init.arms.iter().enumerate(){
                     println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
                 }
@@ -672,8 +686,7 @@ impl EventHandler for MyMiniquadApp {
                     last_world: world,
                     last_timestep: 0,
                     tape_mode: false,
-                    camera,
-                    track_binds,
+                    camera, track_binds, solution,
                 };
                 self.app_state = Loaded(new_loaded);
             }

@@ -61,9 +61,6 @@ fn expect_byte(f: &mut impl Read, expected: u8) -> Result<()> {
 fn expect_int(f: &mut impl Read, expected: i32) -> Result<()> {
     expect_arr(f, expected.to_le_bytes())
 }
-fn expect_long(f: &mut impl Read, expected: u64) -> Result<()> {
-    expect_arr(f, expected.to_le_bytes())
-}
 
 fn parse_byte(f: &mut impl Read) -> Result<u8> {
     let mut dat = [0u8; 1];
@@ -111,7 +108,7 @@ fn parse_str(f: &mut impl Read) -> Result<String> {
 }
 
 fn write_arr<const N: usize>(f: &mut impl Write, data: [u8; N]) -> Result<()> {
-    let mut result = f.write(&data)?;
+    let result = f.write(&data)?;
     ensure!(
         result == N,
         "Tried to write {:?} ({:?} bytes) but only got {:?}",
@@ -232,10 +229,10 @@ fn name_to_part_type(name: String) -> Result<PartType> {
         _                      => bail!("Arm/Glyph {:?} not recognized", name),
     })
 }
-fn part_type_to_name(part: &PartType) -> &'static str {
+fn part_type_to_name(part: &PartType) -> Result<&'static str> {
     use ArmType::*;
     use GlyphType::*;
-    match part {
+    Ok(match part {
         TGlyph(Calcification) => "glyph-calcification",
         TGlyph(Animismus)     => "glyph-life-and-death",
         TGlyph(Projection)    => "glyph-projection",
@@ -261,7 +258,7 @@ fn part_type_to_name(part: &PartType) -> &'static str {
         TOutputRep            => "out-rep",
         TConduit              => "pipe",
         _                     => bail!("Illegal part type {:?} in write attempt!", part),
-    }
+    })
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     expect_int(f, 7)?;
@@ -320,7 +317,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     }
     return Ok(solution_output);
 }
-fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
+pub fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
     //Warning: Assumes the tapes are in order with their solution's arms
     let mut tape_id = 0;
     let mut found_first = false;
@@ -344,29 +341,29 @@ fn replace_tapes(sol: &mut FullSolution, tapes: &[&Tape], loop_len: usize){
         }
     }
 }
-fn write_solution(f: &mut impl Write, sol: FullSolution) -> Result<()>{
+pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
     write_int(f, 7)?;
     write_str(f, &sol.puzzle_name)?;
     write_str(f, &sol.solution_name)?;
-    let stats = write_stats(f, sol.stats)?;
-    write_int(f, sol.part_list.len() as i32);
-    for part in sol.part_list {
-        write_str(f, part_type_to_name(&part.part_type))?;
+    write_stats(f, sol.stats)?;
+    write_int(f, sol.part_list.len() as i32)?;
+    for part in &sol.part_list {
+        write_str(f, part_type_to_name(&part.part_type)?)?;
         write_byte(f, 1)?;
         write_pos(f, part.pos)?;
         write_int(f, part.arm_size)?;
         write_int(f, part.rot)?;
         write_int(f, part.input_output_index)?;
         write_int(f, part.instructions.len() as i32)?;
-        for (instr_pos, instr) in part.instructions {
-            write_int(f, instr_pos)?;
+        for (instr_pos, instr) in &part.instructions {
+            write_int(f, *instr_pos)?;
             write_byte(f, instr.to_byte())?;
         }
-        if let Some(tracks) = part.tracks {
+        if let Some(tracks) = &part.tracks {
             ensure!(part.part_type == PartType::TTrack, "Tracks on non-track piece");
             write_int(f, tracks.len() as i32)?;
             for t in tracks {
-                write_pos(f, t)?;
+                write_pos(f, *t)?;
             }
         }
         write_int(f, part.arm_index)?;
@@ -505,27 +502,30 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
         }
         instructions[pos - first] = instr;
     }
+    if first == usize::MAX{
+        first = 0;
+    }
     Ok(Tape {
         first,
         instructions,
     })
 }
-pub fn puzzle_prep(puzzle: FullPuzzle, soln: FullSolution) -> Result<InitialWorld> {
+pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
     //First, fix the atom connections
     let mut glyphs = Vec::new();
     let mut arms = Vec::new();
-    for p in soln.part_list {
-        match p.part_type {
+    for p in &soln.part_list {
+        match &p.part_type {
             TGlyph(gtype) => {
                 glyphs.push(Glyph {
-                    glyph_type: gtype,
+                    glyph_type: gtype.clone(),
                     pos: p.pos,
                     rot: p.rot,
                 });
             }
             TArm(atype) => {
                 let instr = process_instructions(&p.instructions)?;
-                arms.push(Arm::new(p.pos, p.rot, p.arm_size, atype, instr));
+                arms.push(Arm::new(p.pos, p.rot, p.arm_size, *atype, instr));
             }
             TInput => {
                 let id = p.input_output_index;
@@ -558,7 +558,7 @@ pub fn puzzle_prep(puzzle: FullPuzzle, soln: FullSolution) -> Result<InitialWorl
                 glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
             }
             TTrack => {
-                let tracks = p.tracks
+                let tracks = p.tracks.clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
                 glyphs.push(Glyph {glyph_type: GlyphType::Track(tracks), pos: p.pos, rot: p.rot });
             }

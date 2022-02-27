@@ -267,6 +267,7 @@ pub enum Movement {
     HeldStill,
     Linear(Pos),
     Rotation(Rot, Pos),
+    Pivot(Rot),
 }
 
 pub type AtomPattern = Vec<Atom>;
@@ -441,15 +442,19 @@ impl World {
     fn premove_atoms(&mut self, atom_key: AtomKey, movement: Movement) -> Result<()> {
         let mut moving_atoms = VecDeque::<AtomKey>::new();
         moving_atoms.push_back(atom_key);
+        let normalized_movement = match movement{
+            Movement::Pivot(r) => Movement::Rotation(r, self.atoms.atom_map[atom_key].pos),
+            _ => movement
+        };
 
         while let Some(this_key) = moving_atoms.pop_front() {
             let maybe_move = self.atoms.moves.get(this_key);
             if let Some(curr_move) = maybe_move {
-                if curr_move != &movement {
+                if curr_move != &normalized_movement {
                     return Err(eyre!("Atom moved in multiple directions!"));
                 }
             } else {
-                self.atoms.moves.insert(this_key, movement);
+                self.atoms.moves.insert(this_key, normalized_movement);
                 let atom = &self.atoms.atom_map[this_key];
                 for dir in 0..6 {
                     if !(atom.connections[dir as usize] & Bonds::DYNAMIC_BOND).is_empty() {
@@ -483,10 +488,11 @@ impl World {
                     atom.rotate_connections(*r);
                 }
                 Movement::HeldStill => (),
+                Movement::Pivot(_) => bail!("Atom movement is pivot post-normalization!"),
             }
             let current = self.atoms.locs.insert(atom.pos, atom_key);
             if current != None {
-                return Err(eyre!("Atom moved to position with another atom!"));
+                bail!("Atom moved to position with another atom!");
             }
         }
         Ok(())
@@ -522,8 +528,8 @@ impl World {
                 arm.rot -= 1;
                 Rotation(-1, arm.pos)
             }
-            PivotCounterClockwise => Rotation(1, arm.pos + offset(arm.len, arm.rot)),
-            PivotClockwise => Rotation(-1, arm.pos + offset(arm.len, arm.rot)),
+            PivotCounterClockwise => Pivot(1),
+            PivotClockwise => Pivot(-1),
             Drop => {
                 if arm_type != VanBerlo {
                     arm.atoms_grabbed = [AtomKey::null(); 6];
