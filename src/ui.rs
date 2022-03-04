@@ -130,16 +130,30 @@ fn setup_bonds(ctx: &mut Context) -> Bindings{
 }
 
 fn setup_arms(ctx: &mut Context) -> Bindings{
-    const ARM_VERT_BUF: [Vert;5] = [
+    const ARM_VERT_BUF: [Vert;14] = [
+        //Arm Base
         [ 0.,-0.4,],
         [ 0., 0.4,],
+        //Arm edge
         [ 2., 0.,],
         [ 4., 0.,],
-        [ 6., 0.,]];
-    const ARM_INDEX_BUF: [u16;9] = [
-        0, 1, 2,
-        0, 1, 3,
-        0, 1, 4];
+        [ 6., 0.,],
+        //Grab markers
+        [ 1.8, 0.,],
+        [ 2.2, -0.4,],
+        [ 2.2, 0.4,],
+        [ 3.8, 0.,],
+        [ 4.2, -0.4,],
+        [ 4.2, 0.4,],
+        [ 5.8, 0.,],
+        [ 6.2, -0.4,],
+        [ 6.2, 0.4,],
+        ];
+    //First triangle is arm, 2nd triangle is optional grab marker
+    const ARM_INDEX_BUF: [u16;18] = [
+        0, 1, 2,    5, 6, 7,
+        0, 1, 3,    8, 9, 10,
+        0, 1, 4,    11, 12, 13,];
     let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &ARM_VERT_BUF);
     let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &ARM_INDEX_BUF);
     Bindings {
@@ -289,6 +303,7 @@ struct Loaded{
     tape_mode: bool,
     track_binds: (Bindings, usize),
     solution: parser::FullSolution,
+    message: Option<String>,
 }
 enum AppState{
     NotLoaded(NotLoaded),Loaded(Loaded) 
@@ -455,13 +470,15 @@ impl EventHandler for MyMiniquadApp {
             }
             if loaded.last_timestep < loaded.curr_timestep{
                 for time in loaded.last_timestep..loaded.curr_timestep{
-                    if loaded.last_world.run_step().is_err(){
-                        loaded.max_timestep = time;
+                    let output = loaded.last_world.run_step();
+                    if let Err(output) = output{
+                        loaded.message = Some(output.to_string());
                         loaded.last_world = loaded.base_world.clone();
                         for _ in 0..time{
                             loaded.last_world.run_step().unwrap();
                         }
                         loaded.curr_timestep = time;
+                        loaded.max_timestep = time;
                         break;
                     }
                 }
@@ -605,12 +622,13 @@ impl EventHandler for MyMiniquadApp {
             for arm in world.arms.iter() {
                 let color = [0., 0., 0.];
                 let offset = pos_to_xy(&arm.pos);
+                let triangles_drawn = if arm.grabbing {6} else {3};
                 for r in (0..6).step_by(arm.angles_between_arm() as usize) {
                     let angle = rot_to_angle(arm.rot+r);
                     ctx.apply_uniforms(&BasicUniforms {
                         color, offset, world_offset, angle, scale
                     });
-                    ctx.draw((arm.len-1)*3, 3, 1);
+                    ctx.draw((arm.len-1)*6, triangles_drawn, 1);
                 }
             }
         }
@@ -619,6 +637,13 @@ impl EventHandler for MyMiniquadApp {
         self.egui_mq.run(ctx, |egui_ctx|{
             match &mut self.app_state{
                 Loaded(loaded) => {
+                    if let Some(msg) = &loaded.message{
+                        let mut opened = true;
+                        egui::Window::new("Message").open(&mut opened).show(egui_ctx, |ui| {
+                            ui.label(msg);
+                        });
+                        if !opened {loaded.message = None;}
+                    }
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         ui.horizontal(|ui| {
@@ -667,6 +692,7 @@ impl EventHandler for MyMiniquadApp {
                                 }
                                 parser::write_solution(&mut writer, &loaded.solution).unwrap();
                                 writer.flush().unwrap();
+                                loaded.message = Some(String::from("Saved!"));
                             }
                         });
                     });
@@ -695,7 +721,18 @@ impl EventHandler for MyMiniquadApp {
                                 }
                             });
                         }
-                        if force_reload {loaded.last_timestep = usize::MAX};
+                        if loaded.max_timestep < loaded.curr_timestep{
+                            loaded.max_timestep = loaded.curr_timestep;
+                        }
+                        if force_reload {
+                            loaded.last_timestep = usize::MAX;
+                            let min_size = loaded.base_world.arms.iter()
+                                .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                            if loaded.base_world.repeat_length < min_size{
+                                loaded.base_world.repeat_length = min_size;
+                            }
+                            loaded.message = None;
+                        };
                     });
                 }
                 NotLoaded(dat) => {
@@ -756,6 +793,7 @@ impl EventHandler for MyMiniquadApp {
                     last_timestep: 0,
                     tape_mode: false,
                     camera, track_binds, solution,
+                    message: None,
                 };
                 self.app_state = Loaded(new_loaded);
             }
