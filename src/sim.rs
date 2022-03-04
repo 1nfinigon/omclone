@@ -745,8 +745,11 @@ impl World {
                     }
                 },
                 Disposal => {
-                    if let Some(_) = atoms.locs.get(&pos){
-                        atoms.destroy_atom_at(pos);
+                    if let Some(&atom_key) = atoms.locs.get(&pos){
+                        if atoms.atom_map[atom_key].connections == [Bonds::NO_BOND;6]
+                        && !atoms.moves.contains_key(atom_key) {
+                            atoms.destroy_atom_at(pos);
+                        }
                     }
                 },
                 Conduit(_atom_teleport) => {

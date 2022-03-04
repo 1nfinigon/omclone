@@ -698,8 +698,8 @@ impl EventHandler for MyMiniquadApp {
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
                         ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
-                        let marker = " ".repeat(loaded.curr_timestep+3)+"V"+
-                        &(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
+                        let marker = " ".repeat(loaded.curr_timestep+3)+"V";
+                        //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                         ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
 
                         let mut force_reload = false;
