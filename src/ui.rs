@@ -176,7 +176,7 @@ fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> (Bindings, usize){
 
 type UvVert = [f32;4];
 //(x, y), (u, v)
-const GLYPH_COUNT:usize = 14;
+const GLYPH_COUNT:usize = 15;
 fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
     const GLYPH_VERT_BUF: [UvVert;4] = [
         [-3.,-3.,    0., 1.],
@@ -203,6 +203,7 @@ fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
         include_bytes!("../images/Unbonder.png"),
         include_bytes!("../images/Unification.png"),
         include_bytes!("../images/HexGrid.png"),
+        include_bytes!("../images/ShadeAtomInOut.png"),
     ];
     glyph_list.map(|byte_data| -> Bindings{
         use image::io::Reader as ImageReader;
@@ -412,6 +413,34 @@ impl MyMiniquadApp {
     }
 }
 
+fn atom_color(t: AtomType) -> [f32;3]{
+    use AtomType::*;
+    match t{
+        Salt  => [0.8, 0.8, 0.8],
+        Air   => [0., 1., 1.],
+        Earth => [0., 1., 0.],
+        Fire  => [1., 0., 0.],
+        Water => [0., 0., 1.],
+        Vitae => [1., 0.6, 0.6],
+        Mors  => [0.4, 0., 0.],
+        Quicksilver => [1.,1.,1.],
+        Gold => [1., 1., 0.2],
+        Silver => [0.3, 0.3, 0.3],
+        Copper => [0.8, 0.4, 0.1],
+        Iron => [0.2, 0.2, 0.2],
+        Tin => [0.4, 0.4, 0.2],
+        Lead => [0.3, 0.3, 0.3],
+        Quintessence => {
+            let t = ((miniquad::date::now()/2.).fract() as f32)*PI*2.;
+            let colorize = |o:f32|->f32 {
+                (t+o).sin().max(0.)
+            };
+            [colorize(0.),colorize(PI*2./3.),colorize(-PI*2./3.)]
+        },
+        RepeatingOutputMarker | ConduitSpace => [0., 0., 0.],
+    }
+}
+
 impl EventHandler for MyMiniquadApp {
     fn update(&mut self, _: &mut Context) {}
 
@@ -427,6 +456,7 @@ impl EventHandler for MyMiniquadApp {
             if loaded.last_timestep < loaded.curr_timestep{
                 for time in loaded.last_timestep..loaded.curr_timestep{
                     if loaded.last_world.run_step().is_err(){
+                        loaded.max_timestep = time;
                         loaded.last_world = loaded.base_world.clone();
                         for _ in 0..time{
                             loaded.last_world.run_step().unwrap();
@@ -440,6 +470,11 @@ impl EventHandler for MyMiniquadApp {
             let world = &loaded.last_world;
             let scale = loaded.camera.scale;
             let world_offset = loaded.camera.offset;
+            let y_factor = f32::sqrt(3.)*2.0;
+            let inv_scale= 1./scale;
+            let base_x = ((-inv_scale-world_offset[0])/2.0).ceil()*2.0;
+            let base_y = ((-inv_scale-world_offset[1])/y_factor).ceil()*y_factor;
+
             ctx.apply_pipeline(&self.pipeline_tracks);
             let (track_binds, track_index_count) = &loaded.track_binds;
             ctx.apply_bindings(track_binds);//Hex grid
@@ -448,12 +483,46 @@ impl EventHandler for MyMiniquadApp {
             });
             ctx.draw(0, *track_index_count as i32, 1);
 
+            //Draw input/output atoms
+            for glyph in world.glyphs.iter(){
+                use GlyphType::*;
+                match &glyph.glyph_type{
+                    Input(atoms) | Output(atoms,_) => {
+                        //Draw in/out atom bonds
+                        ctx.apply_pipeline(&self.pipeline);
+                        ctx.apply_bindings(&self.shapes.bond_bindings);
+                        for atom in atoms {
+                            let color = [1., 1., 1.];
+                            let offset = pos_to_xy(&atom.pos);
+                            for r in 0..6 {
+                                let bond = atom.connections[r];
+                                if bond == Bonds::NORMAL{
+                                    let angle = rot_to_angle(r as Rot);
+                                    ctx.apply_uniforms(&BasicUniforms {
+                                        color, offset, world_offset, angle, scale
+                                    });
+                                    ctx.draw(0, 4, 1);
+                                }
+                            }
+                        }
+                        //Draw in/out atom circles
+                        ctx.apply_bindings(&self.shapes.circle_bindings);
+                        for atom in atoms {
+                            let color = atom_color(atom.atom_type);
+                            let offset = pos_to_xy(&atom.pos);
+                            let angle = 0.;
+                            ctx.apply_uniforms(&BasicUniforms {
+                                color, offset, world_offset, angle, scale
+                            });
+                            ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
+                        }
+                    },
+                    _ => continue,
+                };
+            }
+            //Draw the Hex grid
             ctx.apply_pipeline(&self.pipeline_glyphs);
-            ctx.apply_bindings(&self.shapes.glyph_bindings[13]);//Hex grid
-            let y_factor = f32::sqrt(3.)*2.0;
-            let inv_scale= 1./scale;
-            let base_x = ((-inv_scale-world_offset[0])/2.0).ceil()*2.0;
-            let base_y = ((-inv_scale-world_offset[1])/y_factor).ceil()*y_factor;
+            ctx.apply_bindings(&self.shapes.glyph_bindings[13]);
             for x in 0..(inv_scale/3.0).ceil() as i32 +1{
                 for y in 0..(inv_scale/y_factor).ceil() as i32 *2+1{
                     let offset = [base_x+(x as f32*6.0),
@@ -464,11 +533,12 @@ impl EventHandler for MyMiniquadApp {
                     ctx.draw(0, 6, 1);
                 }
             }
+            //Draw glyphs (including half-transparent cover for input/outputs)
             for glyph in world.glyphs.iter(){
                 let offset = pos_to_xy(&glyph.pos);
                 let angle = rot_to_angle(glyph.rot);
                 use GlyphType::*;
-                let i = match glyph.glyph_type{
+                let i = match &glyph.glyph_type{
                     Animismus       => 0,
                     Bonding         => 1,
                     Calcification   => 2,
@@ -482,7 +552,18 @@ impl EventHandler for MyMiniquadApp {
                     TriplexBond     => 10,
                     Unbonding       => 11,
                     Unification     => 12,
-                    _ => continue,
+                    Input(atoms) | Output(atoms,_) => {
+                        ctx.apply_bindings(&self.shapes.glyph_bindings[14]);
+                        for atom in atoms{
+                            let offset = pos_to_xy(&atom.pos);
+                            ctx.apply_uniforms(&UvUniforms {
+                                offset, world_offset, angle, scale
+                            });
+                            ctx.draw(0, 6, 1);
+                        }
+                        continue
+                    },
+                    Track(_) | Conduit(_) => continue,
                 };
                 ctx.apply_bindings(&self.shapes.glyph_bindings[i]);
                 ctx.apply_uniforms(&UvUniforms {
@@ -491,6 +572,7 @@ impl EventHandler for MyMiniquadApp {
                 ctx.draw(0, 6, 1);
             }
 
+            //Draw atom bonds
             ctx.apply_pipeline(&self.pipeline);
             ctx.apply_bindings(&self.shapes.bond_bindings);
             for (_,atom) in world.atoms.atom_map.iter() {
@@ -507,33 +589,10 @@ impl EventHandler for MyMiniquadApp {
                     }
                 }
             }
+            //Draw atom circles
             ctx.apply_bindings(&self.shapes.circle_bindings);
             for (_,atom) in world.atoms.atom_map.iter() {
-                use AtomType::*;
-                let color = match atom.atom_type{
-                    Salt  => [0.8, 0.8, 0.8],
-                    Air   => [0., 1., 1.],
-                    Earth => [0., 1., 0.],
-                    Fire  => [1., 0., 0.],
-                    Water => [0., 0., 1.],
-                    Vitae => [1., 0.6, 0.6],
-                    Mors  => [0.4, 0., 0.],
-                    Quicksilver => [1.,1.,1.],
-                    Gold => [1., 1., 0.2],
-                    Silver => [0.3, 0.3, 0.3],
-                    Copper => [0.8, 0.4, 0.1],
-                    Iron => [0.2, 0.2, 0.2],
-                    Tin => [0.4, 0.4, 0.2],
-                    Lead => [0.3, 0.3, 0.3],
-                    Quintessence => {
-                        let t = ((miniquad::date::now()/2.).fract() as f32)*PI*2.;
-                        let colorize = |o:f32|->f32 {
-                            (t+o).sin().max(0.)
-                        };
-                        [colorize(0.),colorize(PI*2./3.),colorize(-PI*2./3.)]
-                    },
-                    RepeatingOutputMarker | ConduitSpace => [0., 0., 0.],
-                };
+                let color = atom_color(atom.atom_type);
                 let offset = pos_to_xy(&atom.pos);
                 let angle = 0.;
                 ctx.apply_uniforms(&BasicUniforms {
@@ -541,6 +600,7 @@ impl EventHandler for MyMiniquadApp {
                 });
                 ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
             }
+            //Draw arms
             ctx.apply_bindings(&self.shapes.arm_bindings);
             for arm in world.arms.iter() {
                 let color = [0., 0., 0.];
@@ -580,12 +640,21 @@ impl EventHandler for MyMiniquadApp {
                                     loaded.curr_timestep += 1;
                                 }
                             }
+                            ui.label("Max Timestep: ");
+                            ui.add(egui::DragValue::new(&mut loaded.max_timestep)
+                                .speed(0.1));
+                            ui.separator();
+                            if loaded.max_timestep < loaded.curr_timestep{
+                                loaded.max_timestep = loaded.curr_timestep;
+                            }
+
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                             ui.label("Loop length: ");
                             ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
                             ui.separator();
+
                             if ui.button("Save").clicked() {
                                 use std::{fs::File, io::BufWriter, io::prelude::*};
                                 let f = File::create("output.solution").unwrap();
@@ -667,7 +736,7 @@ impl EventHandler for MyMiniquadApp {
                 let world = World::setup_sim(&init).unwrap();
                 let mut test_world = world.clone();
 
-                while !test_world.is_complete() {
+                while !test_world.is_complete() && test_world.timestep < 10000{
                     let res = test_world.run_step();
                     if let Err(e) = res{
                         println!("test world error: {:?}", e);
