@@ -190,7 +190,7 @@ fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> (Bindings, usize){
 
 type UvVert = [f32;4];
 //(x, y), (u, v)
-const GLYPH_COUNT:usize = 15;
+const GLYPH_COUNT:usize = 16;
 fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
     const GLYPH_VERT_BUF: [UvVert;4] = [
         [-3.,-3.,    0., 1.],
@@ -218,6 +218,7 @@ fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
         include_bytes!("../images/Unification.png"),
         include_bytes!("../images/HexGrid.png"),
         include_bytes!("../images/ShadeAtomInOut.png"),
+        include_bytes!("../images/ShadeAreaFill.png"),
     ];
     glyph_list.map(|byte_data| -> Bindings{
         use image::io::Reader as ImageReader;
@@ -304,6 +305,11 @@ struct Loaded{
     track_binds: (Bindings, usize),
     solution: parser::FullSolution,
     message: Option<String>,
+    partial_timestep: f32,
+    running_free: bool,
+    show_area: bool,
+    run_speed: f32,
+    save_path: std::path::PathBuf,
 }
 enum AppState{
     NotLoaded(NotLoaded),Loaded(Loaded) 
@@ -457,34 +463,64 @@ fn atom_color(t: AtomType) -> [f32;3]{
 }
 
 impl EventHandler for MyMiniquadApp {
-    fn update(&mut self, _: &mut Context) {}
+    fn update(&mut self, _: &mut Context) {
+        if let Loaded(loaded) = &mut self.app_state{
+            if loaded.running_free && loaded.last_timestep == loaded.curr_timestep{
+                loaded.curr_timestep += 1;
+                if loaded.max_timestep < loaded.curr_timestep{
+                    loaded.max_timestep = loaded.curr_timestep;
+                }
+            }
+            if loaded.last_timestep > loaded.curr_timestep{
+                loaded.last_timestep = 0;
+                loaded.last_world = loaded.base_world.clone();
+                loaded.partial_timestep = 0.;
+                loaded.running_free = false;
+            }
+            let mut target_step = loaded.curr_timestep;
+            if loaded.last_timestep+1 == loaded.curr_timestep{
+                loaded.partial_timestep += loaded.run_speed;
+                target_step -= 1;
+            } else {
+                loaded.partial_timestep = 0.;
+                loaded.running_free = false;
+            }
+            if loaded.partial_timestep >= 1.{
+                target_step += 1;
+                loaded.partial_timestep = 0.;
+            }
+            if loaded.last_timestep < target_step{
+                for time in loaded.last_timestep..target_step{
+                    let output = loaded.last_world.run_step(loaded.show_area);
+                    if let Err(output) = output{
+                        loaded.message = Some(output.to_string());
+                        loaded.last_world = loaded.base_world.clone();
+                        for _ in 0..time{
+                            loaded.last_world.run_step(loaded.show_area).unwrap();
+                        }
+                        loaded.curr_timestep = time;
+                        loaded.max_timestep = time;
+                        loaded.running_free = false;
+                        break;
+                    }
+                }
+                loaded.last_timestep = loaded.curr_timestep;
+            }
+        }
+    }
 
     fn draw(&mut self, ctx: &mut Context) {
         ctx.clear(Some((1., 1., 1., 1.)), None, None);
         ctx.begin_default_pass(PassAction::clear_color(0.5, 0.5, 0.5, 1.0));
 
         if let Loaded(loaded) = &mut self.app_state{
-            if loaded.last_timestep > loaded.curr_timestep{
-                loaded.last_timestep = 0;
-                loaded.last_world = loaded.base_world.clone();
-            }
-            if loaded.last_timestep < loaded.curr_timestep{
-                for time in loaded.last_timestep..loaded.curr_timestep{
-                    let output = loaded.last_world.run_step();
-                    if let Err(output) = output{
-                        loaded.message = Some(output.to_string());
-                        loaded.last_world = loaded.base_world.clone();
-                        for _ in 0..time{
-                            loaded.last_world.run_step().unwrap();
-                        }
-                        loaded.curr_timestep = time;
-                        loaded.max_timestep = time;
-                        break;
-                    }
-                }
-                loaded.last_timestep = loaded.curr_timestep;
-            }
             let world = &loaded.last_world;
+            let float_world_try = world.partial_step(loaded.partial_timestep);
+            let float_world = if float_world_try.is_ok(){
+                float_world_try.unwrap()
+            } else {
+                world.partial_step(0.).unwrap()
+            };
             let scale = loaded.camera.scale;
             let world_offset = loaded.camera.offset;
             let y_factor = f32::sqrt(3.)*2.0;
@@ -592,13 +628,13 @@ impl EventHandler for MyMiniquadApp {
             //Draw atom bonds
             ctx.apply_pipeline(&self.pipeline);
             ctx.apply_bindings(&self.shapes.bond_bindings);
-            for (_,atom) in world.atoms.atom_map.iter() {
+            for (atom, offset, partial_rotation) in &float_world.atoms_xy {
                 let color = [1., 1., 1.];
-                let offset = pos_to_xy(&atom.pos);
+                let offset = [offset.x, offset.y];
                 for r in 0..6 {
                     let bond = atom.connections[r];
                     if bond == Bonds::NORMAL{
-                        let angle = rot_to_angle(r as Rot);
+                        let angle = rot_to_angle(r as Rot)+partial_rotation;
                         ctx.apply_uniforms(&BasicUniforms {
                             color, offset, world_offset, angle, scale
                         });
@@ -608,9 +644,9 @@ impl EventHandler for MyMiniquadApp {
             }
             //Draw atom circles
             ctx.apply_bindings(&self.shapes.circle_bindings);
-            for (_,atom) in world.atoms.atom_map.iter() {
+            for (atom, offset, _) in &float_world.atoms_xy {
                 let color = atom_color(atom.atom_type);
-                let offset = pos_to_xy(&atom.pos);
+                let offset = [offset.x, offset.y];
                 let angle = 0.;
                 ctx.apply_uniforms(&BasicUniforms {
                     color, offset, world_offset, angle, scale
@@ -629,6 +665,27 @@ impl EventHandler for MyMiniquadApp {
                         color, offset, world_offset, angle, scale
                     });
                     ctx.draw((arm.len-1)*6, triangles_drawn, 1);
+                }
+            }
+            //draw area cover
+            if loaded.show_area{
+                ctx.apply_pipeline(&self.pipeline_glyphs);
+                ctx.apply_bindings(&self.shapes.glyph_bindings[15]);
+                /*for (_, xy, _) in float_world.atoms_xy{
+                    let p = xy_to_pos(xy);
+                    let offset = pos_to_xy(&p);
+                    ctx.apply_uniforms(&UvUniforms {
+                        offset, world_offset, angle:0., scale
+                    });
+                    ctx.draw(0, 6, 1);
+                }*/
+                
+                for p in &world.area_touched{
+                    let offset = pos_to_xy(&p);
+                    ctx.apply_uniforms(&UvUniforms {
+                        offset, world_offset, angle:0., scale
+                    });
+                    ctx.draw(0, 6, 1);
                 }
             }
         }
@@ -658,14 +715,18 @@ impl EventHandler for MyMiniquadApp {
                             if ui.button("-1").clicked() {
                                 if loaded.curr_timestep > 0 {
                                     loaded.curr_timestep -= 1;
+                                    loaded.running_free = false;
+                                    loaded.partial_timestep = 0.;
                                 }
                             }
                             if ui.button("+1").clicked() {
                                 if loaded.curr_timestep < loaded.max_timestep {
                                     loaded.curr_timestep += 1;
+                                    loaded.running_free = false;
+                                    loaded.partial_timestep = 0.;
                                 }
                             }
-                            ui.label("Max Timestep: ");
+                            ui.label("Max Timestep:");
                             ui.add(egui::DragValue::new(&mut loaded.max_timestep)
                                 .speed(0.1));
                             ui.separator();
@@ -675,30 +736,36 @@ impl EventHandler for MyMiniquadApp {
 
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
-                            ui.label("Loop length: ");
+                            ui.label("Loop length:");
                             ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
                             ui.separator();
-
-                            if ui.button("Save").clicked() {
-                                use std::{fs::File, io::BufWriter, io::prelude::*};
-                                let f = File::create("output.solution").unwrap();
-                                let mut writer = BufWriter::new(f);
-                                let base = &loaded.base_world;
-                                let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
-                                parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
-                                if !loaded.solution.solution_name.contains("omclone"){
-                                    loaded.solution.solution_name += "(omclone)";
-                                }
-                                parser::write_solution(&mut writer, &loaded.solution).unwrap();
-                                writer.flush().unwrap();
-                                loaded.message = Some(String::from("Saved!"));
-                            }
+                            ui.checkbox(&mut loaded.show_area, "Show Area");
+                            ui.separator();
+                            ui.label("Speed:");
+                            ui.add(egui::DragValue::new(&mut loaded.run_speed)
+                                .clamp_range(0.01..=1.0).fixed_decimals(2).speed(0.01));
+                                ui.checkbox(&mut loaded.running_free, "Run");
                         });
+                        if ui.button("Save").clicked() {
+                            use std::{fs::File, io::BufWriter, io::prelude::*};
+                            let f = File::create(&loaded.save_path).unwrap();
+                            let mut writer = BufWriter::new(f);
+                            let base = &loaded.base_world;
+                            let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
+                            parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
+                            if !loaded.solution.solution_name.contains("omclone"){
+                                loaded.solution.solution_name += "(omclone)";
+                            }
+                            parser::write_solution(&mut writer, &loaded.solution).unwrap();
+                            writer.flush().unwrap();
+                            loaded.message = Some(String::from("Saved!"));
+                        }
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
                         ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
-                        let marker = " ".repeat(loaded.curr_timestep+3)+"V";
+                        let end_spacing = loaded.max_timestep.saturating_sub(loaded.curr_timestep);
+                        let marker = " ".repeat(loaded.curr_timestep+3)+"V"+&" ".repeat(end_spacing);
                         //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                         ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
 
@@ -726,6 +793,8 @@ impl EventHandler for MyMiniquadApp {
                         }
                         if force_reload {
                             loaded.last_timestep = usize::MAX;
+                            loaded.partial_timestep = 0.;
+                            loaded.running_free = false;
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                             if loaded.base_world.repeat_length < min_size{
@@ -763,7 +832,8 @@ impl EventHandler for MyMiniquadApp {
                 let base_path = Path::new(&dat.base);
                 let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
                 let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
-                let f_sol = File::open(base_path.join(&dat.solution)).unwrap();
+                let solution_path = base_path.join(&dat.solution);
+                let f_sol = File::open(&solution_path).unwrap();
                 let solution = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
                 println!("Check: {:?}", solution.stats);
                 let init = parser::puzzle_prep(&puzzle, &solution).unwrap();
@@ -774,7 +844,7 @@ impl EventHandler for MyMiniquadApp {
                 let mut test_world = world.clone();
 
                 while !test_world.is_complete() && test_world.timestep < 10000{
-                    let res = test_world.run_step();
+                    let res = test_world.run_step(false);
                     if let Err(e) = res{
                         println!("test world error: {:?}", e);
                         break;
@@ -794,6 +864,11 @@ impl EventHandler for MyMiniquadApp {
                     tape_mode: false,
                     camera, track_binds, solution,
                     message: None,
+                    partial_timestep: 0.,
+                    running_free: false,
+                    show_area: true,
+                    run_speed: 0.05,
+                    save_path: solution_path,
                 };
                 self.app_state = Loaded(new_loaded);
             }

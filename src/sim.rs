@@ -14,6 +14,7 @@ pub use nalgebra::Vector2;
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use std::collections::VecDeque;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::f32::consts::PI;
 
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
@@ -436,6 +437,73 @@ pub struct SolutionStats {
     pub instructions: i32,
 }
 
+pub type XYPos = nalgebra::Point2<f32>;
+pub type XYVec = nalgebra::Vector2<f32>;
+pub struct FloatWorld{//Might add arms, maybe some other animation stuff too
+    pub portion: f32,
+    pub atoms_xy: Vec<(Atom, XYPos, f32)>,
+}
+fn pos_to_xy(input: &Pos) -> XYPos{
+    let a = input.x as f32;
+    let b = input.y as f32;
+    XYPos::new(a*2.+b,b*f32::sqrt(3.))
+}
+fn rot_to_angle(r: Rot) -> f32{
+    (-r as f32)*PI/3.
+}
+//https://stackoverflow.com/questions/7705228/hexagonal-grids-how-do-you-find-which-hexagon-a-point-is-in/23370350#23370350
+fn xy_to_pos(input: XYPos) -> Pos{
+    //x=a*2.+b, y=b*f32::sqrt(3.)
+    let b = input.y/f32::sqrt(3.);
+    let a = (input.x-b)/2.;
+    // check closest to (p+1,q), (p,q+1), (p-1,q) or (p,q-1)
+    let (p, q) = (a.round(), b.round());
+    let (lambda, mu) = (a-p, b-q);
+    // opposite signs, so we are guaranteed to be inside hexagon (p,q)
+    let base_hex = Pos::new(p as i32, q as i32);
+    if lambda * mu < 0.0 {return base_hex;}
+
+    // same sign, but which end of the parallelogram are we?
+    let sign = if (lambda<0.) { -1. } else { 1. };
+    let candidate = if ( lambda.abs() > mu.abs() ) {(p+sign,q)} else {(p,q+sign)};
+    let candidate_hex = Pos::new(candidate.0 as i32, candidate.1 as i32);
+    let distance = nalgebra::distance_squared(&pos_to_xy(&base_hex),&input);
+    let distance2 = nalgebra::distance_squared(&pos_to_xy(&candidate_hex),&input);
+    if distance < distance2 {base_hex} else {candidate_hex}
+}
+impl FloatWorld{
+    fn generate(world: &World, portion: f32) -> Self{
+        //Requires atom pre-movement to be complete
+        let mut atoms_xy = Vec::new();
+        fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32){
+            let xy = pos_to_xy(&base);
+            use Movement::*;
+            match movement{
+                Linear(offset) => {
+                    let offset_xy = pos_to_xy(&offset)-XYPos::origin();
+                    return (xy+(offset_xy*amount), 0.)
+                },
+                Rotation(r, pivot) => {
+                    let pivot_xy = pos_to_xy(&pivot);
+                    let offset = xy-pivot_xy;
+                    let rot = rot_to_angle(r)*amount;
+                    return (pivot_xy+(nalgebra::Rotation2::new(-rot)*offset), rot)
+                }
+                HeldStill => {
+                    return (xy, 0.)
+                }
+                Pivot(_) => panic!("Pivot in post-normalized movement"),
+            }
+        }
+        for (atom_key, atom) in &world.atoms.atom_map{
+            let movement = world.atoms.moves.get(atom_key).unwrap_or(&Movement::HeldStill);
+            let (xy, angle) = apply_movement(atom.pos, *movement, portion);
+            atoms_xy.push((atom.clone(), xy, angle));
+        }
+        FloatWorld{ portion, atoms_xy }
+    }
+}
+
 //Running the world
 impl World {
     //sets up a move for the specified atom and all atoms connected to it
@@ -566,7 +634,7 @@ impl World {
                 })
             }
             Repeat | Reset | Noop => {
-                bail!("Unprocessed instruction!");
+                panic!("Unprocessed instruction!");
             }
             Empty => (HeldStill),
         };
@@ -760,18 +828,54 @@ impl World {
         }
     }
 
+    fn mark_area(&mut self){
+        //atom radius = 29/41 or 1/sqrt(2)
+        let atom_radius:f32 = (29./41.)-0.5;
+        let step_count = 10;
+        for step in 0..step_count{
+            let portion = step as f32 / step_count as f32;
+            let progress = FloatWorld::generate(self, portion);
+            for (_, xy, _) in progress.atoms_xy{
+                let pos = xy_to_pos(xy);
+                self.area_touched.insert(pos);
+                for rot in 0..8{
+                    let angle = (rot as f32)/8.*PI*2.;
+                    let offset = nalgebra::Rotation2::new(angle)*XYVec::new(atom_radius,0.);
+                    let pos = xy_to_pos(xy+offset);
+                    self.area_touched.insert(pos);
+                }
+            }
+        }
+    }
+
     //returns true if the solution is fully solved
-    pub fn run_step(&mut self) -> Result<()> {
+    pub fn run_step(&mut self, mark_area: bool) -> Result<()> {
         for a in 0..self.arms.len() {
             self.do_instruction(a, self.timestep)?;
         }
         self.process_glyphs();
+        if mark_area{
+            self.mark_area();
+        }
 
         self.move_atoms()?;
         self.process_glyphs();
         self.atoms.moves.clear();
         self.timestep += 1;
         Ok(())
+    }
+
+    pub fn partial_step(&self, portion: f32) -> Result<FloatWorld> {
+        if portion > 0.{
+            let mut copy = self.clone();
+            for a in 0..copy.arms.len() {
+                copy.do_instruction(a, copy.timestep)?;
+            }
+            copy.process_glyphs();
+            Ok(FloatWorld::generate(&copy, portion))
+        } else {
+            Ok(FloatWorld::generate(&self, portion))
+        }
     }
 
     pub fn is_complete(&self) -> bool{
@@ -1078,6 +1182,7 @@ impl World {
         SolutionStats {cycles,cost,area,instructions}
     }
 }
+
 
 #[cfg(test)]
 mod tests {
