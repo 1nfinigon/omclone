@@ -1,5 +1,6 @@
 use miniquad::*;
 use crate::{sim::*, parser};
+use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
 /*#[cfg(feature = "color_eyre")]
 use color_eyre::{
     eyre::{bail, ensure, eyre},
@@ -74,7 +75,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
             }
         } else {
             if char_range.end <= tape.first{
-                tape.first -= char_range.end - char_range.start;
+                tape.first -= char_range.end.saturating_sub(char_range.start);
             } else {
                 let start = if char_range.start < tape.first{
                     tape.first = char_range.start;
@@ -82,7 +83,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
                 } else {
                     char_range.start-tape.first
                 };
-                let end = char_range.end-tape.first;
+                let end = (char_range.end-tape.first).min(tape.instructions.len());
                 tape.instructions.drain(start..end);
             }
         }
@@ -309,10 +310,13 @@ struct Loaded{
     running_free: bool,
     show_area: bool,
     run_speed: f32,
-    save_path: std::path::PathBuf,
+    popup_reload: bool,
 }
 enum AppState{
-    NotLoaded(NotLoaded),Loaded(Loaded) 
+    NotLoaded,Loaded(Loaded) 
+}
+enum AppStateUpdate{
+    NoChange, LoadFromData, ResetHome
 }
 use AppState::*;
 
@@ -323,6 +327,7 @@ pub struct MyMiniquadApp {
     pipeline_tracks: Pipeline,
     shapes: ShapeStore,
     app_state: AppState,
+    unloaded_info: NotLoaded
 }
 
 #[repr(C)]
@@ -426,10 +431,11 @@ impl MyMiniquadApp {
         let base = String::from(base_str);
         let puzzle = String::from(puzzle_str);
         let solution = String::from(solution_str);
-        let app_state = AppState::NotLoaded(NotLoaded{base, puzzle, solution});
+        let app_state = AppState::NotLoaded;
+        let unloaded_info = NotLoaded{base, puzzle, solution};
         Self {
             egui_mq: egui_miniquad::EguiMq::new(ctx),
-            pipeline,pipeline_glyphs,pipeline_tracks,shapes,app_state
+            pipeline,pipeline_glyphs,pipeline_tracks,shapes,app_state,unloaded_info
         }
     }
 }
@@ -624,49 +630,6 @@ impl EventHandler for MyMiniquadApp {
                 });
                 ctx.draw(0, 6, 1);
             }
-
-            //Draw atom bonds
-            ctx.apply_pipeline(&self.pipeline);
-            ctx.apply_bindings(&self.shapes.bond_bindings);
-            for (atom, offset, partial_rotation) in &float_world.atoms_xy {
-                let color = [1., 1., 1.];
-                let offset = [offset.x, offset.y];
-                for r in 0..6 {
-                    let bond = atom.connections[r];
-                    if bond == Bonds::NORMAL{
-                        let angle = rot_to_angle(r as Rot)+partial_rotation;
-                        ctx.apply_uniforms(&BasicUniforms {
-                            color, offset, world_offset, angle, scale
-                        });
-                        ctx.draw(0, 4, 1);
-                    }
-                }
-            }
-            //Draw atom circles
-            ctx.apply_bindings(&self.shapes.circle_bindings);
-            for (atom, offset, _) in &float_world.atoms_xy {
-                let color = atom_color(atom.atom_type);
-                let offset = [offset.x, offset.y];
-                let angle = 0.;
-                ctx.apply_uniforms(&BasicUniforms {
-                    color, offset, world_offset, angle, scale
-                });
-                ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
-            }
-            //Draw arms
-            ctx.apply_bindings(&self.shapes.arm_bindings);
-            for arm in world.arms.iter() {
-                let color = [0., 0., 0.];
-                let offset = pos_to_xy(&arm.pos);
-                let triangles_drawn = if arm.grabbing {6} else {3};
-                for r in (0..6).step_by(arm.angles_between_arm() as usize) {
-                    let angle = rot_to_angle(arm.rot+r);
-                    ctx.apply_uniforms(&BasicUniforms {
-                        color, offset, world_offset, angle, scale
-                    });
-                    ctx.draw((arm.len-1)*6, triangles_drawn, 1);
-                }
-            }
             //draw area cover
             if loaded.show_area{
                 ctx.apply_pipeline(&self.pipeline_glyphs);
@@ -688,9 +651,52 @@ impl EventHandler for MyMiniquadApp {
                     ctx.draw(0, 6, 1);
                 }
             }
+            //Draw atom bonds
+            ctx.apply_pipeline(&self.pipeline);
+            ctx.apply_bindings(&self.shapes.bond_bindings);
+            for f_atom in &float_world.atoms_xy {
+                let color = [1., 1., 1.];
+                let offset = [f_atom.pos.x, f_atom.pos.y];
+                for r in 0..6 {
+                    let bond = f_atom.connections[r];
+                    if bond == Bonds::NORMAL{
+                        let angle = rot_to_angle(r as Rot)+f_atom.rot;
+                        ctx.apply_uniforms(&BasicUniforms {
+                            color, offset, world_offset, angle, scale
+                        });
+                        ctx.draw(0, 4, 1);
+                    }
+                }
+            }
+            //Draw atom circles
+            ctx.apply_bindings(&self.shapes.circle_bindings);
+            for f_atom in &float_world.atoms_xy {
+                let color = atom_color(f_atom.atom_type);
+                let offset = [f_atom.pos.x, f_atom.pos.y];
+                let angle = 0.;
+                ctx.apply_uniforms(&BasicUniforms {
+                    color, offset, world_offset, angle, scale
+                });
+                ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
+            }
+            //Draw arms
+            ctx.apply_bindings(&self.shapes.arm_bindings);
+            for f_arm in float_world.arms_xy.iter() {
+                let color = [0., 0., 0.];
+                let offset = [f_arm.pos.x, f_arm.pos.y];
+                let triangles_drawn = if f_arm.grabbing {6} else {3};
+                for r in (0..6).step_by(Arm::angles_between_arm(f_arm.arm_type) as usize) {
+                    let angle = f_arm.rot+rot_to_angle(r);
+                    ctx.apply_uniforms(&BasicUniforms {
+                        color, offset, world_offset, angle, scale
+                    });
+                    let rounded_len = (f_arm.len.round() as i32)/2;
+                    ctx.draw((rounded_len-1)*6, triangles_drawn, 1);
+                }
+            }
         }
         ctx.end_render_pass();
-        let mut do_loading = false;
+        let mut do_loading = AppStateUpdate::NoChange;
         self.egui_mq.run(ctx, |egui_ctx|{
             match &mut self.app_state{
                 Loaded(loaded) => {
@@ -747,20 +753,28 @@ impl EventHandler for MyMiniquadApp {
                                 .clamp_range(0.01..=1.0).fixed_decimals(2).speed(0.01));
                                 ui.checkbox(&mut loaded.running_free, "Run");
                         });
-                        if ui.button("Save").clicked() {
-                            use std::{fs::File, io::BufWriter, io::prelude::*};
-                            let f = File::create(&loaded.save_path).unwrap();
-                            let mut writer = BufWriter::new(f);
-                            let base = &loaded.base_world;
-                            let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
-                            parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
-                            if !loaded.solution.solution_name.contains("omclone"){
-                                loaded.solution.solution_name += "(omclone)";
+                        ui.horizontal(|ui| {
+                            if ui.button("Save").clicked() {
+                                let dat = &self.unloaded_info;
+                                let base_path = Path::new(&dat.base);
+                                let solution_path = base_path.join(&dat.solution);
+                                let f = File::create(solution_path).unwrap();
+                                let mut writer = BufWriter::new(f);
+                                let base = &loaded.base_world;
+                                let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
+                                parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
+                                if !loaded.solution.solution_name.contains("omclone"){
+                                    loaded.solution.solution_name += "(omclone)";
+                                }
+                                parser::write_solution(&mut writer, &loaded.solution).unwrap();
+                                writer.flush().unwrap();
+                                loaded.message = Some(String::from("Saved!"));
                             }
-                            parser::write_solution(&mut writer, &loaded.solution).unwrap();
-                            writer.flush().unwrap();
-                            loaded.message = Some(String::from("Saved!"));
-                        }
+                            ui.separator();
+                            if ui.button("Load").clicked() {
+                                loaded.popup_reload = true;
+                            }
+                        });
                     });
                     egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
                         ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
@@ -803,8 +817,17 @@ impl EventHandler for MyMiniquadApp {
                             loaded.message = None;
                         };
                     });
+                    egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
+                        if ui.button("Reload current").clicked() {
+                            do_loading = AppStateUpdate::LoadFromData;
+                        }
+                        if ui.button("Load New").clicked() {
+                            do_loading = AppStateUpdate::ResetHome;
+                        }
+                    });
                 }
-                NotLoaded(dat) => {
+                NotLoaded => {
+                    let dat = &mut self.unloaded_info;
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Base path: ");
@@ -819,16 +842,20 @@ impl EventHandler for MyMiniquadApp {
                             ui.text_edit_singleline(&mut dat.solution);
                         });
                         if ui.button("Load").clicked() {
-                            do_loading = true;
+                            do_loading = AppStateUpdate::LoadFromData;
                         }
                     });
                 }
             };
         });
         self.egui_mq.draw(ctx);
-        if do_loading{
-            if let NotLoaded(dat) = &mut self.app_state{
-                use std::{fs::File, io::BufReader, path::Path};
+        match do_loading{
+            AppStateUpdate::NoChange => {},
+            AppStateUpdate::ResetHome => {
+                self.app_state = NotLoaded;
+            }
+            AppStateUpdate::LoadFromData => {
+                let dat = &self.unloaded_info;
                 let base_path = Path::new(&dat.base);
                 let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
                 let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
@@ -868,7 +895,7 @@ impl EventHandler for MyMiniquadApp {
                     running_free: false,
                     show_area: true,
                     run_speed: 0.05,
-                    save_path: solution_path,
+                    popup_reload: false,
                 };
                 self.app_state = Loaded(new_loaded);
             }

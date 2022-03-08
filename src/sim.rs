@@ -126,7 +126,7 @@ pub struct Tape {
 impl Tape {
     pub fn get(&self, timestep: usize, loop_len: usize) -> Instr {
         use Instr::Empty;
-        if timestep >= self.first {
+        if timestep >= self.first && loop_len > 0{
             let after_first = timestep - self.first;
             *self
                 .instructions
@@ -268,7 +268,12 @@ pub enum Movement {
     HeldStill,
     Linear(Pos),
     Rotation(Rot, Pos),
+}
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ArmMovement{
+    Move(Movement),
     Pivot(Rot),
+    LengthAdjust(i32),
 }
 
 pub type AtomPattern = Vec<Atom>;
@@ -332,15 +337,25 @@ impl Arm {
             atoms_grabbed: [AtomKey::null(); 6],
         }
     }
-    pub fn angles_between_arm(&self) -> Rot {
+    pub fn angles_between_arm(arm_type: ArmType) -> Rot {
         use ArmType::*;
-        match self.arm_type {
+        match arm_type {
             PlainArm => 6,
             DoubleArm => 3,
             TripleArm => 2,
             HexArm => 1,
             Piston => 6,
             VanBerlo => 1,
+        }
+    }
+    fn do_motion(&mut self, action: ArmMovement) {
+        use ArmMovement::*;
+        use Movement::*;
+        match action{
+            Move(Linear(p)) => self.pos += p,
+            Move(Rotation(r,_)) => self.rot += r,
+            LengthAdjust(a) => self.len += a,
+            Move(HeldStill) | Pivot(_) => {},
         }
     }
 }
@@ -439,9 +454,23 @@ pub struct SolutionStats {
 
 pub type XYPos = nalgebra::Point2<f32>;
 pub type XYVec = nalgebra::Vector2<f32>;
+pub struct FloatAtom{
+    pub pos: XYPos,
+    pub rot: f32,
+    pub atom_type: AtomType,
+    pub connections: [Bonds; 6],
+}
+pub struct FloatArm{
+    pub pos: XYPos,
+    pub rot: f32,
+    pub len: f32,
+    pub arm_type: ArmType,
+    pub grabbing: bool,
+}
 pub struct FloatWorld{//Might add arms, maybe some other animation stuff too
     pub portion: f32,
-    pub atoms_xy: Vec<(Atom, XYPos, f32)>,
+    pub atoms_xy: Vec<FloatAtom>,
+    pub arms_xy: Vec<FloatArm>
 }
 fn pos_to_xy(input: &Pos) -> XYPos{
     let a = input.x as f32;
@@ -450,6 +479,11 @@ fn pos_to_xy(input: &Pos) -> XYPos{
 }
 fn rot_to_angle(r: Rot) -> f32{
     (-r as f32)*PI/3.
+}
+fn xy_to_simple_pos(input: XYPos) -> Pos{
+    let b = input.y/f32::sqrt(3.);
+    let a = (input.x-b)/2.;
+    Pos::new(a.round() as i32, b.round() as i32)
 }
 //https://stackoverflow.com/questions/7705228/hexagonal-grids-how-do-you-find-which-hexagon-a-point-is-in/23370350#23370350
 fn xy_to_pos(input: XYPos) -> Pos{
@@ -462,22 +496,24 @@ fn xy_to_pos(input: XYPos) -> Pos{
     // opposite signs, so we are guaranteed to be inside hexagon (p,q)
     let base_hex = Pos::new(p as i32, q as i32);
     if lambda * mu < 0.0 {return base_hex;}
+    let distance = nalgebra::distance_squared(&pos_to_xy(&base_hex),&input);
+    // inside circle, so guaranteed inside hexagon (p,q)
+    if distance < 1. {return base_hex;}
 
     // same sign, but which end of the parallelogram are we?
-    let sign = if (lambda<0.) { -1. } else { 1. };
+    let sign = lambda.signum();
     let candidate = if ( lambda.abs() > mu.abs() ) {(p+sign,q)} else {(p,q+sign)};
     let candidate_hex = Pos::new(candidate.0 as i32, candidate.1 as i32);
-    let distance = nalgebra::distance_squared(&pos_to_xy(&base_hex),&input);
     let distance2 = nalgebra::distance_squared(&pos_to_xy(&candidate_hex),&input);
     if distance < distance2 {base_hex} else {candidate_hex}
 }
 impl FloatWorld{
-    fn generate(world: &World, portion: f32) -> Self{
+    fn generate(world: &World, arm_motion: &[ArmMovement], portion: f32) -> Self{
         //Requires atom pre-movement to be complete
-        let mut atoms_xy = Vec::new();
+        use Movement::*;
+        use ArmMovement::*;
         fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32){
             let xy = pos_to_xy(&base);
-            use Movement::*;
             match movement{
                 Linear(offset) => {
                     let offset_xy = pos_to_xy(&offset)-XYPos::origin();
@@ -492,15 +528,45 @@ impl FloatWorld{
                 HeldStill => {
                     return (xy, 0.)
                 }
-                Pivot(_) => panic!("Pivot in post-normalized movement"),
             }
         }
+        let mut atoms_xy = Vec::with_capacity(world.atoms.atom_map.len());
         for (atom_key, atom) in &world.atoms.atom_map{
-            let movement = world.atoms.moves.get(atom_key).unwrap_or(&Movement::HeldStill);
+            let movement = world.atoms.moves.get(atom_key).unwrap_or(&HeldStill);
             let (xy, angle) = apply_movement(atom.pos, *movement, portion);
-            atoms_xy.push((atom.clone(), xy, angle));
+            let f_atom = FloatAtom{
+                pos: xy,
+                rot: angle,
+                atom_type: atom.atom_type,
+                connections: atom.connections,
+            };
+            atoms_xy.push(f_atom);
         }
-        FloatWorld{ portion, atoms_xy }
+        let mut arms_xy = Vec::with_capacity(world.arms.len());
+        assert_eq!(arm_motion.len(), world.arms.len());
+        for a_index in 0..world.arms.len(){
+            let arm = &world.arms[a_index];
+            let mut arm_len = arm.len as f32;
+            let motion = arm_motion[a_index];
+            let new_motion = match motion{
+                Move(m) => m,
+                LengthAdjust(l) => {
+                    arm_len += (l as f32)*portion;
+                    HeldStill
+                },
+                Pivot(_) => HeldStill,
+            };
+            let (xy, angle) = apply_movement(arm.pos, new_motion, portion);
+            let new_arm = FloatArm{
+                pos: xy,
+                rot: angle+rot_to_angle(arm.rot),
+                len: arm_len*2.,
+                arm_type: arm.arm_type,
+                grabbing: arm.grabbing,
+            };
+            arms_xy.push(new_arm);
+        }
+        FloatWorld{ portion, atoms_xy, arms_xy }
     }
 }
 
@@ -510,19 +576,15 @@ impl World {
     fn premove_atoms(&mut self, atom_key: AtomKey, movement: Movement) -> Result<()> {
         let mut moving_atoms = VecDeque::<AtomKey>::new();
         moving_atoms.push_back(atom_key);
-        let normalized_movement = match movement{
-            Movement::Pivot(r) => Movement::Rotation(r, self.atoms.atom_map[atom_key].pos),
-            _ => movement
-        };
 
         while let Some(this_key) = moving_atoms.pop_front() {
             let maybe_move = self.atoms.moves.get(this_key);
             if let Some(curr_move) = maybe_move {
-                if curr_move != &normalized_movement {
+                if curr_move != &movement {
                     return Err(eyre!("Atom moved in multiple directions!"));
                 }
             } else {
-                self.atoms.moves.insert(this_key, normalized_movement);
+                self.atoms.moves.insert(this_key, movement);
                 let atom = &self.atoms.atom_map[this_key];
                 for dir in 0..6 {
                     if !(atom.connections[dir as usize] & Bonds::DYNAMIC_BOND).is_empty() {
@@ -556,7 +618,6 @@ impl World {
                     atom.rotate_connections(*r);
                 }
                 Movement::HeldStill => (),
-                Movement::Pivot(_) => bail!("Atom movement is pivot post-normalization!"),
             }
             let current = self.atoms.locs.insert(atom.pos, atom_key);
             if current != None {
@@ -566,35 +627,34 @@ impl World {
         Ok(())
     }
 
-    fn do_instruction(&mut self, arm_id: usize, timestep: u64) -> Result<()> {
-        let arm = self.arms.get_mut(arm_id).unwrap();
+    //Returns the movement the arm is going to do
+    fn do_instruction(&mut self, arm_id: usize, timestep: u64) -> Result<ArmMovement> {
+        let arm = &mut self.arms[arm_id];
         use ArmType::*;
         use Instr::*;
         use Movement::*;
+        use ArmMovement::*;
         let arm_type = arm.arm_type;
         let tape = &arm.instruction_tape;
         let timestep = timestep as usize;
         let instruction = tape.get(timestep, self.repeat_length);
+        const STILL: ArmMovement = Move(HeldStill);
         let action = match instruction {
             Extend => {
                 if arm_type == Piston && arm.len < 3 {
-                    arm.len += 1;
-                    Linear(rot_to_pos(arm.rot))
-                } else { HeldStill }
+                    LengthAdjust(1)
+                } else { STILL }
             }
             Retract => {
                 if arm_type == Piston && arm.len > 1 {
-                    arm.len -= 1;
-                    Linear(-rot_to_pos(arm.rot))
-                } else { HeldStill }
+                    LengthAdjust(-1)
+                } else { STILL }
             }
             RotateCounterClockwise => {
-                arm.rot += 1;
-                Rotation(1, arm.pos)
+                Move(Rotation(1, arm.pos))
             }
             RotateClockwise => {
-                arm.rot -= 1;
-                Rotation(-1, arm.pos)
+                Move(Rotation(-1, arm.pos))
             }
             PivotCounterClockwise => Pivot(1),
             PivotClockwise => Pivot(-1),
@@ -603,47 +663,51 @@ impl World {
                     arm.atoms_grabbed = [AtomKey::null(); 6];
                     arm.grabbing = false;
                 }
-                HeldStill
+                STILL
             }
             Grab => {
                 if !arm.grabbing && arm_type != VanBerlo {
                     arm.grabbing = true;
-                    for r in (0..6).step_by(arm.angles_between_arm() as usize) {
+                    for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
                         let grab_pos = arm.pos + (rot_to_pos(arm.rot + r) * arm.len);
                         let null_key = AtomKey::null();
                         let current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
                         arm.atoms_grabbed[r as usize] = *current;
                     }
                 }
-                HeldStill
+                STILL
             }
             Forward => {
                 let track_data = self.track_map.get(&arm.pos)
                     .ok_or(eyre!("Forward movement not on track"))?;
-                track_data.plus.map_or(HeldStill, |x| {
-                    arm.pos += x;
-                    Linear(x)
+                track_data.plus.map_or(STILL, |x| {
+                    Move(Linear(x))
                 })
             }
             Back => {
                 let track_data = self.track_map.get(&arm.pos)
                     .ok_or(eyre!("Backward movement not on track"))?;
-                track_data.minus.map_or(HeldStill, |x| {
-                    arm.pos += x;
-                    Linear(x)
+                track_data.minus.map_or(STILL, |x| {
+                    Move(Linear(x))
                 })
             }
             Repeat | Reset | Noop => {
                 panic!("Unprocessed instruction!");
             }
-            Empty => (HeldStill),
+            Empty => (STILL),
         };
+        let rotation_store = arm.rot;
         for atom in arm.atoms_grabbed {
             if !atom.is_null() {
-                self.premove_atoms(atom, action)?;
+                let atom_movement = match action{
+                    ArmMovement::Pivot(r) => Movement::Rotation(r, self.atoms.atom_map[atom].pos),
+                    ArmMovement::Move(m) => m,
+                    ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store)*a)
+                };
+                self.premove_atoms(atom, atom_movement)?;
             }
         }
-        Ok(())
+        Ok(action)
     }
 
     fn process_glyphs(&mut self) {
@@ -828,21 +892,38 @@ impl World {
         }
     }
 
-    fn mark_area(&mut self){
-        //atom radius = 29/41 or 1/sqrt(2)
-        let atom_radius:f32 = (29./41.)-0.5;
+
+    fn mark_area(&mut self, arm_movement: &[ArmMovement]){
+        fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos){
+            //atom radius = 29/41 or 1/sqrt(2)
+            const ATOM_RADIUS: f32 = 29./41.;
+            let primary = xy_to_simple_pos(point);
+            let candidates = [
+                Pos::new(primary.x, primary.y),
+                Pos::new(primary.x+1, primary.y),
+                Pos::new(primary.x-1, primary.y),
+                Pos::new(primary.x, primary.y+1),
+                Pos::new(primary.x, primary.y-1),
+                ];
+            for hex in candidates{
+                let distance = nalgebra::distance_squared(&pos_to_xy(&hex),&point);
+                if distance < (ATOM_RADIUS*2.).powf(2.){
+                    area_set.insert(hex);
+                }
+            }
+        }
         let step_count = 10;
         for step in 0..step_count{
             let portion = step as f32 / step_count as f32;
-            let progress = FloatWorld::generate(self, portion);
-            for (_, xy, _) in progress.atoms_xy{
-                let pos = xy_to_pos(xy);
-                self.area_touched.insert(pos);
-                for rot in 0..8{
-                    let angle = (rot as f32)/8.*PI*2.;
-                    let offset = nalgebra::Rotation2::new(angle)*XYVec::new(atom_radius,0.);
-                    let pos = xy_to_pos(xy+offset);
-                    self.area_touched.insert(pos);
+            let progress = FloatWorld::generate(self, arm_movement, portion);
+            for atom in progress.atoms_xy{
+                mark_point(&mut self.area_touched, atom.pos);
+            }
+            for arm in progress.arms_xy{
+                for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
+                    let angle = arm.rot+rot_to_angle(r);
+                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
+                    mark_point(&mut self.area_touched, arm.pos+offset);
                 }
             }
         }
@@ -850,12 +931,16 @@ impl World {
 
     //returns true if the solution is fully solved
     pub fn run_step(&mut self, mark_area: bool) -> Result<()> {
-        for a in 0..self.arms.len() {
-            self.do_instruction(a, self.timestep)?;
+        let mut arm_actions = Vec::with_capacity(self.arms.len());
+        for i in 0..self.arms.len() {
+            arm_actions.push(self.do_instruction(i, self.timestep)?);
         }
         self.process_glyphs();
         if mark_area{
-            self.mark_area();
+            self.mark_area(&arm_actions);
+        }
+        for i in 0..self.arms.len() {
+            self.arms[i].do_motion(arm_actions[i]);
         }
 
         self.move_atoms()?;
@@ -866,15 +951,19 @@ impl World {
     }
 
     pub fn partial_step(&self, portion: f32) -> Result<FloatWorld> {
+        let mut arm_actions = Vec::with_capacity(self.arms.len());
         if portion > 0.{
             let mut copy = self.clone();
             for a in 0..copy.arms.len() {
-                copy.do_instruction(a, copy.timestep)?;
+                arm_actions.push(copy.do_instruction(a, copy.timestep)?);
             }
             copy.process_glyphs();
-            Ok(FloatWorld::generate(&copy, portion))
+            Ok(FloatWorld::generate(&copy, &arm_actions, portion))
         } else {
-            Ok(FloatWorld::generate(&self, portion))
+            for _ in 0..self.arms.len() {
+                arm_actions.push(ArmMovement::Move(Movement::HeldStill));
+            }
+            Ok(FloatWorld::generate(&self, &arm_actions, portion))
         }
     }
 
