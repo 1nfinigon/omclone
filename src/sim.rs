@@ -893,10 +893,13 @@ impl World {
     }
 
 
-    fn mark_area(&mut self, arm_movement: &[ArmMovement]){
+    fn mark_area_and_collide(&mut self, arm_movement: &[ArmMovement]) -> Result<()>{
+        //atom radius = 29/41 or 1/sqrt(2)
+        const ATOM_RADIUS: f32 = 29./41.;
+        const ARM_RADIUS: f32 = 0.5;
+        const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
+        const ATOM_ARM_RADIUS_SQUARED: f32 = (ATOM_RADIUS+ARM_RADIUS)*(ATOM_RADIUS+ARM_RADIUS);
         fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos){
-            //atom radius = 29/41 or 1/sqrt(2)
-            const ATOM_RADIUS: f32 = 29./41.;
             let primary = xy_to_simple_pos(point);
             let candidates = [
                 Pos::new(primary.x, primary.y),
@@ -907,19 +910,53 @@ impl World {
                 ];
             for hex in candidates{
                 let distance = nalgebra::distance_squared(&pos_to_xy(&hex),&point);
-                if distance < (ATOM_RADIUS*2.).powf(2.){
+                if distance < ATOM_ATOM_RADIUS_SQUARED{
                     area_set.insert(hex);
                 }
             }
+        }
+        fn collide(atom_collisions: &mut FxHashMap<Pos, Vec<XYPos>>, point: XYPos, is_atom:bool) -> Result<()>{
+            let primary = xy_to_simple_pos(point);
+            let check_dist = if is_atom {ATOM_ATOM_RADIUS_SQUARED} else {ATOM_ARM_RADIUS_SQUARED};
+            let candidates = [
+                Pos::new(primary.x, primary.y),
+                Pos::new(primary.x+1, primary.y),
+                Pos::new(primary.x-1, primary.y),
+                Pos::new(primary.x, primary.y+1),
+                Pos::new(primary.x, primary.y-1),
+                Pos::new(primary.x-1, primary.y+1),
+                Pos::new(primary.x+1, primary.y-1),
+                ];
+            for check in candidates{
+                let possible_vec = atom_collisions.get(&check);
+                if let Some(atoms) = possible_vec{
+                    for atom_point in atoms{
+                        if nalgebra::distance_squared(atom_point,&point) < check_dist {
+                            if is_atom{
+                                bail!("atom-atom collision!");
+                            } else {
+                                bail!("atom-arm collision!");
+                            }
+                        }
+                    }
+                }
+            }
+            if is_atom {
+                atom_collisions.entry(primary).or_insert_with(Vec::new).push(point);
+            }
+            Ok(())
         }
         let step_count = 10;
         for step in 0..step_count{
             let portion = step as f32 / step_count as f32;
             let progress = FloatWorld::generate(self, arm_movement, portion);
+            let mut atom_collisions = FxHashMap::default();
             for atom in progress.atoms_xy{
                 mark_point(&mut self.area_touched, atom.pos);
+                collide(&mut atom_collisions, atom.pos, true)?;
             }
             for arm in progress.arms_xy{
+                collide(&mut atom_collisions, arm.pos, false)?;
                 for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
                     let angle = arm.rot+rot_to_angle(r);
                     let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
@@ -927,6 +964,7 @@ impl World {
                 }
             }
         }
+        Ok(())
     }
 
     //returns true if the solution is fully solved
@@ -937,7 +975,7 @@ impl World {
         }
         self.process_glyphs();
         if mark_area{
-            self.mark_area(&arm_actions);
+            self.mark_area_and_collide(&arm_actions)?;
         }
         for i in 0..self.arms.len() {
             self.arms[i].do_motion(arm_actions[i]);
