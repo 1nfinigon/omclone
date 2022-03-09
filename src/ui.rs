@@ -306,6 +306,7 @@ struct Loaded{
     track_binds: (Bindings, usize),
     solution: parser::FullSolution,
     message: Option<String>,
+    error_loc: Option<XYPos>,
     partial_timestep: f32,
     running_free: bool,
     show_area: bool,
@@ -496,16 +497,18 @@ impl EventHandler for MyMiniquadApp {
                 loaded.partial_timestep = 0.;
             }
             if loaded.last_timestep < target_step{
+                loaded.error_loc = None;
                 for time in loaded.last_timestep..target_step{
                     let output = loaded.last_world.run_step(loaded.show_area);
                     if let Err(output) = output{
                         loaded.message = Some(output.to_string());
+                        loaded.error_loc = Some(output.location);
                         loaded.last_world = loaded.base_world.clone();
                         for _ in 0..time{
                             loaded.last_world.run_step(loaded.show_area).unwrap();
                         }
                         loaded.curr_timestep = time;
-                        loaded.max_timestep = time;
+                        //loaded.max_timestep = time;
                         loaded.running_free = false;
                         break;
                     }
@@ -750,7 +753,7 @@ impl EventHandler for MyMiniquadApp {
                             ui.separator();
                             ui.label("Speed:");
                             ui.add(egui::DragValue::new(&mut loaded.run_speed)
-                                .clamp_range(0.01..=1.0).fixed_decimals(2).speed(0.01));
+                                .clamp_range(0.01..=1.0).fixed_decimals(2).speed(0.002));
                                 ui.checkbox(&mut loaded.running_free, "Run");
                         });
                         ui.horizontal(|ui| {
@@ -891,6 +894,7 @@ impl EventHandler for MyMiniquadApp {
                     tape_mode: false,
                     camera, track_binds, solution,
                     message: None,
+                    error_loc: None,
                     partial_timestep: 0.,
                     running_free: false,
                     show_area: true,

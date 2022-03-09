@@ -283,7 +283,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         for _ in 0..instruction_count {
             let instr_pos = parse_int(f)? as i32;
             let action = parse_byte(f)?;
-            instructions.push((instr_pos, Instr::from_byte(action)?));
+            instructions.push((instr_pos, Instr::from_byte(action).ok_or(eyre!("invalid instruction"))?));
         }
         let tracks = if part_type == PartType::TTrack {
             let track_count = parse_int(f)?;
@@ -421,7 +421,7 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
         let atom2 = *atom_locs
             .get(&to_pos)
             .ok_or(eyre!("bond2 to nonatom position"))?;
-        let rot = pos_to_rot(atoms[atom2].pos - atoms[atom1].pos)?;
+        let rot = pos_to_rot(atoms[atom2].pos - atoms[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
         atoms[atom1].connections[rot as usize] = bond_type;
         atoms[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
     }

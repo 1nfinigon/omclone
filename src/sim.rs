@@ -14,8 +14,23 @@ pub use nalgebra::Vector2;
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use std::collections::VecDeque;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::f32::consts::PI;
+use std::{f32::consts::PI,fmt,error};
 
+#[derive(Debug)]
+pub struct SimError{
+    pub error_str: &'static str,
+    pub location: XYPos,
+}
+impl fmt::Display for SimError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.error_str)
+    }
+}
+impl error::Error for SimError{}
+type SimResult<T> = std::result::Result<T,SimError>;
+fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
+    SimError{error_str, location: pos_to_xy(&location)}
+}
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
 
@@ -57,24 +72,24 @@ impl Instr {
             Empty                   => b' ',
         }
     }
-    pub fn from_byte(input: u8) -> Result<Self> {
+    pub fn from_byte(input: u8) -> Option<Self> {
         use Instr::*;
         match input {
-            b'R' => Ok(RotateClockwise),
-            b'r' => Ok(RotateCounterClockwise),
-            b'E' => Ok(Extend),
-            b'e' => Ok(Retract),
-            b'G' => Ok(Grab),
-            b'g' => Ok(Drop),
-            b'P' => Ok(PivotClockwise),
-            b'p' => Ok(PivotCounterClockwise),
-            b'A' => Ok(Forward),
-            b'a' => Ok(Back),
-            b'C' => Ok(Repeat),
-            b'X' => Ok(Reset),
-            b'O' => Ok(Noop),
-            b' ' => Ok(Empty),
-            _ => Err(eyre!("Illegal instruction byte")),
+            b'R' => Some(RotateClockwise),
+            b'r' => Some(RotateCounterClockwise),
+            b'E' => Some(Extend),
+            b'e' => Some(Retract),
+            b'G' => Some(Grab),
+            b'g' => Some(Drop),
+            b'P' => Some(PivotClockwise),
+            b'p' => Some(PivotCounterClockwise),
+            b'A' => Some(Forward),
+            b'a' => Some(Back),
+            b'C' => Some(Repeat),
+            b'X' => Some(Reset),
+            b'O' => Some(Noop),
+            b' ' => Some(Empty),
+            _ => None,
         }
     }
     pub fn to_char(&self) -> char {
@@ -157,15 +172,15 @@ pub fn normalize_dir(r: Rot) -> Rot {
     return r.rem_euclid(6);
 }
 
-pub fn pos_to_rot(input: Pos) -> Result<Rot> {
+pub fn pos_to_rot(input: Pos) -> Option<Rot> {
     match (input.x, input.y) {
-        ( 1, 0) => Ok(0),
-        ( 0, 1) => Ok(1),
-        (-1, 1) => Ok(2),
-        (-1, 0) => Ok(3),
-        ( 0,-1) => Ok(4),
-        ( 1,-1) => Ok(5),
-        _ => Err(eyre!("Invalid position converted to rotation: {}", input)),
+        ( 1, 0) => Some(0),
+        ( 0, 1) => Some(1),
+        (-1, 1) => Some(2),
+        (-1, 0) => Some(3),
+        ( 0,-1) => Some(4),
+        ( 1,-1) => Some(5),
+        _ => None,
     }
 }
 pub fn offset(n: i32, angle: Rot) -> Pos {
@@ -573,7 +588,7 @@ impl FloatWorld{
 //Running the world
 impl World {
     //sets up a move for the specified atom and all atoms connected to it
-    fn premove_atoms(&mut self, atom_key: AtomKey, movement: Movement) -> Result<()> {
+    fn premove_atoms(&mut self, atom_key: AtomKey, movement: Movement) -> SimResult<()> {
         let mut moving_atoms = VecDeque::<AtomKey>::new();
         moving_atoms.push_back(atom_key);
 
@@ -581,7 +596,8 @@ impl World {
             let maybe_move = self.atoms.moves.get(this_key);
             if let Some(curr_move) = maybe_move {
                 if curr_move != &movement {
-                    return Err(eyre!("Atom moved in multiple directions!"));
+                    let error_str = &"Atom moved in multiple directions!";
+                    return Err(sim_error_pos(error_str,self.atoms.atom_map[this_key].pos));
                 }
             } else {
                 self.atoms.moves.insert(this_key, movement);
@@ -599,7 +615,7 @@ impl World {
     }
 
     //Finalize atom movement
-    fn move_atoms(&mut self) -> Result<()> {
+    fn move_atoms(&mut self) -> SimResult<()> {
         //remove all grabbed atoms from the grid
         for (atom_key, _action) in self.atoms.moves.iter() {
             let atom = &mut self.atoms.atom_map[atom_key];
@@ -621,14 +637,15 @@ impl World {
             }
             let current = self.atoms.locs.insert(atom.pos, atom_key);
             if current != None {
-                bail!("Atom moved to position with another atom!");
+                let error_str = &"Atom moved in multiple directions!";
+                return Err(sim_error_pos(error_str,atom.pos));
             }
         }
         Ok(())
     }
 
     //Returns the movement the arm is going to do
-    fn do_instruction(&mut self, arm_id: usize, timestep: u64) -> Result<ArmMovement> {
+    fn do_instruction(&mut self, arm_id: usize, timestep: u64) -> SimResult<ArmMovement> {
         let arm = &mut self.arms[arm_id];
         use ArmType::*;
         use Instr::*;
@@ -679,14 +696,14 @@ impl World {
             }
             Forward => {
                 let track_data = self.track_map.get(&arm.pos)
-                    .ok_or(eyre!("Forward movement not on track"))?;
+                    .ok_or(sim_error_pos("Forward movement not on track", arm.pos))?;
                 track_data.plus.map_or(STILL, |x| {
                     Move(Linear(x))
                 })
             }
             Back => {
                 let track_data = self.track_map.get(&arm.pos)
-                    .ok_or(eyre!("Backward movement not on track"))?;
+                    .ok_or(sim_error_pos("Backward movement not on track", arm.pos))?;
                 track_data.minus.map_or(STILL, |x| {
                     Move(Linear(x))
                 })
@@ -893,32 +910,14 @@ impl World {
     }
 
 
-    fn mark_area_and_collide(&mut self, arm_movement: &[ArmMovement]) -> Result<()>{
+    fn mark_area_and_collide(&mut self, arm_movement: &[ArmMovement]) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
         const ATOM_RADIUS: f32 = 29./41.;
         const ARM_RADIUS: f32 = 0.5;
         const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
         const ATOM_ARM_RADIUS_SQUARED: f32 = (ATOM_RADIUS+ARM_RADIUS)*(ATOM_RADIUS+ARM_RADIUS);
-        fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos){
-            let primary = xy_to_simple_pos(point);
-            let candidates = [
-                Pos::new(primary.x, primary.y),
-                Pos::new(primary.x+1, primary.y),
-                Pos::new(primary.x-1, primary.y),
-                Pos::new(primary.x, primary.y+1),
-                Pos::new(primary.x, primary.y-1),
-                ];
-            for hex in candidates{
-                let distance = nalgebra::distance_squared(&pos_to_xy(&hex),&point);
-                if distance < ATOM_ATOM_RADIUS_SQUARED{
-                    area_set.insert(hex);
-                }
-            }
-        }
-        fn collide(atom_collisions: &mut FxHashMap<Pos, Vec<XYPos>>, point: XYPos, is_atom:bool) -> Result<()>{
-            let primary = xy_to_simple_pos(point);
-            let check_dist = if is_atom {ATOM_ATOM_RADIUS_SQUARED} else {ATOM_ARM_RADIUS_SQUARED};
-            let candidates = [
+        fn make_candidates(primary: Pos) -> [Pos;7]{
+            [
                 Pos::new(primary.x, primary.y),
                 Pos::new(primary.x+1, primary.y),
                 Pos::new(primary.x-1, primary.y),
@@ -926,17 +925,32 @@ impl World {
                 Pos::new(primary.x, primary.y-1),
                 Pos::new(primary.x-1, primary.y+1),
                 Pos::new(primary.x+1, primary.y-1),
-                ];
+            ]
+        }
+        fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos){
+            let primary = xy_to_simple_pos(point);
+            let candidates = make_candidates(primary);
+            for hex in candidates{
+                let distance = nalgebra::distance_squared(&pos_to_xy(&hex),&point);
+                if distance < ATOM_ATOM_RADIUS_SQUARED{
+                    area_set.insert(hex);
+                }
+            }
+        }
+        fn collide(atom_collisions: &mut FxHashMap<Pos, Vec<XYPos>>, point: XYPos, is_atom:bool) -> SimResult<()>{
+            let check_dist = if is_atom {ATOM_ATOM_RADIUS_SQUARED} else {ATOM_ARM_RADIUS_SQUARED};
+            let primary = xy_to_simple_pos(point);
+            let candidates = make_candidates(primary);
             for check in candidates{
                 let possible_vec = atom_collisions.get(&check);
                 if let Some(atoms) = possible_vec{
                     for atom_point in atoms{
                         if nalgebra::distance_squared(atom_point,&point) < check_dist {
-                            if is_atom{
-                                bail!("atom-atom collision!");
-                            } else {
-                                bail!("atom-arm collision!");
-                            }
+                            let error_str = 
+                                if is_atom {&"atom-atom collision!"} 
+                                else {&"atom-arm collision!"};
+                            let error_point = nalgebra::center(atom_point, &point);
+                            return Err(SimError{error_str, location:error_point});
                         }
                     }
                 }
@@ -946,7 +960,7 @@ impl World {
             }
             Ok(())
         }
-        let step_count = 10;
+        let step_count = 8;
         for step in 0..step_count{
             let portion = step as f32 / step_count as f32;
             let progress = FloatWorld::generate(self, arm_movement, portion);
@@ -968,7 +982,7 @@ impl World {
     }
 
     //returns true if the solution is fully solved
-    pub fn run_step(&mut self, mark_area: bool) -> Result<()> {
+    pub fn run_step(&mut self, mark_area: bool) -> SimResult<()> {
         let mut arm_actions = Vec::with_capacity(self.arms.len());
         for i in 0..self.arms.len() {
             arm_actions.push(self.do_instruction(i, self.timestep)?);
@@ -988,7 +1002,7 @@ impl World {
         Ok(())
     }
 
-    pub fn partial_step(&self, portion: f32) -> Result<FloatWorld> {
+    pub fn partial_step(&self, portion: f32) -> SimResult<FloatWorld> {
         let mut arm_actions = Vec::with_capacity(self.arms.len());
         if portion > 0.{
             let mut copy = self.clone();
@@ -1052,7 +1066,7 @@ impl World {
             let first = *track_pos.first().unwrap();
             let last = *track_pos.last().unwrap();
             let offset = first - last;
-            if pos_to_rot(offset).is_ok() {
+            if pos_to_rot(offset).is_some() {
                 track_map.get_mut(&g.reposition(first)).unwrap().minus = Some(-offset);
                 track_map.get_mut(&g.reposition(last)).unwrap().plus = Some(offset);
             }
