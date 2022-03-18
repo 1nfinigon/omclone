@@ -23,7 +23,13 @@ pub struct SimError{
 }
 impl fmt::Display for SimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.error_str)
+        let hex = xy_to_pos(self.location);
+        let hex_pos = pos_to_xy(&hex);
+        if nalgebra::distance_squared(&hex_pos,&self.location) < 0.1{
+            write!(f, "{} at {:?}", self.error_str,hex)
+        } else {
+            write!(f, "{} near {:?} (at {:?})", self.error_str,hex,self.location)
+        }
     }
 }
 impl error::Error for SimError{}
@@ -223,7 +229,6 @@ bitflags! {
         const TRIPLEX     =0b0000_1110;
         const DYNAMIC_BOND=0b0000_1111;
         const CONDUIT_BOND=0b0001_0000;
-        const BERLO_TYPE  =0b0010_0000;
     }
 }
 
@@ -260,6 +265,7 @@ pub struct Atom {
     pub pos: Pos,
     pub atom_type: AtomType,
     pub connections: [Bonds; 6],
+    pub is_berlo: bool,
 }
 impl Atom {
     pub fn new(pos: Pos, atom_type: AtomType) -> Atom {
@@ -267,6 +273,7 @@ impl Atom {
             pos,
             atom_type,
             connections: [Bonds::NO_BOND; 6],
+            is_berlo: false,
         }
     }
     pub fn rotate_connections(&mut self, r: Rot) {
@@ -688,7 +695,12 @@ impl World {
                     for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
                         let grab_pos = arm.pos + (rot_to_pos(arm.rot + r) * arm.len);
                         let null_key = AtomKey::null();
-                        let current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
+                        let mut current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
+                        if current != &null_key{
+                            if self.atoms.atom_map[*current].is_berlo{
+                                current = &null_key;
+                            }
+                        }
                         arm.atoms_grabbed[r as usize] = *current;
                     }
                 }
@@ -728,14 +740,30 @@ impl World {
     }
 
     fn process_glyphs(&mut self) {
-        fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos, bond_type: Bonds, bond_mask: Bonds ) {
+        fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
-                let bond1 = atoms.atom_map[key1].connections[rot];
-                assert_eq!(atoms.atom_map[key2].connections[(rot + 3) % 6], bond1, "Inconsistent bonds");
-                if (bond1 & !bond_mask).is_empty() {
-                    atoms.atom_map[key1].connections[rot] |= bond_type;
-                    atoms.atom_map[key2].connections[(rot + 3) % 6] |= bond_type;
+                let [atom1,atom2] = atoms.atom_map.get_disjoint_mut([key1,key2]).expect("Inconsistent atoms!");
+                if (atom1.is_berlo || atom2.is_berlo) {return;}
+                let bond1 = atom1.connections[rot];
+                assert_eq!(atom2.connections[(rot + 3) % 6], bond1, "Inconsistent bonds");
+                if bond1 == Bonds::NO_BOND {
+                    atom1.connections[rot] = Bonds::NORMAL;
+                    atom2.connections[(rot + 3) % 6] = Bonds::NORMAL;
+                }
+            }
+        }
+        fn try_triplex_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos, bond_type: Bonds ) {
+            let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
+            if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
+                let [atom1,atom2] = atoms.atom_map.get_disjoint_mut([key1,key2]).expect("Inconsistent atoms!");
+                if (atom1.is_berlo || atom2.is_berlo) {return;}
+                if (atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire) {return;}
+                let bond1 = atom1.connections[rot];
+                assert_eq!(atom2.connections[(rot + 3) % 6], bond1, "Inconsistent bonds");
+                if (bond1 & !Bonds::TRIPLEX).is_empty() {
+                    atom1.connections[rot] |= bond_type;
+                    atom2.connections[(rot + 3) % 6] |= bond_type;
                 }
             }
         }
@@ -848,17 +876,17 @@ impl World {
                     }
                 }
                 Bonding => {
-                    try_bond(atoms, &pos, &pos_bi, Bonds::NORMAL, Bonds::NORMAL);
+                    try_bond(atoms, &pos, &pos_bi);
                 }
                 MultiBond => {
-                    try_bond(atoms, &pos, &pos_bi, Bonds::NORMAL, Bonds::NORMAL);
-                    try_bond(atoms, &pos, &pos_multi2, Bonds::NORMAL, Bonds::NORMAL);
-                    try_bond(atoms, &pos, &pos_multi3, Bonds::NORMAL, Bonds::NORMAL);
+                    try_bond(atoms, &pos, &pos_bi);
+                    try_bond(atoms, &pos, &pos_multi2);
+                    try_bond(atoms, &pos, &pos_multi3);
                 }
                 TriplexBond => {
-                    try_bond(atoms, &pos, &pos_bi, Bonds::TRIPLEX_K, Bonds::TRIPLEX);
-                    try_bond(atoms, &pos, &pos_tri, Bonds::TRIPLEX_R, Bonds::TRIPLEX);
-                    try_bond(atoms, &pos_bi, &pos_tri, Bonds::TRIPLEX_Y, Bonds::TRIPLEX);
+                    try_triplex_bond(atoms, &pos, &pos_bi, Bonds::TRIPLEX_K);
+                    try_triplex_bond(atoms, &pos, &pos_tri, Bonds::TRIPLEX_R);
+                    try_triplex_bond(atoms, &pos_bi, &pos_tri, Bonds::TRIPLEX_Y);
                 }
                 Unbonding => {
                     if let (Some(&key1), Some(&key2)) = (atoms.locs.get(&pos), atoms.locs.get(&pos_bi)){
@@ -912,6 +940,7 @@ impl World {
 
     fn mark_area_and_collide(&mut self, arm_movement: &[ArmMovement]) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
+        use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
         const ARM_RADIUS: f32 = 0.5;
         const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
@@ -937,7 +966,7 @@ impl World {
                 }
             }
         }
-        fn collide(atom_collisions: &mut FxHashMap<Pos, Vec<XYPos>>, point: XYPos, is_atom:bool) -> SimResult<()>{
+        fn collide(atom_collisions: &mut FxHashMap<Pos, SmallVec<[XYPos;2]>>, point: XYPos, is_atom:bool) -> SimResult<()>{
             let check_dist = if is_atom {ATOM_ATOM_RADIUS_SQUARED} else {ATOM_ARM_RADIUS_SQUARED};
             let primary = xy_to_simple_pos(point);
             let candidates = make_candidates(primary);
@@ -956,7 +985,7 @@ impl World {
                 }
             }
             if is_atom {
-                atom_collisions.entry(primary).or_insert_with(Vec::new).push(point);
+                atom_collisions.entry(primary).or_insert_with(SmallVec::new).push(point);
             }
             Ok(())
         }
@@ -1120,12 +1149,18 @@ impl World {
                             .ok_or(eyre!("Forward movement not on track (preprocess)"))?;
                         arm.pos += track_data.plus.unwrap_or_default();
                         track_steps += 1;
+                        if arm.pos == original.pos{
+                            track_steps = 0;
+                        }
                     }
                     Back => {
                         let track_data = track_map.get(&arm.pos)
                             .ok_or(eyre!("Backward movement not on track (preprocess)"))?;
                         arm.pos += track_data.minus.unwrap_or_default();
                         track_steps -= 1;
+                        if arm.pos == original.pos{
+                            track_steps = 0;
+                        }
                     }
                     PivotCounterClockwise | PivotClockwise | Empty => {}
                     Reset | Repeat | Noop => {bail!("Instruction {:?} not basic move!",instr);}
@@ -1149,11 +1184,12 @@ impl World {
                         curr += 1;
                     } else {
                         for i in 0..rep_len {
-                            ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
-                                "Repeat instruction overlaps with {:?} on {}/{}/{}",
-                                instructions[curr + i],curr,last_repeat,i
-                            );
                             let copied_instr = instructions[last_repeat + i];
+                            ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
+                                "Repeat instruction {:?} overlaps with {:?} on {}/{}/{}",
+                                copied_instr, instructions[curr + i],
+                                curr,last_repeat,i
+                            );
                             instructions.push(copied_instr);
                             basic_move(copied_instr)?;
                         }
@@ -1164,8 +1200,9 @@ impl World {
                 Reset => {
                     let mut reset_vec = Vec::new();
                     if arm.grabbing {
-                        reset_vec.push(Drop)
-                    };
+                        reset_vec.push(Drop);
+                        arm.grabbing = false;
+                    }
                     while arm.len > original.len {
                         reset_vec.push(Retract);
                         arm.len -= 1;
@@ -1223,6 +1260,7 @@ impl World {
                         reset_vec.push(Forward);
                         track_steps += 1;
                     }
+                    arm.pos = original.pos;
                     while arm.len < original.len {
                         reset_vec.push(Extend);
                         arm.len += 1;
@@ -1234,10 +1272,11 @@ impl World {
                     for i in 0..reset_vec.len() {
                         ensure!(
                             i == 0 || old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
-                            "Reset instruction overlaps with {:?} on {}/{}",
-                            instructions[last_repeat + i],
+                            "Reset instruction {:?} overlaps with {:?} on {}/{} (curr {})",
+                            reset_vec[i],
+                            old_instructions.get(curr + i),
+                            i, reset_vec.len(),
                             curr,
-                            i
                         );
                         instructions.push(reset_vec[i]);
                     }
@@ -1306,7 +1345,7 @@ impl World {
                     let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
                     let atom_type = ATOM_SETUP[i];
                     let key = world.atoms.create_atom(Atom {
-                        pos, atom_type, connections: [Bonds::BERLO_TYPE; 6],
+                        pos, atom_type, connections: [Bonds::NO_BOND; 6], is_berlo: true
                     });
                     a.atoms_grabbed[i] = key;
                 }

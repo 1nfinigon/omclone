@@ -813,6 +813,7 @@ dependencies = [
  "rustc-hash",
  "simple-eyre",
  "slotmap",
+ "smallvec",
 ]
 
 [[package]]

@@ -389,8 +389,8 @@ pub struct FullPuzzle {
     pub puzzle_name: String,
     creator_id: u64,
     allowed_bitfield: AllowedParts,
-    inputs: Vec<AtomPattern>,
-    outputs: Vec<AtomPattern>,
+    pub inputs: Vec<AtomPattern>,
+    pub outputs: Vec<AtomPattern>,
     output_multiplier: i32,
     production: bool,
     //production data here
@@ -401,11 +401,7 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
     for i in 0..(parse_int(f)? as usize) {
         let atom_type = AtomType::from_u8(parse_byte(f)?).ok_or(eyre!("Illegal atom type"))?;
         let pos = parse_bytepos(f)?;
-        atoms.push(Atom {
-            pos,
-            atom_type,
-            connections: [Bonds::NO_BOND; 6],
-        });
+        atoms.push(Atom::new(pos, atom_type));
         let check = atom_locs.insert(pos, i);
         ensure!(check == None, "Multiple atoms in same location!");
     }
