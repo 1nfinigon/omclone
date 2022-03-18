@@ -1,5 +1,6 @@
 mod parser;
 mod sim;
+mod render_sim;
 mod ui;
 #[cfg(feature = "color_eyre")]
 use color_eyre::{install, eyre::Result};
