@@ -314,10 +314,11 @@ impl EventHandler for MyMiniquadApp {
                                 RunState::Manual(_) => (false, true),
                                 RunState::Crashed(_) => (false, false),
                             };
+                            let was_freerun = running_free;
                             ui.add_enabled_ui(enabled, |ui| ui.checkbox(&mut running_free, "Run"));
                             if running_free{
                                 loaded.run_state = RunState::FreeRun;
-                            } else {
+                            } else if was_freerun{
                                 loaded.try_set_target_time(loaded.curr_time.ceil() as usize);
                             }
                         });
@@ -372,7 +373,9 @@ impl EventHandler for MyMiniquadApp {
                                 }
                             });
                         }
-                        if let Some(target) = target_time {loaded.try_set_target_time(target);}
+                        if let Some(target) = target_time {
+                            loaded.try_set_target_time(target);
+                        }
                         if force_reload {
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));

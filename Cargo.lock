@@ -178,6 +178,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "copypasta"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -302,6 +312,17 @@ name = "emath"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55673de2eb96660dde25ba7b2d36a7054beead1a2bec74dcfd5eb05a1e1ba76d"
+
+[[package]]
+name = "enum-primitive-derive"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c375b9c5eadb68d0a6efee2999fef292f45854c3444c86f09d8ab086ba942b0e"
+dependencies = [
+ "num-traits",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "epaint"
@@ -698,17 +719,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "num-integer"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,17 +813,20 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "color-eyre",
+ "console_error_panic_hook",
  "egui",
  "egui-miniquad",
+ "enum-primitive-derive",
  "image",
  "miniquad",
  "nalgebra",
- "num-derive",
  "num-traits",
  "rustc-hash",
  "simple-eyre",
  "slotmap",
  "smallvec",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

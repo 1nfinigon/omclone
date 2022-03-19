@@ -2,18 +2,33 @@
 name = "omclone"
 version = "0.1.0"
 edition = "2021"
+default-run = "omclone"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["main_ui"]
 #choose one of the following
 benchmark = []
-main_ui = []
-cx_checker = []
+cx_checker = ["wasm-bindgen","web-sys","console_error_panic_hook"]
+main_ui = ["egui", "miniquad", "egui-miniquad", "image"]
+
+[[bin]]
+name="omclone"
+required-features = ["main_ui"]
+path = "src/main.rs"
+
+[[bin]]
+name="omclone_benchmark"
+required-features = ["benchmark"]
+path = "src/main.rs"
+
+[lib]
+name="omclone_cxchecker"
+crate-type = ["cdylib"]
+required-features = ["cx_checker"]
 
 [profile.dev]
 opt-level = 3
-
 [profile.dev.package."*"]
 opt-level = 3
 
@@ -22,14 +37,19 @@ slotmap = "1.0"
 bitflags = "1.3"
 nalgebra = "0.30"
 num-traits = "0.2"
-num-derive = "0.3"
+enum-primitive-derive = "0.2.2"
 rustc-hash = "1.1"
 smallvec = "1.8"
 
-egui = "0.16.0"
-miniquad = { version = "=0.3.0-alpha.43" }
-egui-miniquad = "0.8.0"
-image = "0.24.1"
+egui = {version = "0.16.0", optional = true}
+miniquad = { version = "=0.3.0-alpha.43", optional = true}
+egui-miniquad = {version = "0.8.0", optional = true}
+image = {version = "0.24.1", optional = true}
+
+
+wasm-bindgen = {version = "0.2.74", optional = true}
+web-sys = {version = "0.3.56", optional = true}
+console_error_panic_hook = { version = "0.1.6", optional = true }
 
 color-eyre = {version = "0.6", optional = true}
 simple-eyre = "0.3"

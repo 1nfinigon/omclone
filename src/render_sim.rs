@@ -453,14 +453,22 @@ impl RenderDataBase {
         ctx.apply_pipeline(&self.pipeline);
         ctx.apply_bindings(&self.shapes.bond_bindings);
         for f_atom in &float_world.atoms_xy {
-            let color = [1., 1., 1.];
+            let color_white = [1., 1., 1.];
+            let color_red = [1., 0., 0.];
             let offset = [f_atom.pos.x, f_atom.pos.y];
             for r in 0..6 {
                 let bond = f_atom.connections[r];
                 if bond == Bonds::NORMAL{
                     let angle = rot_to_angle(r as Rot)+f_atom.rot;
                     ctx.apply_uniforms(&BasicUniforms {
-                        color, offset, world_offset, angle, scale
+                        color:color_white, offset, world_offset, angle, scale
+                    });
+                    ctx.draw(0, 4, 1);
+                }
+                if !((bond & Bonds::TRIPLEX).is_empty()){
+                    let angle = rot_to_angle(r as Rot)+f_atom.rot;
+                    ctx.apply_uniforms(&BasicUniforms {
+                        color:color_red, offset, world_offset, angle, scale
                     });
                     ctx.draw(0, 4, 1);
                 }

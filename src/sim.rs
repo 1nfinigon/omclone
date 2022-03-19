@@ -40,23 +40,23 @@ fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, num_derive::FromPrimitive, num_derive::ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, enum_primitive_derive::Primitive)]
 #[repr(u8)]
 pub enum Instr {
-    RotateClockwise,
-    RotateCounterClockwise,
-    Extend,
-    Retract,
-    Grab,
-    Drop,
-    PivotClockwise,
-    PivotCounterClockwise,
-    Forward,
-    Back,
-    Repeat,
-    Reset,
-    Noop,
-    Empty,
+    RotateClockwise        = 01,
+    RotateCounterClockwise = 02,
+    Extend                 = 03,
+    Retract                = 04,
+    Grab                   = 05,
+    Drop                   = 06,
+    PivotClockwise         = 07,
+    PivotCounterClockwise  = 08,
+    Forward                = 09,
+    Back                   = 10,
+    Repeat                 = 11,
+    Reset                  = 12,
+    Noop                   = 13,
+    Empty                  = 14,
 }
 impl Instr {
     pub fn to_byte(&self) -> u8 {
@@ -232,13 +232,13 @@ bitflags! {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, num_derive::FromPrimitive, num_derive::ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, enum_primitive_derive::Primitive)]
 #[repr(u8)]
 pub enum AtomType {
     ConduitSpace = 0,
-    Salt, Air, Earth, Fire, Water,
-    Quicksilver, Gold, Silver, Copper, Iron, Tin, Lead,
-    Vitae, Mors, RepeatingOutputMarker, Quintessence,
+    Salt=1, Air=2, Earth=3, Fire=4, Water=5,
+    Quicksilver=6, Gold=7, Silver=8, Copper=9, Iron=10, Tin=11, Lead=12,
+    Vitae=13, Mors=14, RepeatingOutputMarker=15, Quintessence=16,
 }
 impl AtomType {
     pub fn is_element(&self) -> bool {
@@ -561,7 +561,6 @@ impl FloatWorld{
                 }
             }
         }
-        let mut atoms_xy = &mut self.atoms_xy;
         for (atom_key, atom) in &world.atoms.atom_map{
             let movement = motion.atoms.get(atom_key).unwrap_or(&HeldStill);
             let (xy, angle) = apply_movement(atom.pos, *movement, portion);
@@ -571,9 +570,8 @@ impl FloatWorld{
                 atom_type: atom.atom_type,
                 connections: atom.connections,
             };
-            atoms_xy.push(f_atom);
+            self.atoms_xy.push(f_atom);
         }
-        let mut arms_xy = &mut self.arms_xy;
         assert_eq!(motion.arms.len(), world.arms.len());
         for a_index in 0..world.arms.len(){
             let arm = &world.arms[a_index];
@@ -595,7 +593,7 @@ impl FloatWorld{
                 arm_type: arm.arm_type,
                 grabbing: arm.grabbing,
             };
-            arms_xy.push(new_arm);
+            self.arms_xy.push(new_arm);
         }
     }
 }
@@ -1051,8 +1049,8 @@ impl World {
                 }
             }
         }
-        let fixedRadius = f64::powf(2.,max_radius.log2().round());
-        fixedRadius as usize
+        let fixed_radius = f64::powf(2.,max_radius.log2().round());
+        fixed_radius as usize
     }
     pub fn finalize_step(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
