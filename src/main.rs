@@ -34,10 +34,11 @@ fn main() -> Result<()> {
     }
     let stats = world.get_stats();
     println!("Complete! {:?}", stats);*/
+    let mut float_world = sim::FloatWorld::new();
+    let mut motions = sim::WorldStepInfo::new();
 	loop {
-		world.run_step()?;
+        world.run_step(true, &mut motions, &mut float_world)?;
     }
-    Ok(())
 }
 
 #[cfg(feature = "main_ui")]
@@ -79,6 +80,8 @@ fn main() -> Result<()> {
 
     let mut any_failures = false;
     let mut slowest = 0;
+    let mut float_world = sim::FloatWorld::new();
+    let mut motions = sim::WorldStepInfo::new();
     'variants: for variant in 0..64{
         let mut input_arr = [false;6];
         for idx in 0..6{
@@ -130,7 +133,7 @@ fn main() -> Result<()> {
         let mut world = sim::World::setup_sim(&init)?;
 
         while !world.is_complete() {
-            if let Err(error_out) = world.run_step(true){
+            if let Err(error_out) = world.run_step(true, &mut motions, &mut float_world){
                 any_failures = true;
                 println!("Step {} error: {}", world.timestep, error_out);
                 break 'variants;

@@ -33,7 +33,7 @@ impl fmt::Display for SimError {
     }
 }
 impl error::Error for SimError{}
-type SimResult<T> = std::result::Result<T,SimError>;
+pub type SimResult<T> = std::result::Result<T,SimError>;
 fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
     SimError{error_str, location: pos_to_xy(&location)}
 }
@@ -406,27 +406,17 @@ pub struct World {
     pub cost: i32,
     pub instruction_count: i32,
 }
-/*impl std::fmt::Display for World {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let arm_data: Vec<(Pos, Rot, bool)> = self.arms.iter().map(|a| (a.pos, a.rot, a.grabbing)).collect();
-        let atom_data: Vec<(Pos, AtomType)> = self.atoms.atom_map.iter().map(|(_, a)| (a.pos, a.atom_type)).collect();
-        write!(f, "{:?} || {:?}", arm_data, atom_data)
-    }
-}*/
-
 new_key_type! { pub struct AtomKey; }
 #[derive(Debug, Clone)]
 pub struct WorldAtoms {
     pub atom_map: SlotMap<AtomKey, Atom>,
     pub locs: FxHashMap<Pos, AtomKey>,
-    pub moves: SecondaryMap<AtomKey, Movement>,
 }
 impl WorldAtoms {
     fn new() -> WorldAtoms {
         WorldAtoms {
             atom_map: SlotMap::with_key(),
             locs: Default::default(),
-            moves: SecondaryMap::new(),
         }
     }
     fn get_atom_mut(&mut self, loc: Pos) -> Option<&mut Atom> {
@@ -437,22 +427,18 @@ impl WorldAtoms {
         let &key = self.locs.get(&loc)?;
         Some(self.atom_map.get(key)?.atom_type)
     }
-    fn get_consumable_type(&self, loc: Pos) -> Option<AtomType> {
+    fn get_consumable_type(&self, motion: &WorldStepInfo, loc: Pos) -> Option<AtomType> {
         let &key = self.locs.get(&loc)?;
-        if self.moves.get(key) != None {
+        if motion.atoms.contains_key(key) {
             return None;
         }
         Some(self.atom_map.get(key)?.atom_type)
     }
 
+    //Note: only use on non-grabbed atoms!
     fn destroy_atom_at(&mut self, loc: Pos) {
         let atom_key = self.locs.remove(&loc).expect("Destroying nonatom!");
-        if self.moves.remove(atom_key) != None {
-            panic!("Destroying atom that is still held!");
-        }
-        let atom = self
-            .atom_map
-            .remove(atom_key)
+        let atom = self.atom_map.remove(atom_key)
             .expect("Inconsistent atoms (destroy)!");
         if atom.pos != loc {
             panic!("Inconsistent atoms (destroy loc)!");
@@ -463,6 +449,20 @@ impl WorldAtoms {
         let atom_ref = &self.atom_map[key];
         self.locs.insert(atom_ref.pos, key);
         key
+    }
+}
+
+pub struct WorldStepInfo{
+    pub atoms: SecondaryMap<AtomKey, Movement>,
+    pub arms: Vec<ArmMovement>,
+}
+impl WorldStepInfo{
+    pub fn new() -> Self{
+        WorldStepInfo{atoms: SecondaryMap::new(),arms: Vec::new()}
+    }
+    pub fn clear(&mut self) {
+        self.atoms.clear();
+        self.arms.clear();
     }
 }
 
@@ -530,8 +530,17 @@ fn xy_to_pos(input: XYPos) -> Pos{
     if distance < distance2 {base_hex} else {candidate_hex}
 }
 impl FloatWorld{
-    fn generate(world: &World, arm_motion: &[ArmMovement], portion: f32) -> Self{
-        //Requires atom pre-movement to be complete
+    pub fn new() -> Self{
+        FloatWorld{
+            portion: 0.,
+            atoms_xy: Vec::new(),
+            arms_xy: Vec::new(),
+        }
+    }
+    pub fn regenerate(&mut self, world: &World, motion: &WorldStepInfo, portion: f32) {
+        self.arms_xy.clear();
+        self.atoms_xy.clear();
+        self.portion = portion;
         use Movement::*;
         use ArmMovement::*;
         fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32){
@@ -552,9 +561,9 @@ impl FloatWorld{
                 }
             }
         }
-        let mut atoms_xy = Vec::with_capacity(world.atoms.atom_map.len());
+        let mut atoms_xy = &mut self.atoms_xy;
         for (atom_key, atom) in &world.atoms.atom_map{
-            let movement = world.atoms.moves.get(atom_key).unwrap_or(&HeldStill);
+            let movement = motion.atoms.get(atom_key).unwrap_or(&HeldStill);
             let (xy, angle) = apply_movement(atom.pos, *movement, portion);
             let f_atom = FloatAtom{
                 pos: xy,
@@ -564,12 +573,12 @@ impl FloatWorld{
             };
             atoms_xy.push(f_atom);
         }
-        let mut arms_xy = Vec::with_capacity(world.arms.len());
-        assert_eq!(arm_motion.len(), world.arms.len());
+        let mut arms_xy = &mut self.arms_xy;
+        assert_eq!(motion.arms.len(), world.arms.len());
         for a_index in 0..world.arms.len(){
             let arm = &world.arms[a_index];
             let mut arm_len = arm.len as f32;
-            let motion = arm_motion[a_index];
+            let motion = motion.arms[a_index];
             let new_motion = match motion{
                 Move(m) => m,
                 LengthAdjust(l) => {
@@ -588,26 +597,25 @@ impl FloatWorld{
             };
             arms_xy.push(new_arm);
         }
-        FloatWorld{ portion, atoms_xy, arms_xy }
     }
 }
 
 //Running the world
 impl World {
     //sets up a move for the specified atom and all atoms connected to it
-    fn premove_atoms(&mut self, atom_key: AtomKey, movement: Movement) -> SimResult<()> {
+    fn premove_atoms(&self, motion: &mut WorldStepInfo, atom_key: AtomKey, movement: Movement) -> SimResult<()> {
         let mut moving_atoms = VecDeque::<AtomKey>::new();
         moving_atoms.push_back(atom_key);
 
         while let Some(this_key) = moving_atoms.pop_front() {
-            let maybe_move = self.atoms.moves.get(this_key);
+            let maybe_move = motion.atoms.get(this_key);
             if let Some(curr_move) = maybe_move {
                 if curr_move != &movement {
                     let error_str = &"Atom moved in multiple directions!";
                     return Err(sim_error_pos(error_str,self.atoms.atom_map[this_key].pos));
                 }
             } else {
-                self.atoms.moves.insert(this_key, movement);
+                motion.atoms.insert(this_key, movement);
                 let atom = &self.atoms.atom_map[this_key];
                 for dir in 0..6 {
                     if !(atom.connections[dir as usize] & Bonds::DYNAMIC_BOND).is_empty() {
@@ -622,9 +630,12 @@ impl World {
     }
 
     //Finalize atom movement
-    fn move_atoms(&mut self) -> SimResult<()> {
+    fn apply_motion(&mut self, motion: &WorldStepInfo,) -> SimResult<()> {
+        for i in 0..self.arms.len() {
+            self.arms[i].do_motion(motion.arms[i]);
+        }
         //remove all grabbed atoms from the grid
-        for (atom_key, _action) in self.atoms.moves.iter() {
+        for (atom_key, _action) in motion.atoms.iter() {
             let atom = &mut self.atoms.atom_map[atom_key];
             let loc_check = self.atoms.locs.remove(&atom.pos);
             if loc_check != Some(atom_key) {
@@ -632,7 +643,7 @@ impl World {
             }
         }
         //add them back in at their new locations
-        for (atom_key, action) in self.atoms.moves.iter() {
+        for (atom_key, action) in motion.atoms.iter() {
             let atom = &mut self.atoms.atom_map[atom_key];
             match action {
                 Movement::Linear(p) => atom.pos += p,
@@ -651,8 +662,9 @@ impl World {
         Ok(())
     }
 
-    //Returns the movement the arm is going to do
-    fn do_instruction(&mut self, arm_id: usize, timestep: u64) -> SimResult<ArmMovement> {
+    //Returns the movement the arm is going to do. Returns size of the largest molecule rotated
+    fn do_instruction(&mut self, motion: &mut WorldStepInfo, arm_id: usize, timestep: u64) -> SimResult<()>{
+        assert_eq!(motion.arms.len(), arm_id, "Arm motion array not same as arm ID");
         let arm = &mut self.arms[arm_id];
         use ArmType::*;
         use Instr::*;
@@ -733,13 +745,14 @@ impl World {
                     ArmMovement::Move(m) => m,
                     ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store)*a)
                 };
-                self.premove_atoms(atom, atom_movement)?;
+                self.premove_atoms(motion, atom, atom_movement)?;
             }
         }
-        Ok(action)
+        motion.arms.push(action);
+        Ok(())
     }
 
-    fn process_glyphs(&mut self) {
+    fn process_glyphs(&mut self, motion: &WorldStepInfo) {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
@@ -798,8 +811,8 @@ impl World {
                     }
                 }
                 Animismus => {
-                    let a1 = atoms.get_consumable_type(pos);
-                    let a2 = atoms.get_consumable_type(pos_bi);
+                    let a1 = atoms.get_consumable_type(motion, pos);
+                    let a2 = atoms.get_consumable_type(motion, pos_bi);
                     let o1 = atoms.get_type(pos_tri);
                     let o2 = atoms.get_type(pos_ani);
                     if (Some(Salt),Some(Salt),None,None) == (a1,a2,o1,o2){
@@ -810,7 +823,7 @@ impl World {
                     }
                 }
                 Projection => {
-                    let qs = atoms.get_consumable_type(pos);
+                    let qs = atoms.get_consumable_type(motion, pos);
                     let metal = atoms.get_type(pos_bi);
                     if let (Some(Quicksilver), Some(metal)) = (qs, metal){
                         if let Some(newtype) = metal.promotable_metal(){
@@ -820,7 +833,7 @@ impl World {
                     }
                 }
                 Dispersion => {
-                    let q = atoms.get_consumable_type(pos);
+                    let q = atoms.get_consumable_type(motion, pos);
                     let o1 = atoms.get_type(pos_bi);
                     let o2 = atoms.get_type(pos_disp2);
                     let o3 = atoms.get_type(pos_disp3);
@@ -835,10 +848,10 @@ impl World {
                 }
                 Unification => {
                     let output = atoms.get_type(pos);
-                    let a1 = atoms.get_consumable_type(pos_tri);
-                    let a2 = atoms.get_consumable_type(pos_unif2);
-                    let a3 = atoms.get_consumable_type(pos_unif3);
-                    let a4 = atoms.get_consumable_type(pos_unif4);
+                    let a1 = atoms.get_consumable_type(motion, pos_tri);
+                    let a2 = atoms.get_consumable_type(motion, pos_unif2);
+                    let a3 = atoms.get_consumable_type(motion, pos_unif3);
+                    let a4 = atoms.get_consumable_type(motion, pos_unif4);
                     if let (None,Some(a),Some(b),Some(c),Some(d)) = (output, a1, a2, a3, a4){
                         let set = [a,b,c,d];
                         if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air){
@@ -851,8 +864,8 @@ impl World {
                     }
                 }
                 Purification => {
-                    let a1 = atoms.get_consumable_type(pos);
-                    let a2 = atoms.get_consumable_type(pos_bi);
+                    let a1 = atoms.get_consumable_type(motion, pos);
+                    let a2 = atoms.get_consumable_type(motion, pos_bi);
                     let o = atoms.get_type(pos_tri);
                     match (a1,a2,o){
                         (Some(a1),Some(a2),None) if a1 == a2 => {
@@ -909,7 +922,7 @@ impl World {
                     let full_match = atom_drop_points.iter().all( |a|-> bool {
                             let try_key = atoms.locs.get(&a.pos);
                             if let Some(&atom_key) = try_key{
-                                &atoms.atom_map[atom_key] == a && atoms.moves.get(atom_key) == None
+                                &atoms.atom_map[atom_key] == a && !motion.atoms.contains_key(atom_key)
                             } else {false}
                         });
                     if full_match {
@@ -924,7 +937,7 @@ impl World {
                 Disposal => {
                     if let Some(&atom_key) = atoms.locs.get(&pos){
                         if atoms.atom_map[atom_key].connections == [Bonds::NO_BOND;6]
-                        && !atoms.moves.contains_key(atom_key) {
+                        && !motion.atoms.contains_key(atom_key) {
                             atoms.destroy_atom_at(pos);
                         }
                     }
@@ -938,7 +951,7 @@ impl World {
     }
 
 
-    fn mark_area_and_collide(&mut self, arm_movement: &[ArmMovement]) -> SimResult<()>{
+    pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
         use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
@@ -989,63 +1002,63 @@ impl World {
             }
             Ok(())
         }
-        let step_count = 8;
-        for step in 0..step_count{
-            let portion = step as f32 / step_count as f32;
-            let progress = FloatWorld::generate(self, arm_movement, portion);
-            let mut atom_collisions = FxHashMap::default();
-            for atom in progress.atoms_xy{
-                mark_point(&mut self.area_touched, atom.pos);
-                collide(&mut atom_collisions, atom.pos, true)?;
+        let mut atom_collisions = FxHashMap::default();
+        for atom in &float_world.atoms_xy{
+            mark_point(&mut self.area_touched, atom.pos);
+            collide(&mut atom_collisions, atom.pos, true)?;
+        }
+        for arm in &float_world.arms_xy{
+            collide(&mut atom_collisions, arm.pos, false)?;
+            for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
+                let angle = arm.rot+rot_to_angle(r);
+                let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
+                mark_point(&mut self.area_touched, arm.pos+offset);
             }
-            for arm in progress.arms_xy{
-                collide(&mut atom_collisions, arm.pos, false)?;
-                for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
-                    let angle = arm.rot+rot_to_angle(r);
-                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
-                    mark_point(&mut self.area_touched, arm.pos+offset);
+        }
+        Ok(())
+    }
+
+    pub fn run_step(&mut self, mark_area: bool, motion: &mut WorldStepInfo, float_world: &mut FloatWorld) -> SimResult<()> {
+        self.prepare_step(motion)?;
+        let substep_count = self.substep_count(motion);
+        if mark_area{
+            for substep in 0..substep_count{
+                let portion = substep as f32 / substep_count as f32;
+                float_world.regenerate(self, motion, portion);
+                self.mark_area_and_collide(float_world)?;
+            }
+        }
+        self.finalize_step(motion)?;
+        Ok(())
+    }
+    //returns the step size to be used for this timestep
+    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
+        motion.clear();
+        for i in 0..self.arms.len() {
+            self.do_instruction(motion, i, self.timestep)?;
+        }
+        self.process_glyphs(motion);
+        Ok(())
+    }
+    pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{
+        let mut max_radius:f64 = 8.; //This corresponds to minimum step count of 8
+        for (atom_key, movement) in &motion.atoms{
+            if let Movement::Rotation(_rot, center) = movement{
+                let atom_pos = self.atoms.atom_map[atom_key].pos;
+                let distance = nalgebra::distance(&pos_to_xy(&atom_pos),&pos_to_xy(&center)) as f64;
+                if max_radius < distance {
+                    max_radius = distance;
                 }
             }
         }
-        Ok(())
+        let fixedRadius = f64::powf(2.,max_radius.log2().round());
+        fixedRadius as usize
     }
-
-    //returns true if the solution is fully solved
-    pub fn run_step(&mut self, mark_area: bool) -> SimResult<()> {
-        let mut arm_actions = Vec::with_capacity(self.arms.len());
-        for i in 0..self.arms.len() {
-            arm_actions.push(self.do_instruction(i, self.timestep)?);
-        }
-        self.process_glyphs();
-        if mark_area{
-            self.mark_area_and_collide(&arm_actions)?;
-        }
-        for i in 0..self.arms.len() {
-            self.arms[i].do_motion(arm_actions[i]);
-        }
-
-        self.move_atoms()?;
-        self.process_glyphs();
-        self.atoms.moves.clear();
+    pub fn finalize_step(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
+        self.apply_motion(motion)?;
+        self.process_glyphs(motion);
         self.timestep += 1;
         Ok(())
-    }
-
-    pub fn partial_step(&self, portion: f32) -> SimResult<FloatWorld> {
-        let mut arm_actions = Vec::with_capacity(self.arms.len());
-        if portion > 0.{
-            let mut copy = self.clone();
-            for a in 0..copy.arms.len() {
-                arm_actions.push(copy.do_instruction(a, copy.timestep)?);
-            }
-            copy.process_glyphs();
-            Ok(FloatWorld::generate(&copy, &arm_actions, portion))
-        } else {
-            for _ in 0..self.arms.len() {
-                arm_actions.push(ArmMovement::Move(Movement::HeldStill));
-            }
-            Ok(FloatWorld::generate(&self, &arm_actions, portion))
-        }
     }
 
     pub fn is_complete(&self) -> bool{
@@ -1351,7 +1364,14 @@ impl World {
                 }
             }
         }
-        world.process_glyphs();
+        
+        for glyph in &mut world.glyphs {
+            if let GlyphType::Input(atom_spawn_points) = &glyph.glyph_type {
+                for a in atom_spawn_points{
+                    world.atoms.create_atom(a.clone());
+                }
+            }
+        }
         Ok(world)
     }
     pub fn get_stats(&self) -> SolutionStats {
