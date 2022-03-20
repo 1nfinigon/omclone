@@ -951,6 +951,9 @@ impl World {
 
     pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
+        //spawning atom = 15/41
+        //arm base = 20/41
+        //grabber, cabinet = 24/41, 20/41
         use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
         const ARM_RADIUS: f32 = 0.5;

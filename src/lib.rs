@@ -6,7 +6,8 @@ mod sim;
 #[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 extern "C" {
-    fn alert(s: &str);
+    fn add_text(s: &str);
+    fn add_square(white: bool);
 }
 
 #[cfg(feature = "cx_checker")]
@@ -23,7 +24,7 @@ pub fn evaluate_solution(solution: &[u8]){
     //But are differently ordered, so do it via checking the positions?
     let mut reader = solution;
     let sol = parser::parse_solution(&mut reader).unwrap();
-    alert(&format!("solution: {}",sol.solution_name));
+    add_text(&format!("solution: {}",sol.solution_name));
 
     let mut any_failures = false;
     let mut slowest = 0;
@@ -70,20 +71,23 @@ pub fn evaluate_solution(solution: &[u8]){
         while !world.is_complete() {
             if let Err(error_out) = world.run_step(true, &mut motions, &mut float_world){
                 any_failures = true;
-                alert(&format!("Step {} error: {}", world.timestep, error_out));
-                break 'variants;
+                add_square(false);
+                add_text(&format!("Step {} error: {}", world.timestep, error_out));
+                continue 'variants;
             }
             if world.timestep > 10_000_000{
                 any_failures = true;
-                alert(&format!("Over 10 million steps simmed, assuming failure"));
-                break 'variants;
+                add_square(false);
+                add_text(&format!("Over 10 million steps simmed, assuming failure"));
+                continue 'variants;
             }
         }
+        add_square(true);
         if world.timestep > slowest{
             slowest = world.timestep;
         }
     }
     if !any_failures{
-        alert(&format!("All good! Slowest solve: {}",slowest));
+        add_text(&format!("All good! Slowest solve: {}",slowest));
     }
 }

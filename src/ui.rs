@@ -208,7 +208,11 @@ impl EventHandler for MyMiniquadApp {
             let mut now_time = (loaded.last_world.timestep as f64)+(loaded.curr_substep as f64 / loaded.substep_count as f64);
             let mut advance = |now_time: &mut f64, substep_count: &mut usize, substep_time: &mut f64| -> SimResult<()>{
                 if loaded.curr_substep == 0{
-                    loaded.last_world.prepare_step(&mut loaded.saved_motions)?;
+                    let failcheck = loaded.last_world.prepare_step(&mut loaded.saved_motions);
+                    if let Err(_) = failcheck{
+                        loaded.saved_motions.clear();
+                        return failcheck;
+                    }
                     *substep_count = loaded.last_world.substep_count(&loaded.saved_motions);
                     *substep_time = 1.0/(*substep_count as f64);
                 }
@@ -453,7 +457,7 @@ impl EventHandler for MyMiniquadApp {
                         println!("Initial sim step {:03}", test_world.timestep);
                     }
                 }
-                
+                saved_motions.clear();
                 let camera = CameraSetup::frame_center(&test_world);
                 let tracks = setup_tracks(ctx, &test_world.track_map);
                 let new_loaded = Loaded{
