@@ -1200,8 +1200,8 @@ impl World {
                         for i in 0..rep_len {
                             let copied_instr = instructions[last_repeat + i];
                             ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
-                                "Repeat instruction {:?} overlaps with {:?} on {}/{}/{}",
-                                copied_instr, instructions[curr + i],
+                                "Repeat instruction {:?} overlaps on {}/{}/{}",
+                                copied_instr,
                                 curr,last_repeat,i
                             );
                             instructions.push(copied_instr);
