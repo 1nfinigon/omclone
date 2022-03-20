@@ -1129,11 +1129,17 @@ impl World {
         let arm_type = arm.arm_type;
         let old_instructions = &original.instruction_tape.instructions;
         let mut instructions = Vec::with_capacity(old_instructions.len() + 8);
-        let mut last_repeat = 0;
+        let mut repeat_source = 0;
+        let mut repeat_ending = 0;
+        let mut any_nonrepeat = false;
         let mut curr = 0;
         let mut track_steps = 0;
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
+            if !any_nonrepeat && !matches!(instr, Repeat | Empty | Noop){
+                any_nonrepeat = true;
+                repeat_source = curr;
+            }
             if !matches!(instr, Repeat | Reset | Noop) {
                 instructions.push(instr);
                 curr += 1;
@@ -1186,29 +1192,30 @@ impl World {
                 RotateCounterClockwise|RotateClockwise|
                 Grab|Drop|
                 Forward|Back|
-                PivotCounterClockwise|PivotClockwise|
-                Empty => {
+                PivotCounterClockwise|PivotClockwise => {
                     basic_move(instr)?;
+                    repeat_ending = curr;
                 }
+                Empty => {}
 
                 Repeat => {
-                    let rep_len = curr - last_repeat;
+                    let rep_len = repeat_ending - repeat_source;
                     if rep_len == 0 {
                         instructions.push(Empty);
                         curr += 1;
                     } else {
                         for i in 0..rep_len {
-                            let copied_instr = instructions[last_repeat + i];
+                            let copied_instr = instructions[repeat_source + i];
                             ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
                                 "Repeat instruction {:?} overlaps on {}/{}/{}",
                                 copied_instr,
-                                curr,last_repeat,i
+                                curr,repeat_source,i
                             );
                             instructions.push(copied_instr);
                             basic_move(copied_instr)?;
                         }
-                        last_repeat = curr;
                         curr += rep_len;
+                        any_nonrepeat = false;
                     }
                 }
                 Reset => {
@@ -1295,6 +1302,7 @@ impl World {
                         instructions.push(reset_vec[i]);
                     }
                     curr += reset_vec.len();
+                    repeat_ending = curr;
                 }
                 Noop => {
                     instructions.push(Empty);
