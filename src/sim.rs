@@ -956,7 +956,7 @@ impl World {
         //grabber, cabinet = 24/41, 20/41
         use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
-        const ARM_RADIUS: f32 = 0.5;
+        const ARM_RADIUS: f32 = 20./41.;
         const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
         const ATOM_ARM_RADIUS_SQUARED: f32 = (ATOM_RADIUS+ARM_RADIUS)*(ATOM_RADIUS+ARM_RADIUS);
         fn make_candidates(primary: Pos) -> [Pos;7]{

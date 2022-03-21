@@ -274,6 +274,9 @@ impl EventHandler for MyMiniquadApp {
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         let mut target_time = loaded.curr_time.floor() as usize;
+                        if loaded.max_timestep < target_time{
+                            loaded.max_timestep = target_time;
+                        }
                         ui.horizontal(|ui| {
                             ui.add(egui::Slider::new(&mut target_time, 0..=loaded.max_timestep)
                                 .show_value(false));
