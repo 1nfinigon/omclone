@@ -8,3 +8,4 @@ Code is heavily influenced by omsim (https://github.com/ianh/omsim).
 
 Enable feature "color-eye" for improved error reporting. Right now most errors hard crash.
 Enable "benchmark" to get a program which will just run forever (useful for performance analysis)
+Enable "cx_checker" and compile with "wasm-pack build --target no-modules" to get the .wasm and .js in pkg folder

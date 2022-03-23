@@ -47,11 +47,13 @@ pub fn evaluate_solution(solution: &[u8]){
         fn to_type(a: bool) -> sim::AtomType{
             if a {sim::AtomType::Fire} else {sim::AtomType::Salt}
         }
+        let mut output_string = "".to_string();
         for idx in 0..6{
             let output_bool = rule_cx(input_arr[(idx+5)%6],
                                       input_arr[idx],
                                       input_arr[(idx+1)%6]);
             let pos = sim::rot_to_pos(idx as i32);
+            output_string += if output_bool {"F"} else {"S"};
             //println!("at {},{} : {},{},{} -> {}", pos.x, pos.y ,input_arr[(idx+5)%6],input_arr[(idx+0)%6],input_arr[(idx+1)%6],output_bool);
             for atom in &mut puzzle.inputs[0]{
                 if atom.pos == pos{
@@ -67,18 +69,20 @@ pub fn evaluate_solution(solution: &[u8]){
         
         let init = parser::puzzle_prep(&puzzle, &sol).unwrap();
         let mut world = sim::World::setup_sim(&init).unwrap();
+        let input_string:String = input_arr.map(|b|if b {'F'} else {'S'}).iter().collect();
+        let fail_str = format!("ID {}, input {}, output {}",variant,input_string,output_string);
 
         while !world.is_complete() {
             if let Err(error_out) = world.run_step(true, &mut motions, &mut float_world){
                 any_failures = true;
                 add_square(false);
-                add_text(&format!("Step {} error: {}", world.timestep, error_out));
+                add_text(&format!("{}: Step {} error: {}", fail_str, world.timestep, error_out));
                 continue 'variants;
             }
             if world.timestep > 10_000_000{
                 any_failures = true;
                 add_square(false);
-                add_text(&format!("Over 10 million steps simmed, assuming failure"));
+                add_text(&format!("{}: Over 10 million steps simmed, assuming failure", fail_str));
                 continue 'variants;
             }
         }
@@ -89,5 +93,7 @@ pub fn evaluate_solution(solution: &[u8]){
     }
     if !any_failures{
         add_text(&format!("All good! Slowest solve: {}",slowest));
+    } else {
+        add_text("Fire/Salt patterns are in counter-clockwise order, starting from the right");
     }
 }

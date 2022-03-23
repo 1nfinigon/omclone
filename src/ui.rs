@@ -221,11 +221,11 @@ impl EventHandler for MyMiniquadApp {
                 *now_time = (loaded.last_world.timestep as f64)+(portion as f64);
                 if loaded.show_area{
                     loaded.float_world.regenerate(&loaded.last_world, &mut loaded.saved_motions, portion);
-                    loaded.last_world.mark_area_and_collide(&loaded.float_world)?;
+                    loaded.last_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
                 }
                 if loaded.curr_substep == *substep_count{
                     loaded.curr_substep = 0;
-                    loaded.last_world.finalize_step(&loaded.saved_motions)?;
+                    loaded.last_world.finalize_step(&mut loaded.saved_motions)?;
                 }
                 Ok(())
             };
@@ -241,12 +241,11 @@ impl EventHandler for MyMiniquadApp {
             }
             loaded.curr_time = target_time;
             let display_portion = target_time.fract() as f32;
-            if display_portion == 0. && loaded.saved_motions.arms.len() == 0{
-                for _ in &loaded.last_world.arms{
-                    loaded.saved_motions.arms.push(ArmMovement::Move(Movement::HeldStill));
-                }
+            if loaded.saved_motions.arms.len() == 0{
+                loaded.float_world.generate_static(&loaded.last_world);
+            } else {
+                loaded.float_world.regenerate(&loaded.last_world, &mut loaded.saved_motions, display_portion);
             }
-            loaded.float_world.regenerate(&loaded.last_world, &mut loaded.saved_motions, display_portion);
         }
     }
 

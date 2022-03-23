@@ -12,7 +12,7 @@ use simple_eyre::{
 };
 pub use nalgebra::Vector2;
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{f32::consts::PI,fmt,error};
 
@@ -24,7 +24,7 @@ pub struct SimError{
 impl fmt::Display for SimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hex = xy_to_pos(self.location);
-        let hex_pos = pos_to_xy(&hex);
+        let hex_pos = pos_to_xy(hex);
         if nalgebra::distance_squared(&hex_pos,&self.location) < 0.1{
             write!(f, "{} at {:?}", self.error_str,hex)
         } else {
@@ -35,7 +35,7 @@ impl fmt::Display for SimError {
 impl error::Error for SimError{}
 pub type SimResult<T> = std::result::Result<T,SimError>;
 fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
-    SimError{error_str, location: pos_to_xy(&location)}
+    SimError{error_str, location: pos_to_xy(location)}
 }
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
@@ -455,10 +455,11 @@ impl WorldAtoms {
 pub struct WorldStepInfo{
     pub atoms: SecondaryMap<AtomKey, Movement>,
     pub arms: Vec<ArmMovement>,
+    pub spawning_atoms: Vec<Atom>,
 }
 impl WorldStepInfo{
     pub fn new() -> Self{
-        WorldStepInfo{atoms: SecondaryMap::new(),arms: Vec::new()}
+        WorldStepInfo{atoms: SecondaryMap::new(),arms: Vec::new(), spawning_atoms:Vec::new()}
     }
     pub fn clear(&mut self) {
         self.atoms.clear();
@@ -494,7 +495,7 @@ pub struct FloatWorld{//Might add arms, maybe some other animation stuff too
     pub atoms_xy: Vec<FloatAtom>,
     pub arms_xy: Vec<FloatArm>
 }
-fn pos_to_xy(input: &Pos) -> XYPos{
+fn pos_to_xy(input: Pos) -> XYPos{
     let a = input.x as f32;
     let b = input.y as f32;
     XYPos::new(a*2.+b,b*f32::sqrt(3.))
@@ -518,7 +519,7 @@ fn xy_to_pos(input: XYPos) -> Pos{
     // opposite signs, so we are guaranteed to be inside hexagon (p,q)
     let base_hex = Pos::new(p as i32, q as i32);
     if lambda * mu < 0.0 {return base_hex;}
-    let distance = nalgebra::distance_squared(&pos_to_xy(&base_hex),&input);
+    let distance = nalgebra::distance_squared(&pos_to_xy(base_hex),&input);
     // inside circle, so guaranteed inside hexagon (p,q)
     if distance < 1. {return base_hex;}
 
@@ -526,7 +527,7 @@ fn xy_to_pos(input: XYPos) -> Pos{
     let sign = lambda.signum();
     let candidate = if ( lambda.abs() > mu.abs() ) {(p+sign,q)} else {(p,q+sign)};
     let candidate_hex = Pos::new(candidate.0 as i32, candidate.1 as i32);
-    let distance2 = nalgebra::distance_squared(&pos_to_xy(&candidate_hex),&input);
+    let distance2 = nalgebra::distance_squared(&pos_to_xy(candidate_hex),&input);
     if distance < distance2 {base_hex} else {candidate_hex}
 }
 impl FloatWorld{
@@ -544,14 +545,14 @@ impl FloatWorld{
         use Movement::*;
         use ArmMovement::*;
         fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32){
-            let xy = pos_to_xy(&base);
+            let xy = pos_to_xy(base);
             match movement{
                 Linear(offset) => {
-                    let offset_xy = pos_to_xy(&offset)-XYPos::origin();
+                    let offset_xy = pos_to_xy(offset)-XYPos::origin();
                     return (xy+(offset_xy*amount), 0.)
                 },
                 Rotation(r, pivot) => {
-                    let pivot_xy = pos_to_xy(&pivot);
+                    let pivot_xy = pos_to_xy(pivot);
                     let offset = xy-pivot_xy;
                     let rot = rot_to_angle(r)*amount;
                     return (pivot_xy+(nalgebra::Rotation2::new(-rot)*offset), rot)
@@ -589,6 +590,32 @@ impl FloatWorld{
             let new_arm = FloatArm{
                 pos: xy,
                 rot: angle+rot_to_angle(arm.rot),
+                len: arm_len*2.,
+                arm_type: arm.arm_type,
+                grabbing: arm.grabbing,
+            };
+            self.arms_xy.push(new_arm);
+        }
+    }
+    pub fn generate_static(&mut self, world: &World) {
+        self.arms_xy.clear();
+        self.atoms_xy.clear();
+        for (_atom_key, atom) in &world.atoms.atom_map{
+            let xy = pos_to_xy(atom.pos);
+            let f_atom = FloatAtom{
+                pos: xy,
+                rot: 0.,
+                atom_type: atom.atom_type,
+                connections: atom.connections,
+            };
+            self.atoms_xy.push(f_atom);
+        }
+        for a_index in 0..world.arms.len(){
+            let arm = &world.arms[a_index];
+            let arm_len = arm.len as f32;
+            let new_arm = FloatArm{
+                pos: pos_to_xy(arm.pos),
+                rot: rot_to_angle(arm.rot),
                 len: arm_len*2.,
                 arm_type: arm.arm_type,
                 grabbing: arm.grabbing,
@@ -750,7 +777,7 @@ impl World {
         Ok(())
     }
 
-    fn process_glyphs(&mut self, motion: &WorldStepInfo) {
+    fn process_glyphs(&mut self, motion: &mut WorldStepInfo) {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
@@ -816,8 +843,8 @@ impl World {
                     if (Some(Salt),Some(Salt),None,None) == (a1,a2,o1,o2){
                         atoms.destroy_atom_at(pos);
                         atoms.destroy_atom_at(pos_bi);
-                        atoms.create_atom(Atom::new(pos_tri, Vitae));
-                        atoms.create_atom(Atom::new(pos_ani, Mors));
+                        motion.spawning_atoms.push(Atom::new(pos_tri, Vitae));
+                        motion.spawning_atoms.push(Atom::new(pos_ani, Mors));
                     }
                 }
                 Projection => {
@@ -838,10 +865,10 @@ impl World {
                     let o4 = atoms.get_type(pos_disp4);
                     if (Some(Quintessence),None,None,None,None) == (q,o1,o2,o3,o4){
                         atoms.destroy_atom_at(pos);
-                        atoms.create_atom(Atom::new(pos_bi, Earth));
-                        atoms.create_atom(Atom::new(pos_disp2, Water));
-                        atoms.create_atom(Atom::new(pos_disp3, Fire));
-                        atoms.create_atom(Atom::new(pos_disp4, Air));
+                        motion.spawning_atoms.push(Atom::new(pos_bi, Earth));
+                        motion.spawning_atoms.push(Atom::new(pos_disp2, Water));
+                        motion.spawning_atoms.push(Atom::new(pos_disp3, Fire));
+                        motion.spawning_atoms.push(Atom::new(pos_disp4, Air));
                     }
                 }
                 Unification => {
@@ -857,7 +884,7 @@ impl World {
                             atoms.destroy_atom_at(pos_unif2);
                             atoms.destroy_atom_at(pos_unif3);
                             atoms.destroy_atom_at(pos_unif4);
-                            atoms.create_atom(Atom::new(pos, Quintessence));
+                            motion.spawning_atoms.push(Atom::new(pos, Quintessence));
                         }
                     }
                 }
@@ -871,7 +898,7 @@ impl World {
                             if let Some(newtype) = next {
                                 atoms.destroy_atom_at(pos);
                                 atoms.destroy_atom_at(pos_bi);
-                                atoms.create_atom(Atom::new(pos_tri, newtype));
+                                motion.spawning_atoms.push(Atom::new(pos_tri, newtype));
                             }
                         }
                         _ => ()
@@ -949,7 +976,7 @@ impl World {
     }
 
 
-    pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld) -> SimResult<()>{
+    pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld, spawning_atoms: &[Atom]) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
         //spawning atom = 15/41
         //arm base = 20/41
@@ -957,8 +984,10 @@ impl World {
         use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
         const ARM_RADIUS: f32 = 20./41.;
+        const SPAWNING_ATOM_RADIUS: f32 = 15./41.;
         const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
         const ATOM_ARM_RADIUS_SQUARED: f32 = (ATOM_RADIUS+ARM_RADIUS)*(ATOM_RADIUS+ARM_RADIUS);
+        const ATOM_SPAWN_RADIUS_SQUARED: f32 = (ATOM_RADIUS+SPAWNING_ATOM_RADIUS)*(ATOM_RADIUS+SPAWNING_ATOM_RADIUS);
         fn make_candidates(primary: Pos) -> [Pos;7]{
             [
                 Pos::new(primary.x, primary.y),
@@ -974,14 +1003,13 @@ impl World {
             let primary = xy_to_simple_pos(point);
             let candidates = make_candidates(primary);
             for hex in candidates{
-                let distance = nalgebra::distance_squared(&pos_to_xy(&hex),&point);
+                let distance = nalgebra::distance_squared(&pos_to_xy(hex),&point);
                 if distance < ATOM_ATOM_RADIUS_SQUARED{
                     area_set.insert(hex);
                 }
             }
         }
-        fn collide(atom_collisions: &mut FxHashMap<Pos, SmallVec<[XYPos;2]>>, point: XYPos, is_atom:bool) -> SimResult<()>{
-            let check_dist = if is_atom {ATOM_ATOM_RADIUS_SQUARED} else {ATOM_ARM_RADIUS_SQUARED};
+        fn collide(atom_collisions: &mut FxHashMap<Pos, SmallVec<[XYPos;2]>>, point: XYPos, check_dist:f32, error_str: &'static str) -> SimResult<()>{
             let primary = xy_to_simple_pos(point);
             let candidates = make_candidates(primary);
             for check in candidates{
@@ -989,32 +1017,31 @@ impl World {
                 if let Some(atoms) = possible_vec{
                     for atom_point in atoms{
                         if nalgebra::distance_squared(atom_point,&point) < check_dist {
-                            let error_str = 
-                                if is_atom {&"atom-atom collision!"} 
-                                else {&"atom-arm collision!"};
                             let error_point = nalgebra::center(atom_point, &point);
                             return Err(SimError{error_str, location:error_point});
                         }
                     }
                 }
             }
-            if is_atom {
-                atom_collisions.entry(primary).or_insert_with(SmallVec::new).push(point);
-            }
             Ok(())
         }
-        let mut atom_collisions = FxHashMap::default();
+        let mut atom_collisions = FxHashMap::with_capacity_and_hasher(float_world.atoms_xy.len(),Default::default());
         for atom in &float_world.atoms_xy{
+            let primary = xy_to_simple_pos(atom.pos);
             mark_point(&mut self.area_touched, atom.pos);
-            collide(&mut atom_collisions, atom.pos, true)?;
+            collide(&mut atom_collisions, atom.pos, ATOM_ATOM_RADIUS_SQUARED, "atom/atom collision!")?;
+            atom_collisions.entry(primary).or_insert_with(SmallVec::new).push(atom.pos);
         }
         for arm in &float_world.arms_xy{
-            collide(&mut atom_collisions, arm.pos, false)?;
+            collide(&mut atom_collisions, arm.pos, ATOM_ARM_RADIUS_SQUARED,"atom/arm collision!")?;
             for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
                 let angle = arm.rot+rot_to_angle(r);
                 let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos+offset);
             }
+        }
+        for spawning_atom in spawning_atoms{
+            collide(&mut atom_collisions, pos_to_xy(spawning_atom.pos), ATOM_SPAWN_RADIUS_SQUARED, "atom/spawning atom collision!")?;
         }
         Ok(())
     }
@@ -1026,7 +1053,7 @@ impl World {
             for substep in 0..substep_count{
                 let portion = substep as f32 / substep_count as f32;
                 float_world.regenerate(self, motion, portion);
-                self.mark_area_and_collide(float_world)?;
+                self.mark_area_and_collide(float_world, &motion.spawning_atoms)?;
             }
         }
         self.finalize_step(motion)?;
@@ -1046,7 +1073,7 @@ impl World {
         for (atom_key, movement) in &motion.atoms{
             if let Movement::Rotation(_rot, center) = movement{
                 let atom_pos = self.atoms.atom_map[atom_key].pos;
-                let distance = nalgebra::distance(&pos_to_xy(&atom_pos),&pos_to_xy(&center)) as f64;
+                let distance = nalgebra::distance(&pos_to_xy(atom_pos),&pos_to_xy(*center)) as f64;
                 if max_radius < distance {
                     max_radius = distance;
                 }
@@ -1055,9 +1082,13 @@ impl World {
         let fixed_radius = f64::powf(2.,max_radius.log2().round());
         fixed_radius as usize
     }
-    pub fn finalize_step(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
+    pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
         self.process_glyphs(motion);
+        for atom in motion.spawning_atoms.drain(..){
+            self.atoms.create_atom(atom);
+        }
+        motion.clear();
         self.timestep += 1;
         Ok(())
     }
