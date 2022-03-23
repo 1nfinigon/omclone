@@ -850,7 +850,7 @@ impl World {
                     add_all(&mut self.area_touched,pos_list.iter().map(|a|glyph.reposition(*a)))
                 },
                 Disposal => {
-                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp2,pos_disp3,pos_disp4,pos_unif2])
+                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp3,pos_disp4,pos_unif2])
                 },
                 Conduit(_atom_teleport) => {
                     Ok(())//TODO
