@@ -270,6 +270,17 @@ impl EventHandler for MyMiniquadApp {
                         });
                         if !opened {loaded.message = None;}
                     }
+                    egui::Window::new("Camera controls").show(egui_ctx, |ui| {
+                        ui.label("x:");
+                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[0])
+                            .speed(0.1));
+                        ui.label("y:");
+                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
+                            .speed(0.1));
+                        ui.label("zoom:");
+                        ui.add(egui::Slider::new(&mut loaded.camera.scale,0.001 ..= 0.1)
+                            .logarithmic(true));
+                    });
                     egui::Window::new("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         let mut target_time = loaded.curr_time.floor() as usize;
@@ -449,7 +460,7 @@ impl EventHandler for MyMiniquadApp {
 
                 let mut float_world = FloatWorld::new();
                 let mut saved_motions = WorldStepInfo::new();
-                while !test_world.is_complete() && test_world.timestep < 10000{
+                /*while !test_world.is_complete() && test_world.timestep < 10000{
                     let res = test_world.run_step(false, &mut saved_motions, &mut float_world);
                     if let Err(e) = res{
                         println!("test world error: {:?}", e);
@@ -458,7 +469,7 @@ impl EventHandler for MyMiniquadApp {
                     if test_world.timestep % 100 == 0{
                         println!("Initial sim step {:03}", test_world.timestep);
                     }
-                }
+                }*/
                 saved_motions.clear();
                 let camera = CameraSetup::frame_center(&test_world);
                 let tracks = setup_tracks(ctx, &test_world.track_map);
@@ -470,7 +481,7 @@ impl EventHandler for MyMiniquadApp {
                     substep_count: 8,
                     float_world,saved_motions,
                 
-                    max_timestep: test_world.timestep as usize,
+                    max_timestep: 100,//test_world.timestep as usize,
                     camera,tracks,solution,
                     message: None,
                 

@@ -432,7 +432,12 @@ impl WorldAtoms {
         if motion.atoms.contains_key(key) {
             return None;
         }
-        Some(self.atom_map.get(key)?.atom_type)
+        let atom = self.atom_map.get(key).expect("Inconsistent atoms (consume check)");
+        if atom.connections.iter().any(|bonds| !bonds.is_empty()){
+            return None
+        }
+        //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
+        Some(atom.atom_type)
     }
 
     //Note: only use on non-grabbed atoms!
@@ -777,6 +782,86 @@ impl World {
         Ok(())
     }
 
+    fn initial_area(&mut self) -> SimResult<()>{
+        use GlyphType::*;
+        for glyph in &mut self.glyphs {
+            let pos = glyph.pos; //primary position
+            let pos_bi = glyph.reposition(Pos::new(1, 0)); //position for all 2-sized glyphs
+            let pos_tri = glyph.reposition(Pos::new(0, 1)); //third (closely packed) position
+
+            let pos_ani = glyph.reposition(Pos::new(1, -1));
+
+            let pos_disp2 = glyph.reposition(Pos::new(1, -1));
+            let pos_disp3 = glyph.reposition(Pos::new(0, -1));
+            let pos_disp4 = glyph.reposition(Pos::new(-1, 0));
+
+            let pos_multi2 = glyph.reposition(Pos::new(0, -1));
+            let pos_multi3 = glyph.reposition(Pos::new(-1, 1));
+
+            let pos_unif2 = glyph.reposition(Pos::new(-1, 1));
+            let pos_unif3 = glyph.reposition(Pos::new(0, -1));
+            let pos_unif4 = glyph.reposition(Pos::new(1, -1));
+            fn add_all(area_set: &mut FxHashSet<Pos>,input: impl IntoIterator<Item=Pos>) -> SimResult<()>{
+                for p in input{
+                    if !area_set.insert(p){
+                        return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
+                    }
+                }
+                Ok(())
+            }
+            match &glyph.glyph_type{
+                Calcification => {
+                    add_all(&mut self.area_touched,[pos])
+                }
+                Animismus => {
+                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani])
+                }
+                Projection => {
+                    add_all(&mut self.area_touched,[pos, pos_bi])
+                }
+                Dispersion => {
+                    add_all(&mut self.area_touched,[pos, pos_bi,pos_disp2,pos_disp3,pos_disp4])
+                }
+                Unification => {
+                    add_all(&mut self.area_touched,[pos, pos_tri,pos_unif2,pos_unif3,pos_unif4])
+                }
+                Purification => {
+                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri])
+                }
+                Duplication => {
+                    add_all(&mut self.area_touched,[pos, pos_bi])
+                }
+                Bonding => {
+                    add_all(&mut self.area_touched,[pos, pos_bi])
+                }
+                MultiBond => {
+                    add_all(&mut self.area_touched,[pos, pos_bi,pos_multi2,pos_multi3])
+                }
+                TriplexBond => {
+                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri])
+                }
+                Unbonding => {
+                    add_all(&mut self.area_touched,[pos, pos_bi])
+                }
+                Input(atom_points) | Output(atom_points, _)=> {
+                    add_all(&mut self.area_touched,atom_points.iter().map(|a|a.pos))
+                }
+                Track(pos_list) => {
+                    add_all(&mut self.area_touched,pos_list.iter().map(|a|glyph.reposition(*a)))
+                },
+                Disposal => {
+                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp2,pos_disp3,pos_disp4,pos_unif2])
+                },
+                Conduit(_atom_teleport) => {
+                    Ok(())//TODO
+                },
+                Equilibrium => {
+                    add_all(&mut self.area_touched,[pos])
+                }
+            }?;
+        }
+        Ok(())
+    }
     fn process_glyphs(&mut self, motion: &mut WorldStepInfo) {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
@@ -830,7 +915,7 @@ impl World {
             match &mut glyph.glyph_type{
                 Calcification => {
                     if let Some(atom) = atoms.get_atom_mut(pos) {
-                        if atom.atom_type.is_element(){
+                        if atom.atom_type.is_element() && !atom.is_berlo{
                             atom.atom_type = AtomType::Salt;
                         }
                     }
@@ -1033,11 +1118,21 @@ impl World {
             atom_collisions.entry(primary).or_insert_with(SmallVec::new).push(atom.pos);
         }
         for arm in &float_world.arms_xy{
+            mark_point(&mut self.area_touched, arm.pos);
             collide(&mut atom_collisions, arm.pos, ATOM_ARM_RADIUS_SQUARED,"atom/arm collision!")?;
             for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
                 let angle = arm.rot+rot_to_angle(r);
                 let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos+offset);
+                //arm lengths are doubled in floatworld
+                if arm.len > 1.0{
+                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(2., 0.);
+                    mark_point(&mut self.area_touched, arm.pos+offset);
+                }
+                if arm.len > 3.0{
+                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(4., 0.);
+                    mark_point(&mut self.area_touched, arm.pos+offset);
+                }
             }
         }
         for spawning_atom in spawning_atoms{
@@ -1238,9 +1333,9 @@ impl World {
                         for i in 0..rep_len {
                             let copied_instr = instructions[repeat_source + i];
                             ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
-                                "Repeat instruction {:?} overlaps on {}/{}/{}",
-                                copied_instr,
-                                curr,repeat_source,i
+                                "Repeat instruction {:?} overlaps with {:?} on {}/{}. Repeat {}-{}",
+                                copied_instr,old_instructions.get(curr + i),
+                                curr,i,repeat_source,repeat_ending
                             );
                             instructions.push(copied_instr);
                             basic_move(copied_instr)?;
@@ -1407,15 +1502,22 @@ impl World {
         
         for glyph in &mut world.glyphs {
             if let GlyphType::Input(atom_spawn_points) = &glyph.glyph_type {
-                for a in atom_spawn_points{
-                    world.atoms.create_atom(a.clone());
+                if atom_spawn_points.iter().all(|a| world.atoms.locs.get(&a.pos) == None){
+                    for a in atom_spawn_points{
+                        world.atoms.create_atom(a.clone());
+                    }
                 }
             }
         }
+        world.initial_area()?;
+        world.timestep = world.get_first_timestep();
         Ok(world)
     }
+    fn get_first_timestep(&self) -> u64{
+        self.arms.iter().map(|a|a.instruction_tape.first as u64).fold(u64::MAX, std::cmp::min)
+    }
     pub fn get_stats(&self) -> SolutionStats {
-        let cycles = (self.timestep as i32) + 1;
+        let cycles = (self.timestep-self.get_first_timestep()) as i32;
         let cost = self.cost;
         let area = self.area_touched.len() as i32;
         let instructions = self.instruction_count;

@@ -387,12 +387,12 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
 
 pub struct FullPuzzle {
     pub puzzle_name: String,
-    creator_id: u64,
-    allowed_bitfield: AllowedParts,
+    pub creator_id: u64,
+    pub allowed_bitfield: AllowedParts,
     pub inputs: Vec<AtomPattern>,
     pub outputs: Vec<AtomPattern>,
-    output_multiplier: i32,
-    production: bool,
+    pub output_multiplier: i32,
+    pub production: bool,
     //production data here
 }
 fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
