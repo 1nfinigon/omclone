@@ -40,23 +40,16 @@ fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, enum_primitive_derive::Primitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Instr {
-    RotateClockwise        = 01,
-    RotateCounterClockwise = 02,
-    Extend                 = 03,
-    Retract                = 04,
-    Grab                   = 05,
-    Drop                   = 06,
-    PivotClockwise         = 07,
-    PivotCounterClockwise  = 08,
-    Forward                = 09,
-    Back                   = 10,
-    Repeat                 = 11,
-    Reset                  = 12,
-    Noop                   = 13,
-    Empty                  = 14,
+    RotateClockwise, RotateCounterClockwise,
+    Extend, Retract,
+    Grab, Drop,
+    PivotClockwise, PivotCounterClockwise,
+    Forward, Back,
+    Repeat, Reset,
+    Noop, Empty,
 }
 impl Instr {
     pub fn to_byte(&self) -> u8 {
@@ -189,7 +182,7 @@ pub fn pos_to_rot(input: Pos) -> Option<Rot> {
         _ => None,
     }
 }
-pub fn offset(n: i32, angle: Rot) -> Pos {
+pub fn rot_dist_to_pos(n: i32, angle: Rot) -> Pos {
     match normalize_dir(angle) {
         0 => Pos::new( n, 0),
         1 => Pos::new( 0, n),
@@ -201,7 +194,7 @@ pub fn offset(n: i32, angle: Rot) -> Pos {
     }
 }
 pub fn rot_to_pos(angle: Rot) -> Pos {
-    offset(1, angle)
+    rot_dist_to_pos(1, angle)
 }
 pub fn rotate(pos: Pos, angle: Rot) -> Pos {
     match normalize_dir(angle) {
@@ -336,6 +329,12 @@ impl Glyph {
                 }
                 true
             }
+            Track(locs) => {
+                for a in locs {
+                    *a = self.pos + rotate(*a, self.rot);
+                }
+                true
+            }
             _ => false,
         }
     }
@@ -425,6 +424,13 @@ impl WorldAtoms {
     }
     fn get_type(&self, loc: Pos) -> Option<AtomType> {
         let &key = self.locs.get(&loc)?;
+        let atom = self.atom_map.get(key).expect("Inconsistent atoms (type check)");
+        Some(atom.atom_type)
+    }
+    fn get_nonberlo_type(&self, loc: Pos) -> Option<AtomType> {
+        let &key = self.locs.get(&loc)?;
+        let atom = self.atom_map.get(key).expect("Inconsistent atoms (nonberlo type check)");
+        if atom.is_berlo {return None};
         Some(self.atom_map.get(key)?.atom_type)
     }
     fn get_consumable_type(&self, motion: &WorldStepInfo, loc: Pos) -> Option<AtomType> {
@@ -433,7 +439,7 @@ impl WorldAtoms {
             return None;
         }
         let atom = self.atom_map.get(key).expect("Inconsistent atoms (consume check)");
-        if atom.connections.iter().any(|bonds| !bonds.is_empty()){
+        if atom.connections != [Bonds::NO_BOND;6]{
             return None
         }
         //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
@@ -472,7 +478,7 @@ impl WorldStepInfo{
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolutionStats {
     pub cycles: i32,
     pub cost: i32,
@@ -641,6 +647,7 @@ impl World {
             let maybe_move = motion.atoms.get(this_key);
             if let Some(curr_move) = maybe_move {
                 if curr_move != &movement {
+                    println!("was {:?},applying {:?}",curr_move,movement);
                     let error_str = &"Atom moved in multiple directions!";
                     return Err(sim_error_pos(error_str,self.atoms.atom_map[this_key].pos));
                 }
@@ -847,7 +854,7 @@ impl World {
                     add_all(&mut self.area_touched,atom_points.iter().map(|a|a.pos))
                 }
                 Track(pos_list) => {
-                    add_all(&mut self.area_touched,pos_list.iter().map(|a|glyph.reposition(*a)))
+                    add_all(&mut self.area_touched,pos_list.iter().map(|a|*a))
                 },
                 Disposal => {
                     add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp3,pos_disp4,pos_unif2])
@@ -991,9 +998,9 @@ impl World {
                 }
                 Duplication => {
                     let source = atoms.get_type(pos);
-                    let salt = atoms.get_type(pos_bi);
+                    let salt = atoms.get_nonberlo_type(pos_bi);
                     if let (Some(elem), Some(Salt)) = (source, salt){
-                        if elem.is_element(){
+                        if elem.is_element() {
                             atoms.get_atom_mut(pos_bi).unwrap().atom_type = elem;
                         }
                     }
@@ -1251,8 +1258,7 @@ impl World {
     ) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
-        let mut arm = original.clone();
-        let arm_type = arm.arm_type;
+        let arm_type = original.arm_type;
         let old_instructions = &original.instruction_tape.instructions;
         let mut instructions = Vec::with_capacity(old_instructions.len() + 8);
         let mut repeat_source = 0;
@@ -1260,9 +1266,26 @@ impl World {
         let mut any_nonrepeat = false;
         let mut curr = 0;
         let mut track_steps = 0;
+        let mut rot_diff = 0;
+        let mut len = original.len;
+        let mut known_grab = false;
+        let mut position_check = original.pos;
+        fn get_track_loop_length(track_map: &TrackMap, pos: Pos) -> Option<i32>{
+            let mut my_pos = pos;
+            let mut loop_length = 0;
+            loop{
+                let offset = track_map.get(&my_pos)?.plus?;
+                my_pos += offset;
+                loop_length += 1;
+                if my_pos == pos {return Some(loop_length);}
+                if loop_length as usize > track_map.len() {return None;}
+            }
+        }
+        let track_loop = get_track_loop_length(track_map, original.pos);
+        //println!("arm @ {:?}, loop length {:?}",original.pos,track_loop);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
-            if !any_nonrepeat && !matches!(instr, Repeat | Empty | Noop){
+            if !any_nonrepeat && !matches!(instr, Repeat | Empty ){
                 any_nonrepeat = true;
                 repeat_source = curr;
             }
@@ -1273,39 +1296,37 @@ impl World {
             let mut basic_move = |instr: Instr|->Result<()>{
                 match instr{
                     Extend => {
-                        if arm_type == Piston && arm.len < 3 {
-                            arm.len += 1;
+                        if arm_type == Piston && len < 3 {
+                            len += 1;
                         }
                     }
                     Retract => {
-                        if arm_type == Piston && arm.len > 1 {
-                            arm.len -= 1;
+                        if arm_type == Piston && len > 1 {
+                            len -= 1;
                         }
                     }
                     RotateCounterClockwise => {
-                        arm.rot += 1;
+                        rot_diff += 1;
                     }
                     RotateClockwise => {
-                        arm.rot -= 1;
+                        rot_diff -= 1;
                     }
-                    Grab => arm.grabbing = true,
-                    Drop => arm.grabbing = false,
+                    Grab => known_grab = true,
+                    Drop => known_grab = false,
                     Forward => {
-                        let track_data = track_map.get(&arm.pos)
-                            .ok_or(eyre!("Forward movement not on track (preprocess)"))?;
-                        arm.pos += track_data.plus.unwrap_or_default();
-                        track_steps += 1;
-                        if arm.pos == original.pos{
-                            track_steps = 0;
+                        if let Some(track_data) = track_map.get(&position_check){
+                            if let Some(offset) = track_data.plus{
+                                track_steps += 1;
+                                position_check += offset;
+                            }
                         }
                     }
                     Back => {
-                        let track_data = track_map.get(&arm.pos)
-                            .ok_or(eyre!("Backward movement not on track (preprocess)"))?;
-                        arm.pos += track_data.minus.unwrap_or_default();
-                        track_steps -= 1;
-                        if arm.pos == original.pos{
-                            track_steps = 0;
+                        if let Some(track_data) = track_map.get(&position_check){
+                            if let Some(offset) = track_data.minus{
+                                track_steps -= 1;
+                                position_check += offset;
+                            }
                         }
                     }
                     PivotCounterClockwise | PivotClockwise | Empty => {}
@@ -1342,61 +1363,42 @@ impl World {
                         }
                         curr += rep_len;
                         any_nonrepeat = false;
+
+                        known_grab = false;
+                        rot_diff = 0;
+                        len = original.len;
+                        track_steps = 0;
+                        position_check = original.pos;
                     }
                 }
                 Reset => {
                     let mut reset_vec = Vec::new();
-                    if arm.grabbing {
+                    if known_grab {
                         reset_vec.push(Drop);
-                        arm.grabbing = false;
+                        known_grab = false;
                     }
-                    while arm.len > original.len {
+                    while len > original.len {
                         reset_vec.push(Retract);
-                        arm.len -= 1;
+                        len -= 1;
                     }
-                    let mut rot_tmp = normalize_dir(original.rot - arm.rot + 3) - 3;
-                    while rot_tmp > 0 {
-                        reset_vec.push(RotateCounterClockwise);
-                        rot_tmp -= 1;
-                    }
-                    while rot_tmp < 0 {
+                    while rot_diff > 3 {rot_diff -= 6;}
+                    while rot_diff < -3 {rot_diff += 6;}
+                    while rot_diff > 0 {
                         reset_vec.push(RotateClockwise);
-                        rot_tmp += 1;
+                        rot_diff -= 1;
                     }
-                    arm.rot = original.rot;
+                    while rot_diff < 0 {
+                        reset_vec.push(RotateCounterClockwise);
+                        rot_diff += 1;
+                    }
                     // look for a path forward on the track that's shorter than
                     // the path backward.
-                    if track_steps > 0 {
-                        let mut tmp_pos = arm.pos;
-                        'path_forward: for i in 1..track_steps {
-                            let track_data = track_map
-                                .get(&arm.pos)
-                                .ok_or(eyre!("Reset track while not on track (Forward)"))?;
-                            if let Some(offset) = track_data.plus {
-                                tmp_pos += offset
-                            } else {
-                                break 'path_forward;
-                            }
-                            if tmp_pos == original.pos {
-                                track_steps = -i;
-                                break 'path_forward;
-                            }
+                    if let Some(loop_len) = track_loop{
+                        while track_steps > loop_len/2 {
+                            track_steps -= loop_len;
                         }
-                    } else if track_steps < 0 {
-                        let mut tmp_pos = arm.pos;
-                        'path_backward: for i in 1..-track_steps {
-                            let track_data = track_map
-                                .get(&arm.pos)
-                                .ok_or(eyre!("Reset track while not on track (Backward)"))?;
-                            if let Some(offset) = track_data.minus {
-                                tmp_pos += offset
-                            } else {
-                                break 'path_backward;
-                            }
-                            if tmp_pos == original.pos {
-                                track_steps = i;
-                                break 'path_backward;
-                            }
+                        while track_steps < -loop_len/2 {
+                            track_steps += loop_len
                         }
                     }
                     while track_steps > 0 {
@@ -1407,11 +1409,11 @@ impl World {
                         reset_vec.push(Forward);
                         track_steps += 1;
                     }
-                    arm.pos = original.pos;
-                    while arm.len < original.len {
+                    while len < original.len {
                         reset_vec.push(Extend);
-                        arm.len += 1;
+                        len += 1;
                     }
+                    position_check = original.pos;
 
                     if reset_vec.len() == 0 {
                         reset_vec.push(Empty)
@@ -1532,8 +1534,8 @@ mod tests {
     #[test]
     fn rotation_tests() {
         for r in 0..6 {
-            assert_eq!(offset(1, r), rotate(Pos::new(1, 0), r));
-            assert_eq!(offset(2, r), rotate(Pos::new(2, 0), r));
+            assert_eq!(rot_dist_to_pos(1, r), rotate(Pos::new(1, 0), r));
+            assert_eq!(rot_dist_to_pos(2, r), rotate(Pos::new(2, 0), r));
             assert_eq!(rotate(Pos::new(3, 1), r + 1), rotate(Pos::new(-1, 4), r));
         }
     }

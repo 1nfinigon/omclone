@@ -6,7 +6,7 @@ default-run = "omclone"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["main_ui"]
+default = ["cx_checker"]
 #choose one of the following
 benchmark = []
 cx_checker = ["wasm-bindgen","web-sys","console_error_panic_hook"]
@@ -20,7 +20,7 @@ path = "src/main.rs"
 [[bin]]
 name="omclone_benchmark"
 required-features = ["benchmark"]
-path = "src/main.rs"
+path = "src/bin/benchmark.rs"
 
 [lib]
 name="omclone_cxchecker"

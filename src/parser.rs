@@ -107,20 +107,13 @@ fn parse_str(f: &mut impl Read) -> Result<String> {
     Ok(String::from_utf8(dat)?)
 }
 
-fn write_arr<const N: usize>(f: &mut impl Write, data: [u8; N]) -> Result<()> {
-    let result = f.write(&data)?;
-    ensure!(
-        result == N,
-        "Tried to write {:?} ({:?} bytes) but only got {:?}",
-        data, N, result
-    );
+fn write_byte(f: &mut impl Write, n: u8) -> Result<()>{
+    f.write_all(&n.to_le_bytes())?;
     Ok(())
 }
-fn write_byte(f: &mut impl Write, n: u8) -> Result<()>{
-    write_arr(f, n.to_le_bytes())
-}
 fn write_int(f: &mut impl Write, n: i32) -> Result<()>{
-    write_arr(f, n.to_le_bytes())
+    f.write_all(&n.to_le_bytes())?;
+    Ok(())
 }
 fn write_pos(f: &mut impl Write, p: Pos) -> Result<()>{
     write_int(f, p.x)?;
@@ -130,7 +123,7 @@ fn write_str(f: &mut impl Write, s: &str) -> Result<()> {
     //Instead of writing a byte, should write a var_int
     ensure!(s.len() < 128, "Write string {:?} too long {:?} > 127", s, s.len());
     write_byte(f, s.len() as u8)?;
-    f.write(s.as_bytes())?;
+    f.write_all(s.as_bytes())?;
     Ok(())
 }
 
@@ -158,7 +151,7 @@ fn parse_stats(f: &mut impl Read) -> Result<Option<SolutionStats>> {
     }
 }
 
-fn write_stats(f: &mut impl Write, stats: Option<SolutionStats>) -> Result<()> {
+fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> {
     match stats{
         None => write_int(f, 0)?,
         Some(stats) => {
@@ -315,7 +308,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
             instructions, tracks, arm_index,
         });
     }
-    return Ok(solution_output);
+    Ok(solution_output)
 }
 pub fn replace_tapes<'a>(sol: &mut FullSolution, mut tapes: impl Iterator<Item=&'a Tape>, loop_len: usize) -> Result<()>{
     //Warning: Assumes the tapes are in order with their solution's arms
@@ -345,7 +338,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
     write_int(f, 7)?;
     write_str(f, &sol.puzzle_name)?;
     write_str(f, &sol.solution_name)?;
-    write_stats(f, sol.stats)?;
+    write_stats(f, &sol.stats)?;
     write_int(f, sol.part_list.len() as i32)?;
     for part in &sol.part_list {
         write_str(f, part_type_to_name(&part.part_type)?)?;

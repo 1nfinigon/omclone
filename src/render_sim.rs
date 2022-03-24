@@ -442,7 +442,7 @@ impl RenderDataBase {
             ctx.apply_pipeline(&self.pipeline_glyphs);
             ctx.apply_bindings(&self.shapes.glyph_bindings[15]);                
             for p in &world.area_touched{
-                let offset = pos_to_xy(&p);
+                let offset = pos_to_xy(p);
                 ctx.apply_uniforms(&UvUniforms {
                     offset, world_offset, angle:0., scale
                 });

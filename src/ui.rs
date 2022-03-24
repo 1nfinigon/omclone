@@ -32,7 +32,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
     }
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         let tape = &mut self.tape_ref;
-        let instr_mapped:Vec<Instr> = text.chars().filter_map(|x| Instr::from_char(x)).collect();
+        let instr_mapped:Vec<Instr> = text.chars().filter_map(Instr::from_char).collect();
         let inserted = instr_mapped.len();
 
         let empty_extension = if char_index < tape.first{
@@ -209,7 +209,7 @@ impl EventHandler for MyMiniquadApp {
             let mut advance = |now_time: &mut f64, substep_count: &mut usize, substep_time: &mut f64| -> SimResult<()>{
                 if loaded.curr_substep == 0{
                     let failcheck = loaded.last_world.prepare_step(&mut loaded.saved_motions);
-                    if let Err(_) = failcheck{
+                    if failcheck.is_err(){
                         loaded.saved_motions.clear();
                         return failcheck;
                     }
@@ -220,7 +220,7 @@ impl EventHandler for MyMiniquadApp {
                 let portion = loaded.curr_substep as f32 / *substep_count as f32;
                 *now_time = (loaded.last_world.timestep as f64)+(portion as f64);
                 if loaded.show_area{
-                    loaded.float_world.regenerate(&loaded.last_world, &mut loaded.saved_motions, portion);
+                    loaded.float_world.regenerate(&loaded.last_world, &loaded.saved_motions, portion);
                     loaded.last_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
                 }
                 if loaded.curr_substep == *substep_count{
@@ -241,10 +241,10 @@ impl EventHandler for MyMiniquadApp {
             }
             loaded.curr_time = target_time;
             let display_portion = target_time.fract() as f32;
-            if loaded.saved_motions.arms.len() == 0{
+            if loaded.saved_motions.arms.is_empty(){
                 loaded.float_world.generate_static(&loaded.last_world);
             } else {
-                loaded.float_world.regenerate(&loaded.last_world, &mut loaded.saved_motions, display_portion);
+                loaded.float_world.regenerate(&loaded.last_world, &loaded.saved_motions, display_portion);
             }
         }
     }
@@ -255,7 +255,7 @@ impl EventHandler for MyMiniquadApp {
         if let Loaded(loaded) = &mut self.app_state{
             let world = &loaded.last_world;
             let float_world = &loaded.float_world;
-            self.render_data.draw(ctx, &loaded.camera, &loaded.tracks, loaded.show_area, &world, &float_world)
+            self.render_data.draw(ctx, &loaded.camera, &loaded.tracks, loaded.show_area, world, float_world)
         }
         ctx.end_render_pass();
         
