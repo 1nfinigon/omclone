@@ -10,7 +10,7 @@ use simple_eyre::{
     eyre::{bail, ensure, eyre},
     Result,
 };
-pub use nalgebra::Vector2;
+pub use nalgebra::{Vector2, Point2};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use std::collections::{VecDeque, HashMap};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -486,8 +486,8 @@ pub struct SolutionStats {
     pub instructions: i32,
 }
 
-pub type XYPos = nalgebra::Point2<f32>;
-pub type XYVec = nalgebra::Vector2<f32>;
+pub type XYPos = Point2<f32>;
+pub type XYVec = Vector2<f32>;
 pub struct FloatAtom{
     pub pos: XYPos,
     pub rot: f32,
@@ -869,7 +869,7 @@ impl World {
         }
         Ok(())
     }
-    fn process_glyphs(&mut self, motion: &mut WorldStepInfo) {
+    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, can_consume: bool) {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
@@ -932,7 +932,7 @@ impl World {
                     let a2 = atoms.get_consumable_type(motion, pos_bi);
                     let o1 = atoms.get_type(pos_tri);
                     let o2 = atoms.get_type(pos_ani);
-                    if (Some(Salt),Some(Salt),None,None) == (a1,a2,o1,o2){
+                    if (Some(Salt),Some(Salt),None,None) == (a1,a2,o1,o2) && can_consume{
                         atoms.destroy_atom_at(pos);
                         atoms.destroy_atom_at(pos_bi);
                         motion.spawning_atoms.push(Atom::new(pos_tri, Vitae));
@@ -955,7 +955,7 @@ impl World {
                     let o2 = atoms.get_type(pos_disp2);
                     let o3 = atoms.get_type(pos_disp3);
                     let o4 = atoms.get_type(pos_disp4);
-                    if (Some(Quintessence),None,None,None,None) == (q,o1,o2,o3,o4){
+                    if (Some(Quintessence),None,None,None,None) == (q,o1,o2,o3,o4) && can_consume{
                         atoms.destroy_atom_at(pos);
                         motion.spawning_atoms.push(Atom::new(pos_bi, Earth));
                         motion.spawning_atoms.push(Atom::new(pos_disp2, Water));
@@ -971,7 +971,7 @@ impl World {
                     let a4 = atoms.get_consumable_type(motion, pos_unif4);
                     if let (None,Some(a),Some(b),Some(c),Some(d)) = (output, a1, a2, a3, a4){
                         let set = [a,b,c,d];
-                        if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air){
+                        if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air) && can_consume{
                             atoms.destroy_atom_at(pos_tri);
                             atoms.destroy_atom_at(pos_unif2);
                             atoms.destroy_atom_at(pos_unif3);
@@ -985,7 +985,7 @@ impl World {
                     let a2 = atoms.get_consumable_type(motion, pos_bi);
                     let o = atoms.get_type(pos_tri);
                     match (a1,a2,o){
-                        (Some(a1),Some(a2),None) if a1 == a2 => {
+                        (Some(a1),Some(a2),None) if a1 == a2 && can_consume => {
                             let next = a1.promotable_metal();
                             if let Some(newtype) = next {
                                 atoms.destroy_atom_at(pos);
@@ -1132,11 +1132,11 @@ impl World {
                 let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos+offset);
                 //arm lengths are doubled in floatworld
-                if arm.len > 1.0{
+                if arm.len > 3.0{
                     let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(2., 0.);
                     mark_point(&mut self.area_touched, arm.pos+offset);
                 }
-                if arm.len > 3.0{
+                if arm.len > 5.0{
                     let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(4., 0.);
                     mark_point(&mut self.area_touched, arm.pos+offset);
                 }
@@ -1167,11 +1167,11 @@ impl World {
         for i in 0..self.arms.len() {
             self.do_instruction(motion, i, self.timestep)?;
         }
-        self.process_glyphs(motion);
+        self.process_glyphs(motion, true);
         Ok(())
     }
     pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{
-        let mut max_radius:f64 = 8.; //This corresponds to minimum step count of 8
+        let mut max_radius:f64 = 1.;
         for (atom_key, movement) in &motion.atoms{
             if let Movement::Rotation(_rot, center) = movement{
                 let atom_pos = self.atoms.atom_map[atom_key].pos;
@@ -1181,12 +1181,13 @@ impl World {
                 }
             }
         }
-        let fixed_radius = f64::powf(2.,max_radius.log2().round());
-        fixed_radius as usize
+        max_radius *= 2.;
+        usize::pow(2,max_radius.log2().round() as u32).max(8)
+        //usize::max(10, (max_radius*2.0) as usize)
     }
     pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
-        self.process_glyphs(motion);
+        self.process_glyphs(motion, false);
         for atom in motion.spawning_atoms.drain(..){
             self.atoms.create_atom(atom);
         }
@@ -1282,7 +1283,6 @@ impl World {
             }
         }
         let track_loop = get_track_loop_length(track_map, original.pos);
-        //println!("arm @ {:?}, loop length {:?}",original.pos,track_loop);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
             if !any_nonrepeat && !matches!(instr, Repeat | Empty ){

@@ -1,7 +1,7 @@
 /target
 /.vscode
 /test
-output.solution
+*.solution
 
 #This contains potentially private information - a default is provided.
 src/default_paths.txt

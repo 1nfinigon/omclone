@@ -69,7 +69,7 @@ fn check_all(){
                         };
                         stats.1 += 1;
                         while !world.is_complete() && world.timestep < 500_000 {
-                            let step = world.run_step(false, &mut motions, &mut float_world);
+                            let step = world.run_step(true, &mut motions, &mut float_world);
                             if let Err(e) = step{
                                 println!("Simulation error on step {} puzzle {}: {:?}: {}",world.timestep,sol.puzzle_name,fpath, e);
                                 continue 'file_loop;
@@ -77,7 +77,7 @@ fn check_all(){
                         }
                         let mut newstats = world.get_stats();
                         let oldstats = sol.stats.unwrap();
-                        newstats.area = oldstats.area;
+                        //newstats.area = oldstats.area;
                         //newstats.instructions = oldstats.instructions;
                         if newstats == oldstats{
                             stats.0 += 1;

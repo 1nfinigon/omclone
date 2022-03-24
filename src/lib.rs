@@ -1,13 +1,18 @@
+#[cfg(feature = "cx_checker")]
 mod parser;
+#[cfg(feature = "cx_checker")]
 mod sim;
+#[cfg(feature = "cx_checker")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 extern "C" {
     fn add_text(s: &str);
     fn add_square(white: bool);
 }
 
+#[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 pub fn evaluate_solution(solution: &[u8]){
     #[cfg(feature = "console_error_panic_hook")]
