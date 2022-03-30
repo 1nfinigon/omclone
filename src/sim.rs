@@ -13,6 +13,7 @@ use simple_eyre::{
 pub use nalgebra::{Vector2, Point2};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use std::collections::{VecDeque, HashMap};
+use smallvec::SmallVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{f32::consts::PI,fmt,error};
 
@@ -291,7 +292,7 @@ pub enum ArmMovement{
     LengthAdjust(i32),
 }
 
-pub type AtomPattern = Vec<Atom>;
+pub type AtomPattern = SmallVec<[Vec<Atom>;1]>;
 
 //Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,10 +323,12 @@ impl Glyph {
     pub fn reposition_pattern(&mut self) -> bool {
         use GlyphType::*;
         match &mut self.glyph_type {
-            Input(pat) | Output(pat, _) | Conduit(pat) => {
-                for mut a in pat {
-                    a.pos = self.pos + rotate(a.pos, self.rot);
-                    a.rotate_connections(self.rot);
+            Input(meta_pattern) | Output(meta_pattern, _) | Conduit(meta_pattern) => {
+                for pat in meta_pattern{
+                    for mut a in pat {
+                        a.pos = self.pos + rotate(a.pos, self.rot);
+                        a.rotate_connections(self.rot);
+                    }
                 }
                 true
             }
@@ -850,7 +853,8 @@ impl World {
                 Unbonding => {
                     add_all(&mut self.area_touched,[pos, pos_bi])
                 }
-                Input(atom_points) | Output(atom_points, _)=> {
+                Input(meta_pattern) | Output(meta_pattern, _)=> {
+                    let atom_points = &meta_pattern[0];
                     add_all(&mut self.area_touched,atom_points.iter().map(|a|a.pos))
                 }
                 Track(pos_list) => {
@@ -1028,14 +1032,18 @@ impl World {
                         }
                     }
                 }
-                Input(atom_spawn_points) => {
+                Input(meta_pattern) => {
+                    let atom_spawn_points = &meta_pattern[0];
                     if atom_spawn_points.iter().all(|a| atoms.locs.get(&a.pos) == None){
                         for a in atom_spawn_points{
                             atoms.create_atom(a.clone());
                         }
+                        let tmp = meta_pattern.remove(0);
+                        meta_pattern.push(tmp);
                     }
                 }
-                Output(atom_drop_points, output_count) => {
+                Output(meta_pattern, output_count) => {
+                    let atom_drop_points = &meta_pattern[0];
                     let full_match = atom_drop_points.iter().all( |a|-> bool {
                             let try_key = atoms.locs.get(&a.pos);
                             if let Some(&atom_key) = try_key{
@@ -1049,6 +1057,8 @@ impl World {
                         if *output_count > 0{
                             *output_count -= 1;
                         }
+                        let tmp = meta_pattern.remove(0);
+                        meta_pattern.push(tmp);
                     }
                 },
                 Disposal => {
@@ -1073,7 +1083,6 @@ impl World {
         //spawning atom = 15/41
         //arm base = 20/41
         //grabber, cabinet = 24/41, 20/41
-        use smallvec::SmallVec;
         const ATOM_RADIUS: f32 = 29./41.;
         const ARM_RADIUS: f32 = 20./41.;
         const SPAWNING_ATOM_RADIUS: f32 = 15./41.;
@@ -1503,11 +1512,14 @@ impl World {
         }
         
         for glyph in &mut world.glyphs {
-            if let GlyphType::Input(atom_spawn_points) = &glyph.glyph_type {
+            if let GlyphType::Input(meta_pattern) = &mut glyph.glyph_type {
+                let atom_spawn_points = &meta_pattern[0];
                 if atom_spawn_points.iter().all(|a| world.atoms.locs.get(&a.pos) == None){
                     for a in atom_spawn_points{
                         world.atoms.create_atom(a.clone());
                     }
+                    let tmp = meta_pattern.remove(0);
+                    meta_pattern.push(tmp);
                 }
             }
         }

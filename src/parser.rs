@@ -14,6 +14,7 @@ use simple_eyre::{
 use num_traits::FromPrimitive;
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use smallvec::smallvec;
 
 type AllowedParts = u64;
 /*use bitflags::bitflags;
@@ -389,7 +390,7 @@ pub struct FullPuzzle {
     //production data here
 }
 fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
-    let mut atoms = AtomPattern::new();
+    let mut atoms = Vec::new();
     let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
     for i in 0..(parse_int(f)? as usize) {
         let atom_type = AtomType::from_u8(parse_byte(f)?).ok_or(eyre!("Illegal atom type"))?;
@@ -414,9 +415,10 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
         atoms[atom1].connections[rot as usize] = bond_type;
         atoms[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
     }
-    Ok(atoms)
+    let final_output = smallvec![atoms];
+    Ok(final_output)
 }
-fn process_repeats(input: &AtomPattern, reps: i32) -> Result<AtomPattern> {
+fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     let mut rep_offset = None;
     for atom in input {
         if atom.atom_type == AtomType::RepeatingOutputMarker {
@@ -441,7 +443,7 @@ fn process_repeats(input: &AtomPattern, reps: i32) -> Result<AtomPattern> {
             }
         }
     }
-    Ok(output)
+    Ok(smallvec![output])
 }
 
 pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
@@ -541,7 +543,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 let id = p.input_output_index;
                 let molecule = puzzle.outputs.get(id as usize)
                     .ok_or(eyre!("Output(rep) ID {} not found (max {})",id,puzzle.outputs.len()))?;
-                let repeated_molecule = process_repeats(molecule, 6)?;
+                let repeated_molecule = process_repeats(&molecule[0], 6)?;
                 let output_glyph =
                     GlyphType::Output(repeated_molecule, 6 * puzzle.output_multiplier);
                 glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
