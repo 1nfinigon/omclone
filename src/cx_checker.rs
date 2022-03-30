@@ -1,11 +1,7 @@
-#[cfg(feature = "cx_checker")]
 mod parser;
-#[cfg(feature = "cx_checker")]
 mod sim;
-#[cfg(feature = "cx_checker")]
 use wasm_bindgen::prelude::*;
 
-#[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 extern "C" {
     fn add_text(s: &str);
@@ -61,7 +57,6 @@ fn make_variant(variant_id: usize, source: &Vec<sim::Atom>) -> CXVariant{
         input, output, input_name, output_name
     }
 }
-#[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 pub fn evaluate_solution(solution: &[u8]){
     #[cfg(feature = "console_error_panic_hook")]
@@ -125,7 +120,6 @@ pub fn evaluate_solution(solution: &[u8]){
     }
 }
 
-#[cfg(feature = "cx_checker")]
 #[wasm_bindgen]
 pub fn random_test(solution: &[u8], variants: &[usize]) -> bool{
     #[cfg(feature = "console_error_panic_hook")]

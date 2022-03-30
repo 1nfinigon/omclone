@@ -26,6 +26,7 @@ path = "src/bin/benchmark.rs"
 name="omclone_cxchecker"
 crate-type = ["cdylib"]
 required-features = ["cx_checker"]
+path = "src/cx_checker.rs"
 
 [profile.dev]
 opt-level = 3
@@ -40,6 +41,7 @@ num-traits = "0.2"
 enum-primitive-derive = "0.2.2"
 rustc-hash = "1.1"
 smallvec = "1.8"
+
 
 egui = {version = "0.16.0", optional = true}
 miniquad = { version = "=0.3.0-alpha.43", optional = true}

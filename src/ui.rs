@@ -320,6 +320,9 @@ impl EventHandler for MyMiniquadApp {
                             ui.label("Loop length:");
                             ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
+                            if loaded.max_timestep < loaded.base_world.repeat_length{
+                                loaded.max_timestep = loaded.base_world.repeat_length;
+                            }
                             ui.separator();
                             ui.checkbox(&mut loaded.show_area, "Show Area");
                             ui.separator();

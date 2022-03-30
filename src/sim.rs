@@ -1177,6 +1177,16 @@ impl World {
             self.do_instruction(motion, i, self.timestep)?;
         }
         self.process_glyphs(motion, true);
+        
+        for i in 0..self.arms.len() {
+            let position = self.arms[i].pos;
+            for j in i+1..self.arms.len() {
+                if position == self.arms[j].pos {
+                    let location = pos_to_xy(position);
+                    return Err(SimError{location, error_str: &"Arm-Arm collision!"});
+                }
+            }
+        }
         Ok(())
     }
     pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{

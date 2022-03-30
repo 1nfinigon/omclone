@@ -353,7 +353,8 @@ impl RenderDataBase {
         for glyph in world.glyphs.iter(){
             use GlyphType::*;
             match &glyph.glyph_type{
-                Input(atoms) | Output(atoms,_) => {
+                Input(atoms_meta) | Output(atoms_meta,_) => {
+                    let atoms = &atoms_meta[0];
                     //Draw in/out atom bonds
                     ctx.apply_pipeline(&self.pipeline);
                     ctx.apply_bindings(&self.shapes.bond_bindings);
@@ -418,7 +419,8 @@ impl RenderDataBase {
                 TriplexBond     => 10,
                 Unbonding       => 11,
                 Unification     => 12,
-                Input(atoms) | Output(atoms,_) => {
+                Input(atoms_meta) | Output(atoms_meta,_) => {
+                    let atoms = &atoms_meta[0];
                     ctx.apply_bindings(&self.shapes.glyph_bindings[14]);
                     for atom in atoms{
                         let offset = pos_to_xy(&atom.pos);
