@@ -372,27 +372,28 @@ impl EventHandler for MyMiniquadApp {
                         let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
                         //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                         ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
-
                         let mut force_reload = false;
                         let mut target_time = None;
-                        for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
-                            let text = a.instruction_tape.to_string();
-                            let mut text_buf = TapeBuffer{
-                                tape_ref: &mut a.instruction_tape,
-                                force_reload: &mut force_reload,
-                                tape_mode: loaded.tape_mode,
-                                held_str: text
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(format!("{:02}",a_num));
-                                let text_output = egui::TextEdit::singleline(&mut text_buf)
-                                    .code_editor().desired_width(f32::INFINITY)
-                                    .show(ui);
-                                if let Some(cursor) = text_output.cursor_range{
-                                    target_time = Some(cursor.primary.ccursor.index);
-                                }
-                            });
-                        }
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
+                                let text = a.instruction_tape.to_string();
+                                let mut text_buf = TapeBuffer{
+                                    tape_ref: &mut a.instruction_tape,
+                                    force_reload: &mut force_reload,
+                                    tape_mode: loaded.tape_mode,
+                                    held_str: text
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{:02}",a_num+1));
+                                    let text_output = egui::TextEdit::singleline(&mut text_buf)
+                                        .code_editor().desired_width(f32::INFINITY)
+                                        .show(ui);
+                                    if let Some(cursor) = text_output.cursor_range{
+                                        target_time = Some(cursor.primary.ccursor.index);
+                                    }
+                                });
+                            }
+                        });
                         if let Some(target) = target_time {
                             loaded.try_set_target_time(target);
                         }

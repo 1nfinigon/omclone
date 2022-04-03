@@ -516,7 +516,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TArm(atype) => {
                 let instr = process_instructions(&p.instructions)?;
-                arms.push(Arm::new(p.pos, p.rot, p.arm_size, *atype, instr));
+                arms.push((Arm::new(p.pos, p.rot, p.arm_size, *atype, instr),p.arm_index));
             }
             TInput => {
                 let id = p.input_output_index;
@@ -558,5 +558,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
         }
     }
+    arms.sort_by(|a, b| a.1.cmp(&b.1));
+    let arms = arms.into_iter().map(|a| a.0).collect();
     Ok(InitialWorld { glyphs, arms })
 }
