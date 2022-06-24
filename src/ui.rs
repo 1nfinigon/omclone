@@ -151,7 +151,7 @@ enum AppState{
     NotLoaded,Loaded(Loaded) 
 }
 enum AppStateUpdate{
-    NoChange, LoadFromData, ResetHome
+    NoChange, LoadFromData, LoadFromJS, ResetHome
 }
 use AppState::*;
 
@@ -185,6 +185,66 @@ impl MyMiniquadApp {
             render_data,app_state,unloaded_info
         }
     }
+    pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read, ctx: &mut Context){
+        let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
+        let solution = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
+        println!("Check: {:?}", solution.stats);
+        let init = parser::puzzle_prep(&puzzle, &solution).unwrap();
+        for (a_num, a) in init.arms.iter().enumerate(){
+            println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
+        }
+        let world = World::setup_sim(&init).unwrap();
+        let test_world = world.clone();
+
+        let float_world = FloatWorld::new();
+        let mut saved_motions = WorldStepInfo::new();
+        saved_motions.clear();
+        let camera = CameraSetup::frame_center(&test_world);
+        let tracks = setup_tracks(ctx, &test_world.track_map);
+        let new_loaded = Loaded{
+            base_world: world.clone(),
+            last_world: world,
+            curr_time: 0.,
+            curr_substep: 0,
+            substep_count: 8,
+            float_world,saved_motions,
+        
+            max_timestep: 100,//test_world.timestep as usize,
+            camera,tracks,solution,
+            message: None,
+        
+            tape_mode: false,
+            run_state: RunState::Manual(0),
+            show_area: true,
+            run_speed: 0.05,
+            popup_reload: false,
+        };
+        self.app_state = Loaded(new_loaded);
+    }
+}
+
+
+//Will be able to remove in Rust 1.63
+#[cfg(feature = "display_ui")]
+use once_cell::sync::Lazy;
+#[cfg(feature = "display_ui")]
+static JS_PUZZLE_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
+#[cfg(feature = "display_ui")]
+static JS_SOLUTION_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
+
+#[cfg(feature = "display_ui")]
+#[no_mangle]
+pub extern "C" fn js_load_puzzle(puzzle: sapp_jsutils::JsObject){
+    let mut puzzle_vec = Vec::new();
+    puzzle.to_byte_buffer(&mut puzzle_vec);
+    *JS_PUZZLE_INPUT.lock().unwrap() = Some(puzzle_vec);
+}
+#[cfg(feature = "display_ui")]
+#[no_mangle]
+pub extern "C" fn js_load_solution(solution: sapp_jsutils::JsObject){
+    let mut solution_vec = Vec::new();
+    solution.to_byte_buffer(&mut solution_vec);
+    *JS_SOLUTION_INPUT.lock().unwrap() = Some(solution_vec);
 }
 
 impl EventHandler for MyMiniquadApp {
@@ -318,8 +378,13 @@ impl EventHandler for MyMiniquadApp {
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                             ui.label("Loop length:");
+                            #[cfg(feature = "editor_ui")]
                             ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
+                            #[cfg(feature = "display_ui")]
+                            ui.add_enabled(false, egui::DragValue::new(&mut loaded.base_world.repeat_length)
+                                .clamp_range(min_size..=usize::MAX));
+                            
                             if loaded.max_timestep < loaded.base_world.repeat_length{
                                 loaded.max_timestep = loaded.base_world.repeat_length;
                             }
@@ -328,7 +393,7 @@ impl EventHandler for MyMiniquadApp {
                             ui.separator();
                             ui.label("Speed:");
                             ui.add(egui::DragValue::new(&mut loaded.run_speed)
-                                .clamp_range(0.01..=10.0).fixed_decimals(2).speed(0.002));
+                                .clamp_range(0.01..=10.0f32).fixed_decimals(2).speed(0.002));
                             let (mut running_free, enabled) = match loaded.run_state{
                                 RunState::FreeRun => (true, true),
                                 RunState::Manual(_) => (false, true),
@@ -342,99 +407,116 @@ impl EventHandler for MyMiniquadApp {
                                 loaded.try_set_target_time(loaded.curr_time.ceil() as usize);
                             }
                         });
-                        ui.horizontal(|ui| {
-                            if ui.button("Save").clicked() {
-                                let dat = &self.unloaded_info;
-                                let base_path = Path::new(&dat.base);
-                                let solution_path = base_path.join(&dat.solution);
-                                let f = File::create(solution_path).unwrap();
-                                let mut writer = BufWriter::new(f);
-                                let base = &loaded.base_world;
-                                let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
-                                parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
-                                if !loaded.solution.solution_name.contains("omclone"){
-                                    loaded.solution.solution_name += "(omclone)";
-                                }
-                                parser::write_solution(&mut writer, &loaded.solution).unwrap();
-                                writer.flush().unwrap();
-                                loaded.message = Some(String::from("Saved!"));
-                            }
-                            ui.separator();
-                            if ui.button("Load").clicked() {
-                                loaded.popup_reload = true;
-                            }
-                        });
-                    });
-                    egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
-                        ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
-                        let curr_timestep = loaded.curr_time.floor() as usize;
-                        let end_spacing = loaded.max_timestep.saturating_sub(curr_timestep);
-                        let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
-                        //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
-                        ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
-                        let mut force_reload = false;
-                        let mut target_time = None;
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
-                                let text = a.instruction_tape.to_string();
-                                let mut text_buf = TapeBuffer{
-                                    tape_ref: &mut a.instruction_tape,
-                                    force_reload: &mut force_reload,
-                                    tape_mode: loaded.tape_mode,
-                                    held_str: text
-                                };
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{:02}",a_num+1));
-                                    let text_output = egui::TextEdit::singleline(&mut text_buf)
-                                        .code_editor().desired_width(f32::INFINITY)
-                                        .show(ui);
-                                    if let Some(cursor) = text_output.cursor_range{
-                                        target_time = Some(cursor.primary.ccursor.index);
+                        #[cfg(feature = "editor_ui")]
+                        {
+                            ui.horizontal(|ui| {
+                                if ui.button("Save").clicked() {
+                                    let dat = &self.unloaded_info;
+                                    let base_path = Path::new(&dat.base);
+                                    let solution_path = base_path.join(&dat.solution);
+                                    let f = File::create(solution_path).unwrap();
+                                    let mut writer = BufWriter::new(f);
+                                    let base = &loaded.base_world;
+                                    let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
+                                    parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
+                                    if !loaded.solution.solution_name.contains("omclone"){
+                                        loaded.solution.solution_name += "(omclone)";
                                     }
-                                });
+                                    parser::write_solution(&mut writer, &loaded.solution).unwrap();
+                                    writer.flush().unwrap();
+                                    loaded.message = Some(String::from("Saved!"));
+                                }
+                                ui.separator();
+                                if ui.button("Load").clicked() {
+                                    loaded.popup_reload = true;
+                                }
+                            });
+                        }
+                    });
+                    #[cfg(feature = "editor_ui")]
+                    {
+                        egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
+                            ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
+                            let curr_timestep = loaded.curr_time.floor() as usize;
+                            let end_spacing = loaded.max_timestep.saturating_sub(curr_timestep);
+                            let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
+                            //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
+                            ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
+                            let mut force_reload = false;
+                            let mut target_time = None;
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
+                                    let text = a.instruction_tape.to_string();
+                                    let mut text_buf = TapeBuffer{
+                                        tape_ref: &mut a.instruction_tape,
+                                        force_reload: &mut force_reload,
+                                        tape_mode: loaded.tape_mode,
+                                        held_str: text
+                                    };
+                                    ui.horizontal(|ui| {
+                                        ui.label(format!("{:02}",a_num+1));
+                                        let text_output = egui::TextEdit::singleline(&mut text_buf)
+                                            .code_editor().desired_width(f32::INFINITY)
+                                            .show(ui);
+                                        if let Some(cursor) = text_output.cursor_range{
+                                            target_time = Some(cursor.primary.ccursor.index);
+                                        }
+                                    });
+                                }
+                            });
+                            if let Some(target) = target_time {
+                                loaded.try_set_target_time(target);
+                            }
+                            if force_reload {
+                                let min_size = loaded.base_world.arms.iter()
+                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                                if loaded.base_world.repeat_length < min_size{
+                                    loaded.base_world.repeat_length = min_size;
+                                }
+                                if let RunState::Crashed(_) = loaded.run_state{
+                                    loaded.run_state = RunState::Manual(loaded.last_world.timestep as usize);
+                                }
+                                loaded.reset_worlds();
+                            };
+                        });
+                        egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
+                            if ui.button("Reload current").clicked() {
+                                do_loading = AppStateUpdate::LoadFromData;
+                            }
+                            if ui.button("Load New").clicked() {
+                                do_loading = AppStateUpdate::ResetHome;
                             }
                         });
-                        if let Some(target) = target_time {
-                            loaded.try_set_target_time(target);
-                        }
-                        if force_reload {
-                            let min_size = loaded.base_world.arms.iter()
-                                .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
-                            if loaded.base_world.repeat_length < min_size{
-                                loaded.base_world.repeat_length = min_size;
-                            }
-                            if let RunState::Crashed(_) = loaded.run_state{
-                                loaded.run_state = RunState::Manual(loaded.last_world.timestep as usize);
-                            }
-                            loaded.reset_worlds();
-                        };
-                    });
-                    egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
-                        if ui.button("Reload current").clicked() {
-                            do_loading = AppStateUpdate::LoadFromData;
-                        }
-                        if ui.button("Load New").clicked() {
-                            do_loading = AppStateUpdate::ResetHome;
-                        }
-                    });
+                    }
                 }
                 NotLoaded => {
                     let dat = &mut self.unloaded_info;
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Base path: ");
-                            ui.text_edit_singleline(&mut dat.base);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Puzzle: ");
-                            ui.text_edit_singleline(&mut dat.puzzle);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Solution: ");
-                            ui.text_edit_singleline(&mut dat.solution);
-                        });
-                        if ui.button("Load").clicked() {
-                            do_loading = AppStateUpdate::LoadFromData;
+                        
+                        #[cfg(feature = "editor_ui")]
+                        {
+                            ui.horizontal(|ui| {
+                                ui.label("Base path: ");
+                                ui.text_edit_singleline(&mut dat.base);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Puzzle: ");
+                                ui.text_edit_singleline(&mut dat.puzzle);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Solution: ");
+                                ui.text_edit_singleline(&mut dat.solution);
+                            });
+                            if ui.button("Load").clicked() {
+                                do_loading = AppStateUpdate::LoadFromData;
+                            }
+                        }
+                        #[cfg(feature = "display_ui")]
+                        {
+                            ui.label("Upload the puzzle and the solution");
+                            if JS_PUZZLE_INPUT.lock().unwrap().is_some() && JS_SOLUTION_INPUT.lock().unwrap().is_some(){
+                                do_loading = AppStateUpdate::LoadFromJS;
+                            }
                         }
                     });
                 }
@@ -447,55 +529,25 @@ impl EventHandler for MyMiniquadApp {
                 self.app_state = NotLoaded;
             }
             AppStateUpdate::LoadFromData => {
-                let dat = &self.unloaded_info;
-                let base_path = Path::new(&dat.base);
-                let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
-                let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
-                let solution_path = base_path.join(&dat.solution);
-                let f_sol = File::open(&solution_path).unwrap();
-                let solution = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
-                println!("Check: {:?}", solution.stats);
-                let init = parser::puzzle_prep(&puzzle, &solution).unwrap();
-                for (a_num, a) in init.arms.iter().enumerate(){
-                    println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
+                #[cfg(feature = "editor_ui")]
+                {
+                    let dat = &self.unloaded_info;
+                    let base_path = Path::new(&dat.base);
+                    let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
+                    let solution_path = base_path.join(&dat.solution);
+                    let f_sol = File::open(&solution_path).unwrap();
+                    self.load(f_puzzle, f_sol, ctx);
                 }
-                let world = World::setup_sim(&init).unwrap();
-                let mut test_world = world.clone();
-
-                let mut float_world = FloatWorld::new();
-                let mut saved_motions = WorldStepInfo::new();
-                /*while !test_world.is_complete() && test_world.timestep < 10000{
-                    let res = test_world.run_step(false, &mut saved_motions, &mut float_world);
-                    if let Err(e) = res{
-                        println!("test world error: {:?}", e);
-                        break;
-                    }
-                    if test_world.timestep % 100 == 0{
-                        println!("Initial sim step {:03}", test_world.timestep);
-                    }
-                }*/
-                saved_motions.clear();
-                let camera = CameraSetup::frame_center(&test_world);
-                let tracks = setup_tracks(ctx, &test_world.track_map);
-                let new_loaded = Loaded{
-                    base_world: world.clone(),
-                    last_world: world,
-                    curr_time: 0.,
-                    curr_substep: 0,
-                    substep_count: 8,
-                    float_world,saved_motions,
-                
-                    max_timestep: 100,//test_world.timestep as usize,
-                    camera,tracks,solution,
-                    message: None,
-                
-                    tape_mode: false,
-                    run_state: RunState::Manual(0),
-                    show_area: true,
-                    run_speed: 0.05,
-                    popup_reload: false,
-                };
-                self.app_state = Loaded(new_loaded);
+            }
+            AppStateUpdate::LoadFromJS => {
+                #[cfg(feature = "display_ui")]
+                {
+                    let puzzle = JS_PUZZLE_INPUT.lock().unwrap();
+                    let f_puzzle = puzzle.as_ref().unwrap();
+                    let solution = JS_SOLUTION_INPUT.lock().unwrap();
+                    let f_sol = solution.as_ref().unwrap();
+                    self.load(f_puzzle.as_slice(), f_sol.as_slice(), ctx);
+                }
             }
         }
 

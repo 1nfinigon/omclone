@@ -1,5 +1,5 @@
-mod parser;
-mod sim;
+use crate::parser;
+use crate::sim;
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::{install, eyre::Result};

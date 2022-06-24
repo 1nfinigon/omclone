@@ -156,7 +156,7 @@ fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> 
     match stats{
         None => write_int(f, 0)?,
         Some(stats) => {
-            write_int(f, 1)?;
+            write_int(f, 4)?;
             write_int(f, 0)?;
             write_int(f, stats.cycles)?;
             write_int(f, 1)?;
