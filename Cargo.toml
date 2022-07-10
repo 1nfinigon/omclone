@@ -6,11 +6,13 @@ default-run = "omclone"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["display_ui"]
+default = ["editor_ui"]
 #choose one of the following
 benchmark = []
 editor_ui = ["egui", "miniquad", "egui-miniquad", "image"]
-display_ui = ["egui", "miniquad", "egui-miniquad", "image", "sapp-jsutils", "once_cell"]
+display_ui = ["egui", "miniquad", "egui-miniquad", "image"]
+#Can add this to either of the prior _ui features
+js_ui_mod = ["sapp-jsutils", "once_cell"]
 
 [[bin]]
 name="omclone"
@@ -31,6 +33,10 @@ path = "src/main.rs"
 opt-level = 3
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+opt-level = "s"
+lto = true
 
 [dependencies]
 slotmap = "1.0"

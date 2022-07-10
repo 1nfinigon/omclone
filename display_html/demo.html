@@ -10,10 +10,10 @@
         canvas {
             margin: 0px;
             padding: 0px;
-            width: 100%;
-            height: 100%;
             overflow: hidden;
-            position: absolute;
+			display: flex;
+			flex-flow: column;
+			height: 100%;
             background: black;
             z-index: 0;
         };
@@ -71,8 +71,24 @@
 		}
 		puz_input.addEventListener('change', read_puzzle);
 		sol_input.addEventListener('change', read_solution);
+		
+		function on_init(){
+			if (window.opener && window.opener !== window){
+				window.addEventListener('message', function (e) {
+					if (e.data && typeof e.data === 'object' && e.data.command && e.data.command === 'load') {
+						wasm_exports.js_load_puzzle(js_object(e.data.puzzle));
+						wasm_exports.js_load_solution(js_object(e.data.solution));
+					}
+				});
+				window.opener.postMessage("Hello","*");
+			}
+		}
+		
+		miniquad_add_plugin({ on_init });
+		
+		load("omclone_display.wasm");
 	</script>
 
-    <script>load("omclone_display.wasm");</script></body>
+    </body>
 
 </html>

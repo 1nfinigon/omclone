@@ -15,7 +15,7 @@ use simple_eyre::{install, eyre::Result};
 
 #[cfg(any(feature = "editor_ui",feature = "display_ui",))]
 fn main() -> Result< () >{
-    #[cfg(any(feature = "editor_ui"))]
+    #[cfg(not(feature = "js_ui_mod"))]
     std::env::set_var("RUST_BACKTRACE", "full");
     install()?;
 

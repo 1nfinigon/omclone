@@ -15,24 +15,6 @@ pub fn rot_to_angle(r: Rot) -> f32{
 type Vert = [f32;2];
 //Vertex format: (x, y)
 //note: 1 hex has inner radius of 1 (width of 2).
-fn setup_bonds(ctx: &mut Context) -> Bindings{
-    const BOND_VERT_BUF: [Vert;4] = [
-        [ 0.,-0.1,],
-        [ 0., 0.1,],
-        [ 2., -0.1,],
-        [ 2., 0.1,]];
-    const BOND_INDEX_BUF: [u16;6] = [
-        0, 1, 2,
-        0, 2, 3,];
-    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &BOND_VERT_BUF);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &BOND_INDEX_BUF);
-    Bindings {
-        vertex_buffers: vec![vb],
-        index_buffer: index_buffer,
-        images: vec![],
-    }
-}
-
 fn setup_arms(ctx: &mut Context) -> Bindings{
     const ARM_VERT_BUF: [Vert;14] = [
         //Arm Base
@@ -101,19 +83,19 @@ pub fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> TrackBindings{
 
 type UvVert = [f32;4];
 //(x, y), (u, v)
-const GLYPH_COUNT:usize = 16;
-fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
-    const GLYPH_VERT_BUF: [UvVert;4] = [
+const TEXTURE_COUNT:usize = 20;
+fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
+    const TEXTURE_VERT_BUF: [UvVert;4] = [
         [-3.,-3.,    0., 1.],
         [-3., 3.,    0., 0.],
         [ 3.,-3.,    1., 1.],
         [ 3., 3.,    1., 0.]];
-    const GLYPH_INDEX_BUF: [u16;6] = [
+    const TEXTURE_INDEX_BUF: [u16;6] = [
         0, 1, 2,
         1, 2, 3];
-    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &GLYPH_VERT_BUF);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &GLYPH_INDEX_BUF);
-    let glyph_list:[&[u8];GLYPH_COUNT] = [
+    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &TEXTURE_VERT_BUF);
+    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &TEXTURE_INDEX_BUF);
+    let texture_list:[&[u8];TEXTURE_COUNT] = [
         include_bytes!("../images/Ani.png"),
         include_bytes!("../images/Bonder.png"),
         include_bytes!("../images/Calcification.png"),
@@ -127,11 +109,15 @@ fn setup_glyphs(ctx: &mut Context) -> [Bindings;GLYPH_COUNT]{
         include_bytes!("../images/Triplex.png"),
         include_bytes!("../images/Unbonder.png"),
         include_bytes!("../images/Unification.png"),
-        include_bytes!("../images/HexGrid.png"),
+        include_bytes!("../images/HexGrid.png"),//13
         include_bytes!("../images/ShadeAtomInOut.png"),
         include_bytes!("../images/ShadeAreaFill.png"),
+        include_bytes!("../images/BondNormal.png"),//16
+		include_bytes!("../images/BondRed.png"),
+		include_bytes!("../images/BondWhite.png"),
+		include_bytes!("../images/BondYellow.png"),
     ];
-    glyph_list.map(|byte_data| -> Bindings{
+    texture_list.map(|byte_data| -> Bindings{
         use image::io::Reader as ImageReader;
         use image::ImageFormat::Png;
         use std::io::Cursor;
@@ -167,8 +153,7 @@ fn setup_circle(ctx: &mut Context) -> Bindings{
 struct ShapeStore{
     arm_bindings: Bindings,
     circle_bindings: Bindings,
-    bond_bindings: Bindings,
-    glyph_bindings: [Bindings;GLYPH_COUNT],
+    texture_bindings: [Bindings;TEXTURE_COUNT],
 }
 pub struct CameraSetup{
     pub scale: f32,
@@ -202,7 +187,7 @@ impl CameraSetup{
 }
 pub struct RenderDataBase {
     pipeline: Pipeline,
-    pipeline_glyphs: Pipeline,
+    pipeline_textured: Pipeline,
     pipeline_tracks: Pipeline,
     shapes: ShapeStore,
 }
@@ -262,7 +247,7 @@ impl RenderDataBase {
         const F_UV_SHADE: &str = include_str!("uv_frag.fs");
         let shader_uv = Shader::new(ctx, V_UV_SHADE, F_UV_SHADE, shader_meta_uv).unwrap();
         use miniquad::graphics::*;
-        let pipeline_glyphs = Pipeline::with_params(
+        let pipeline_textured = Pipeline::with_params(
             ctx,
             &[BufferLayout::default()],
             &[
@@ -292,12 +277,11 @@ impl RenderDataBase {
         let shapes = ShapeStore{
             arm_bindings: setup_arms(ctx),
             circle_bindings: setup_circle(ctx),
-            bond_bindings: setup_bonds(ctx),
-            glyph_bindings: setup_glyphs(ctx),
+            texture_bindings: setup_textures(ctx),
         };
         
         Self {
-            pipeline,pipeline_glyphs,pipeline_tracks,shapes
+            pipeline,pipeline_textured,pipeline_tracks,shapes
         }
     }
 }
@@ -331,6 +315,47 @@ fn atom_color(t: AtomType) -> [f32;3]{
 }
 
 impl RenderDataBase {
+	fn draw_atoms(&self, ctx: &mut Context, atoms:&[FloatAtom], camera: &CameraSetup){
+        let scale = camera.scale;
+        let world_offset = camera.offset;
+        ctx.apply_pipeline(&self.pipeline_textured);
+
+        //Draw atom bonds
+        let atoms_copy = atoms;
+		for atom in atoms_copy {
+			let offset = [atom.pos.x, atom.pos.y];
+			for r in 0..6 {
+				let matches = [
+					(Bonds::NORMAL, &self.shapes.texture_bindings[16]),
+					(Bonds::TRIPLEX_R, &self.shapes.texture_bindings[17]),
+					(Bonds::TRIPLEX_K, &self.shapes.texture_bindings[18]),
+					(Bonds::TRIPLEX_Y, &self.shapes.texture_bindings[19])];
+				let bond = atom.connections[r];
+				for (bondtype, bindtype) in matches{
+					if bond.intersects(bondtype){
+						let angle = rot_to_angle(r as Rot)+atom.rot;
+						ctx.apply_bindings(bindtype);
+						ctx.apply_uniforms(&UvUniforms {
+							offset, world_offset, angle, scale
+						});
+						ctx.draw(0, 4, 1);
+					}
+				}
+			}
+		}
+		//Draw atom circles
+		ctx.apply_pipeline(&self.pipeline);
+		ctx.apply_bindings(&self.shapes.circle_bindings);
+		for atom in atoms {
+			let color = atom_color(atom.atom_type);
+			let offset = [atom.pos.x, atom.pos.y];
+			let angle = 0.;
+			ctx.apply_uniforms(&BasicUniforms {
+				color, offset, world_offset, angle, scale
+			});
+			ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
+		}
+	}
     //note: assumes ctx is in the middle of a render pass
     pub fn draw(&self, ctx: &mut Context, camera: &CameraSetup, tracks: &TrackBindings,
          show_area: bool, world: &World, float_world: &FloatWorld)
@@ -354,42 +379,16 @@ impl RenderDataBase {
             use GlyphType::*;
             match &glyph.glyph_type{
                 Input(atoms_meta) | Output(atoms_meta,_) => {
-                    let atoms = &atoms_meta[0];
-                    //Draw in/out atom bonds
-                    ctx.apply_pipeline(&self.pipeline);
-                    ctx.apply_bindings(&self.shapes.bond_bindings);
-                    for atom in atoms {
-                        let color = [1., 1., 1.];
-                        let offset = pos_to_xy(&atom.pos);
-                        for r in 0..6 {
-                            let bond = atom.connections[r];
-                            if bond == Bonds::NORMAL{
-                                let angle = rot_to_angle(r as Rot);
-                                ctx.apply_uniforms(&BasicUniforms {
-                                    color, offset, world_offset, angle, scale
-                                });
-                                ctx.draw(0, 4, 1);
-                            }
-                        }
-                    }
-                    //Draw in/out atom circles
-                    ctx.apply_bindings(&self.shapes.circle_bindings);
-                    for atom in atoms {
-                        let color = atom_color(atom.atom_type);
-                        let offset = pos_to_xy(&atom.pos);
-                        let angle = 0.;
-                        ctx.apply_uniforms(&BasicUniforms {
-                            color, offset, world_offset, angle, scale
-                        });
-                        ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
-                    }
+                    let atoms = atoms_meta[0].iter().map(|x| x.into());
+                    let atoms_vec:Vec<FloatAtom> = atoms.collect();
+					self.draw_atoms(ctx, &atoms_vec, camera);
                 },
                 _ => continue,
             };
         }
         //Draw the Hex grid
-        ctx.apply_pipeline(&self.pipeline_glyphs);
-        ctx.apply_bindings(&self.shapes.glyph_bindings[13]);
+        ctx.apply_pipeline(&self.pipeline_textured);
+        ctx.apply_bindings(&self.shapes.texture_bindings[13]);
         for x in 0..(inv_scale/3.0).ceil() as i32 +1{
             for y in 0..(inv_scale/y_factor).ceil() as i32 *2+1{
                 let offset = [base_x+(x as f32*6.0),
@@ -421,8 +420,8 @@ impl RenderDataBase {
                 Unification     => 12,
                 Input(atoms_meta) | Output(atoms_meta,_) => {
                     let atoms = &atoms_meta[0];
-                    ctx.apply_bindings(&self.shapes.glyph_bindings[14]);
-                    for atom in atoms{
+                    ctx.apply_bindings(&self.shapes.texture_bindings[14]);
+                    for atom in atoms{ //transparent cover
                         let offset = pos_to_xy(&atom.pos);
                         ctx.apply_uniforms(&UvUniforms {
                             offset, world_offset, angle, scale
@@ -433,7 +432,7 @@ impl RenderDataBase {
                 },
                 Track(_) | Conduit(_) => continue,
             };
-            ctx.apply_bindings(&self.shapes.glyph_bindings[i]);
+            ctx.apply_bindings(&self.shapes.texture_bindings[i]);
             ctx.apply_uniforms(&UvUniforms {
                 offset, world_offset, angle, scale
             });
@@ -441,8 +440,8 @@ impl RenderDataBase {
         }
         //draw area cover
         if show_area{
-            ctx.apply_pipeline(&self.pipeline_glyphs);
-            ctx.apply_bindings(&self.shapes.glyph_bindings[15]);                
+            ctx.apply_pipeline(&self.pipeline_textured);
+            ctx.apply_bindings(&self.shapes.texture_bindings[15]);                
             for p in &world.area_touched{
                 let offset = pos_to_xy(p);
                 ctx.apply_uniforms(&UvUniforms {
@@ -451,43 +450,13 @@ impl RenderDataBase {
                 ctx.draw(0, 6, 1);
             }
         }
-        //Draw atom bonds
-        ctx.apply_pipeline(&self.pipeline);
-        ctx.apply_bindings(&self.shapes.bond_bindings);
-        for f_atom in &float_world.atoms_xy {
-            let color_white = [1., 1., 1.];
-            let color_red = [1., 0., 0.];
-            let offset = [f_atom.pos.x, f_atom.pos.y];
-            for r in 0..6 {
-                let bond = f_atom.connections[r];
-                if bond == Bonds::NORMAL{
-                    let angle = rot_to_angle(r as Rot)+f_atom.rot;
-                    ctx.apply_uniforms(&BasicUniforms {
-                        color:color_white, offset, world_offset, angle, scale
-                    });
-                    ctx.draw(0, 4, 1);
-                }
-                if !((bond & Bonds::TRIPLEX).is_empty()){
-                    let angle = rot_to_angle(r as Rot)+f_atom.rot;
-                    ctx.apply_uniforms(&BasicUniforms {
-                        color:color_red, offset, world_offset, angle, scale
-                    });
-                    ctx.draw(0, 4, 1);
-                }
-            }
-        }
-        //Draw atom circles
-        ctx.apply_bindings(&self.shapes.circle_bindings);
-        for f_atom in &float_world.atoms_xy {
-            let color = atom_color(f_atom.atom_type);
-            let offset = [f_atom.pos.x, f_atom.pos.y];
-            let angle = 0.;
-            ctx.apply_uniforms(&BasicUniforms {
-                color, offset, world_offset, angle, scale
-            });
-            ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
-        }
+		
+		//Draw atoms
+        let atoms_slice = &float_world.atoms_xy[..];
+		self.draw_atoms(ctx, atoms_slice, camera);
+		
         //Draw arms
+        ctx.apply_pipeline(&self.pipeline);
         ctx.apply_bindings(&self.shapes.arm_bindings);
         for f_arm in float_world.arms_xy.iter() {
             let color = [0., 0., 0.];

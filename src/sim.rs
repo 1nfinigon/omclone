@@ -491,11 +491,22 @@ pub struct SolutionStats {
 
 pub type XYPos = Point2<f32>;
 pub type XYVec = Vector2<f32>;
+#[derive(Debug, Copy, Clone)]
 pub struct FloatAtom{
     pub pos: XYPos,
     pub rot: f32,
     pub atom_type: AtomType,
     pub connections: [Bonds; 6],
+}
+impl From<&Atom> for FloatAtom{
+	fn from(a: &Atom) -> FloatAtom {
+		return FloatAtom{
+			pos: pos_to_xy(a.pos),
+			rot: 0.,
+			atom_type: a.atom_type,
+			connections: a.connections,
+		}
+	}
 }
 pub struct FloatArm{
     pub pos: XYPos,
@@ -658,7 +669,7 @@ impl World {
                 motion.atoms.insert(this_key, movement);
                 let atom = &self.atoms.atom_map[this_key];
                 for dir in 0..6 {
-                    if !(atom.connections[dir as usize] & Bonds::DYNAMIC_BOND).is_empty() {
+                    if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
                         let newpos = atom.pos + rot_to_pos(dir);
                         let newkey = *self.atoms.locs.get(&newpos).expect("Inconsistent atoms (movement prep)");
                         moving_atoms.push_back(newkey);
@@ -1026,7 +1037,7 @@ impl World {
                     if let (Some(&key1), Some(&key2)) = (atoms.locs.get(&pos), atoms.locs.get(&pos_bi)){
                         let bond1 = atoms.atom_map[key1].connections[rot];
                         assert_eq!(atoms.atom_map[key2].connections[(rot+3)%6], bond1, "Inconsistent bonds");
-                        if !(bond1 & Bonds::DYNAMIC_BOND).is_empty() {
+                        if bond1.intersects(Bonds::DYNAMIC_BOND) {
                             atoms.atom_map[key1].connections[rot] = Bonds::NO_BOND;
                             atoms.atom_map[key2].connections[(rot+3)%6] = Bonds::NO_BOND;
                         }

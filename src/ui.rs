@@ -1,16 +1,6 @@
 use miniquad::*;
 use crate::{sim::*, parser, render_sim::*};
 use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
-/*#[cfg(feature = "color_eyre")]
-use color_eyre::{
-    eyre::{bail, ensure, eyre},
-    Result,
-};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{
-    eyre::{bail, ensure, eyre},
-    Result,
-};*/
 
 use core::ops::Range;
 struct TapeBuffer<'a>{
@@ -151,7 +141,7 @@ enum AppState{
     NotLoaded,Loaded(Loaded) 
 }
 enum AppStateUpdate{
-    NoChange, LoadFromData, LoadFromJS, ResetHome
+    NoChange, Load, ResetHome
 }
 use AppState::*;
 
@@ -215,7 +205,7 @@ impl MyMiniquadApp {
         
             tape_mode: false,
             run_state: RunState::Manual(0),
-            show_area: true,
+            show_area: false,
             run_speed: 0.05,
             popup_reload: false,
         };
@@ -225,27 +215,35 @@ impl MyMiniquadApp {
 
 
 //Will be able to remove in Rust 1.63
-#[cfg(feature = "display_ui")]
+#[cfg(feature = "js_ui_mod")]
 use once_cell::sync::Lazy;
-#[cfg(feature = "display_ui")]
+#[cfg(feature = "js_ui_mod")]
 static JS_PUZZLE_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
-#[cfg(feature = "display_ui")]
+#[cfg(feature = "js_ui_mod")]
 static JS_SOLUTION_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
 
-#[cfg(feature = "display_ui")]
+#[cfg(feature = "js_ui_mod")]
 #[no_mangle]
 pub extern "C" fn js_load_puzzle(puzzle: sapp_jsutils::JsObject){
     let mut puzzle_vec = Vec::new();
     puzzle.to_byte_buffer(&mut puzzle_vec);
     *JS_PUZZLE_INPUT.lock().unwrap() = Some(puzzle_vec);
 }
-#[cfg(feature = "display_ui")]
+#[cfg(feature = "js_ui_mod")]
 #[no_mangle]
 pub extern "C" fn js_load_solution(solution: sapp_jsutils::JsObject){
     let mut solution_vec = Vec::new();
     solution.to_byte_buffer(&mut solution_vec);
     *JS_SOLUTION_INPUT.lock().unwrap() = Some(solution_vec);
 }
+
+#[cfg(feature = "js_ui_mod")]
+#[no_mangle]
+extern "C" {
+    fn save_file(filedata: sapp_jsutils::JsObject, filename: sapp_jsutils::JsObject);
+}
+
+const EDITOR_ENABLED: bool = cfg!(feature = "editor_ui");
 
 impl EventHandler for MyMiniquadApp {
     fn update(&mut self, _: &mut Context) {
@@ -323,25 +321,7 @@ impl EventHandler for MyMiniquadApp {
         self.egui_mq.run(ctx, |egui_ctx|{
             match &mut self.app_state{
                 Loaded(loaded) => {
-                    if let Some(msg) = &loaded.message{
-                        let mut opened = true;
-                        egui::Window::new("Message").open(&mut opened).show(egui_ctx, |ui| {
-                            ui.label(msg);
-                        });
-                        if !opened {loaded.message = None;}
-                    }
-                    egui::Window::new("Camera controls").show(egui_ctx, |ui| {
-                        ui.label("x:");
-                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[0])
-                            .speed(0.1));
-                        ui.label("y:");
-                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
-                            .speed(0.1));
-                        ui.label("zoom:");
-                        ui.add(egui::Slider::new(&mut loaded.camera.scale,0.001 ..= 0.1)
-                            .logarithmic(true));
-                    });
-                    egui::Window::new("World loaded").show(egui_ctx, |ui| {
+                    egui::TopBottomPanel::top("World loaded").show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         let mut target_time = loaded.curr_time.floor() as usize;
                         if loaded.max_timestep < target_time{
@@ -378,11 +358,8 @@ impl EventHandler for MyMiniquadApp {
                             let min_size = loaded.base_world.arms.iter()
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                             ui.label("Loop length:");
-                            #[cfg(feature = "editor_ui")]
-                            ui.add(egui::DragValue::new(&mut loaded.base_world.repeat_length)
-                                .clamp_range(min_size..=usize::MAX));
-                            #[cfg(feature = "display_ui")]
-                            ui.add_enabled(false, egui::DragValue::new(&mut loaded.base_world.repeat_length)
+
+                            ui.add_enabled(EDITOR_ENABLED, egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
                             
                             if loaded.max_timestep < loaded.base_world.repeat_length{
@@ -407,14 +384,44 @@ impl EventHandler for MyMiniquadApp {
                                 loaded.try_set_target_time(loaded.curr_time.ceil() as usize);
                             }
                         });
-                        #[cfg(feature = "editor_ui")]
-                        {
+                    });
+                    if let Some(msg) = &loaded.message{
+                        let mut opened = true;
+                        egui::Window::new("Message").open(&mut opened).show(egui_ctx, |ui| {
+                            ui.label(msg);
+                        });
+                        if !opened {loaded.message = None;}
+                    }
+                    egui::Window::new("Camera controls").show(egui_ctx, |ui| {
+                        ui.label("x:");
+                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[0])
+                            .speed(0.1));
+                        ui.label("y:");
+                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
+                            .speed(0.1));
+                        ui.label("zoom:");
+                        ui.add(egui::Slider::new(&mut loaded.camera.scale,0.001 ..= 0.1)
+                            .logarithmic(true));
+                    });
+					
+                    #[cfg(feature = "editor_ui")]
+                    {
+                        egui::Window::new("File info").show(egui_ctx, |ui| {
+                            ui.label("solution:");
+                            ui.text_edit_singleline(&mut loaded.solution.solution_name);
+                            ui.label("filename:");
+                            ui.text_edit_singleline(&mut self.unloaded_info.solution);
                             ui.horizontal(|ui| {
                                 if ui.button("Save").clicked() {
                                     let dat = &self.unloaded_info;
                                     let base_path = Path::new(&dat.base);
                                     let solution_path = base_path.join(&dat.solution);
+                                    
+                                    #[cfg(not(feature = "js_ui_mod"))]
                                     let f = File::create(solution_path).unwrap();
+                                    #[cfg(feature = "js_ui_mod")]
+                                    let f = Vec::<u8>::new();
+
                                     let mut writer = BufWriter::new(f);
                                     let base = &loaded.base_world;
                                     let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
@@ -431,8 +438,8 @@ impl EventHandler for MyMiniquadApp {
                                     loaded.popup_reload = true;
                                 }
                             });
-                        }
-                    });
+                        });
+                    }
                     #[cfg(feature = "editor_ui")]
                     {
                         egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
@@ -479,21 +486,32 @@ impl EventHandler for MyMiniquadApp {
                                 loaded.reset_worlds();
                             };
                         });
-                        egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
-                            if ui.button("Reload current").clicked() {
-                                do_loading = AppStateUpdate::LoadFromData;
-                            }
-                            if ui.button("Load New").clicked() {
+                    }
+                    egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
+                        #[cfg(not(feature = "js_ui_mod"))]
+                        {
+                                if ui.button("Reload current").clicked() {
+                                    do_loading = AppStateUpdate::Load;
+                                }
+                                if ui.button("Load New").clicked() {
+                                    do_loading = AppStateUpdate::ResetHome;
+                                }
+                        }
+                        #[cfg(feature = "js_ui_mod")]
+                        {
+                            ui.label("Choose files first, then press:");
+                            if ui.button("Reset").clicked() {
                                 do_loading = AppStateUpdate::ResetHome;
                             }
-                        });
-                    }
+
+                        }
+                    });
                 }
                 NotLoaded => {
                     let dat = &mut self.unloaded_info;
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
                         
-                        #[cfg(feature = "editor_ui")]
+                        #[cfg(not(feature = "js_ui_mod"))]
                         {
                             ui.horizontal(|ui| {
                                 ui.label("Base path: ");
@@ -508,14 +526,14 @@ impl EventHandler for MyMiniquadApp {
                                 ui.text_edit_singleline(&mut dat.solution);
                             });
                             if ui.button("Load").clicked() {
-                                do_loading = AppStateUpdate::LoadFromData;
+                                do_loading = AppStateUpdate::Load;
                             }
                         }
-                        #[cfg(feature = "display_ui")]
+                        #[cfg(feature = "js_ui_mod")]
                         {
                             ui.label("Upload the puzzle and the solution");
                             if JS_PUZZLE_INPUT.lock().unwrap().is_some() && JS_SOLUTION_INPUT.lock().unwrap().is_some(){
-                                do_loading = AppStateUpdate::LoadFromJS;
+                                do_loading = AppStateUpdate::Load;
                             }
                         }
                     });
@@ -528,8 +546,8 @@ impl EventHandler for MyMiniquadApp {
             AppStateUpdate::ResetHome => {
                 self.app_state = NotLoaded;
             }
-            AppStateUpdate::LoadFromData => {
-                #[cfg(feature = "editor_ui")]
+            AppStateUpdate::Load => {
+                #[cfg(not(feature = "js_ui_mod"))]
                 {
                     let dat = &self.unloaded_info;
                     let base_path = Path::new(&dat.base);
@@ -538,9 +556,7 @@ impl EventHandler for MyMiniquadApp {
                     let f_sol = File::open(&solution_path).unwrap();
                     self.load(f_puzzle, f_sol, ctx);
                 }
-            }
-            AppStateUpdate::LoadFromJS => {
-                #[cfg(feature = "display_ui")]
+                #[cfg(feature = "js_ui_mod")]
                 {
                     let puzzle = JS_PUZZLE_INPUT.lock().unwrap();
                     let f_puzzle = puzzle.as_ref().unwrap();
