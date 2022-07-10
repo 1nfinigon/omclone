@@ -321,7 +321,7 @@ impl EventHandler for MyMiniquadApp {
         self.egui_mq.run(ctx, |egui_ctx|{
             match &mut self.app_state{
                 Loaded(loaded) => {
-                    egui::TopBottomPanel::top("World loaded").show(egui_ctx, |ui| {
+                    egui::Window::new("World loaded").default_pos((0.,0.)).show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         let mut target_time = loaded.curr_time.floor() as usize;
                         if loaded.max_timestep < target_time{
@@ -400,7 +400,7 @@ impl EventHandler for MyMiniquadApp {
                         ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
                             .speed(0.1));
                         ui.label("zoom:");
-                        ui.add(egui::Slider::new(&mut loaded.camera.scale,0.001 ..= 0.1)
+                        ui.add(egui::Slider::new(&mut loaded.camera.scale_base,0.001 ..= 0.1)
                             .logarithmic(true));
                     });
 					

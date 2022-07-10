@@ -1030,8 +1030,8 @@ impl World {
                 }
                 TriplexBond => {
                     try_triplex_bond(atoms, &pos, &pos_bi, Bonds::TRIPLEX_K);
-                    try_triplex_bond(atoms, &pos, &pos_tri, Bonds::TRIPLEX_R);
-                    try_triplex_bond(atoms, &pos_bi, &pos_tri, Bonds::TRIPLEX_Y);
+                    try_triplex_bond(atoms, &pos, &pos_tri, Bonds::TRIPLEX_Y);
+                    try_triplex_bond(atoms, &pos_bi, &pos_tri, Bonds::TRIPLEX_R);
                 }
                 Unbonding => {
                     if let (Some(&key1), Some(&key2)) = (atoms.locs.get(&pos), atoms.locs.get(&pos_bi)){

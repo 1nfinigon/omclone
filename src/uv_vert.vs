@@ -4,7 +4,7 @@ attribute vec2 uv;
 uniform vec2 offset;
 uniform vec2 world_offset;
 uniform float angle;
-uniform float scale;
+uniform vec2 scale;
 varying lowp vec2 tex_uv;
 void main() {
     //TODO: Check if row-major or column-major

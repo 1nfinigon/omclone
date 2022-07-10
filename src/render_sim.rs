@@ -2,6 +2,8 @@ use miniquad::*;
 use crate::sim::*;
 
 pub type GFXPos = [f32;2];
+const DEFAULT_HEIGHT:f32 = 600.;
+const DEFAULT_WIDTH:f32 = 800.;
 use std::f32::consts::PI;
 pub fn pos_to_xy(input: &Pos) -> GFXPos{
     let a = input.x as f32;
@@ -156,33 +158,36 @@ struct ShapeStore{
     texture_bindings: [Bindings;TEXTURE_COUNT],
 }
 pub struct CameraSetup{
-    pub scale: f32,
+    pub scale_base: f32,
     pub offset: GFXPos,
 }
 impl CameraSetup{
+    pub fn scale(&self, screen_size:(f32,f32)) -> (f32, f32) {
+        (DEFAULT_WIDTH/screen_size.0*self.scale_base,DEFAULT_HEIGHT/screen_size.1*self.scale_base)
+    }
     pub fn frame_center(world: &World) -> Self{
-        let mut pos_list = world.glyphs.iter().map(|x| pos_to_xy(&x.pos));
-        let (mut lowx, mut lowy, mut highx, mut highy) = pos_list.try_fold(
+        let pos_list = world.glyphs.iter().map(|x| pos_to_xy(&x.pos));
+        let (mut lowx, mut lowy, mut highx, mut highy) = pos_list.fold(
             (f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY),
             |(lowx, lowy, highx, highy), [thisx, thisy]| {
                 let new_lowx = if thisx < lowx {thisx} else {lowx};
                 let new_highx = if thisx > highx {thisx} else {highx};
                 let new_lowy = if thisy < lowy {thisy} else {lowy};
                 let new_highy = if thisy > highy {thisy} else {highy};
-                Some((new_lowx, new_lowy, new_highx, new_highy))
+                (new_lowx, new_lowy, new_highx, new_highy)
             }
-        ).unwrap();
-        const BORDER: f32 = 5.;
+        );
+        const BORDER: f32 = 2.;
         lowx -= BORDER;
         lowy -= BORDER;
         highx+= BORDER;
         highy+= BORDER;
         let offset = [-(lowx+highx)/2., -(lowy+highy)/2.];
-        let scale_x = 1./(highx-lowx);
-        let scale_y = 1./(highy-lowy);
-        let scale = if scale_x > scale_y {scale_x} else {scale_y};
-        println!("camera: x{}, +{:?}",scale,offset);
-        CameraSetup {scale, offset}
+        let world_width_scale = 1./(highx-lowx);
+        let world_height_scale = 1./(highy-lowy);
+        let scale_base = if world_width_scale > world_height_scale {world_width_scale} else {world_height_scale};
+        println!("camera: x{}, +{:?}",scale_base,offset);
+        CameraSetup {scale_base, offset}
     }
 }
 pub struct RenderDataBase {
@@ -198,14 +203,14 @@ struct BasicUniforms{
     offset: GFXPos,
     world_offset: GFXPos,
     angle: f32,
-    scale: f32,
+    scale: (f32,f32),
 }
 #[repr(C)]
 struct UvUniforms{
     offset: GFXPos,
     world_offset: GFXPos,
     angle: f32,
-    scale: f32,
+    scale: (f32,f32),
 }
 impl RenderDataBase {
     pub fn new(ctx: &mut Context) -> Self {
@@ -217,7 +222,7 @@ impl RenderDataBase {
                     UniformDesc::new("offset", UniformType::Float2),
                     UniformDesc::new("world_offset", UniformType::Float2),
                     UniformDesc::new("angle", UniformType::Float1),
-                    UniformDesc::new("scale", UniformType::Float1),
+                    UniformDesc::new("scale", UniformType::Float2),
                     ],
             },
         };
@@ -239,7 +244,7 @@ impl RenderDataBase {
                     UniformDesc::new("offset", UniformType::Float2),
                     UniformDesc::new("world_offset", UniformType::Float2),
                     UniformDesc::new("angle", UniformType::Float1),
-                    UniformDesc::new("scale", UniformType::Float1),
+                    UniformDesc::new("scale", UniformType::Float2),
                     ],
             },
         };
@@ -316,7 +321,7 @@ fn atom_color(t: AtomType) -> [f32;3]{
 
 impl RenderDataBase {
 	fn draw_atoms(&self, ctx: &mut Context, atoms:&[FloatAtom], camera: &CameraSetup){
-        let scale = camera.scale;
+        let scale = camera.scale(ctx.screen_size());
         let world_offset = camera.offset;
         ctx.apply_pipeline(&self.pipeline_textured);
 
@@ -338,7 +343,7 @@ impl RenderDataBase {
 						ctx.apply_uniforms(&UvUniforms {
 							offset, world_offset, angle, scale
 						});
-						ctx.draw(0, 4, 1);
+						ctx.draw(0, 6, 1);
 					}
 				}
 			}
@@ -360,12 +365,12 @@ impl RenderDataBase {
     pub fn draw(&self, ctx: &mut Context, camera: &CameraSetup, tracks: &TrackBindings,
          show_area: bool, world: &World, float_world: &FloatWorld)
     {
-        let scale = camera.scale;
+        let scale = camera.scale(ctx.screen_size());
         let world_offset = camera.offset;
         let y_factor = f32::sqrt(3.)*2.0;
-        let inv_scale= 1./scale;
-        let base_x = ((-inv_scale-world_offset[0])/2.0).ceil()*2.0;
-        let base_y = ((-inv_scale-world_offset[1])/y_factor).ceil()*y_factor;
+        let (inv_scale_x, inv_scale_y)= (1./scale.0,1./scale.1);
+        let base_x = ((-inv_scale_x-world_offset[0])/2.0).ceil()*2.0;
+        let base_y = ((-inv_scale_y-world_offset[1])/y_factor).ceil()*y_factor;
 
         ctx.apply_pipeline(&self.pipeline_tracks);
         ctx.apply_bindings(&tracks.bindings);//Hex grid
@@ -389,8 +394,8 @@ impl RenderDataBase {
         //Draw the Hex grid
         ctx.apply_pipeline(&self.pipeline_textured);
         ctx.apply_bindings(&self.shapes.texture_bindings[13]);
-        for x in 0..(inv_scale/3.0).ceil() as i32 +1{
-            for y in 0..(inv_scale/y_factor).ceil() as i32 *2+1{
+        for x in 0..(inv_scale_x/3.0).ceil() as i32 +1{
+            for y in 0..(inv_scale_y/y_factor).ceil() as i32 *2+1{
                 let offset = [base_x+(x as f32*6.0),
                                 base_y+(y as f32*y_factor)];
                 ctx.apply_uniforms(&UvUniforms {
