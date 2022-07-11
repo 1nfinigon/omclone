@@ -1,5 +1,5 @@
-use crate::parser;
-use crate::sim;
+mod parser;
+mod sim;
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::{install, eyre::Result};
@@ -11,12 +11,9 @@ use simple_eyre::{install, eyre::Result};
 fn main() -> Result<()> {
     use std::{fs::File, io::BufReader, path::Path};
     std::env::set_var("RUST_BACKTRACE", "full");
-    #[cfg(color_eyre)]
-    color_eyre::install()?;
-    #[cfg(not(color_eyre))]
-    simple_eyre::install()?;
+    install()?;
 
-    let (base_str, puzzle_str, solution_str) = ui::get_default_path_strs();
+    let (base_str, puzzle_str, solution_str) = sim::get_default_path_strs();
     let base_path = Path::new(base_str);
     let f_puzzle = File::open(base_path.join(puzzle_str))?;
     let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle))?;

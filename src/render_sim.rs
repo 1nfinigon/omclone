@@ -2,8 +2,6 @@ use miniquad::*;
 use crate::sim::*;
 
 pub type GFXPos = [f32;2];
-const DEFAULT_HEIGHT:f32 = 600.;
-const DEFAULT_WIDTH:f32 = 800.;
 use std::f32::consts::PI;
 pub fn pos_to_xy(input: &Pos) -> GFXPos{
     let a = input.x as f32;
@@ -163,9 +161,9 @@ pub struct CameraSetup{
 }
 impl CameraSetup{
     pub fn scale(&self, screen_size:(f32,f32)) -> (f32, f32) {
-        (DEFAULT_WIDTH/screen_size.0*self.scale_base,DEFAULT_HEIGHT/screen_size.1*self.scale_base)
+        (1000./screen_size.0*self.scale_base,1000./screen_size.1*self.scale_base)
     }
-    pub fn frame_center(world: &World) -> Self{
+    pub fn frame_center(world: &World, screen_size:(f32,f32)) -> Self{
         let pos_list = world.glyphs.iter().map(|x| pos_to_xy(&x.pos));
         let (mut lowx, mut lowy, mut highx, mut highy) = pos_list.fold(
             (f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY),
@@ -177,15 +175,16 @@ impl CameraSetup{
                 (new_lowx, new_lowy, new_highx, new_highy)
             }
         );
-        const BORDER: f32 = 2.;
+        const BORDER: f32 = 6.;
         lowx -= BORDER;
         lowy -= BORDER;
         highx+= BORDER;
         highy+= BORDER;
         let offset = [-(lowx+highx)/2., -(lowy+highy)/2.];
-        let world_width_scale = 1./(highx-lowx);
-        let world_height_scale = 1./(highy-lowy);
-        let scale_base = if world_width_scale > world_height_scale {world_width_scale} else {world_height_scale};
+        let world_width_scale = screen_size.0/1000.*2./(highx-lowx);
+        let world_height_scale = screen_size.1/1000.*2./(highy-lowy);
+        let scale_base = if world_width_scale < world_height_scale {world_width_scale} else {world_height_scale};
+        println!("camera debug: screen {:?}, scales {:?},{:?} wh {:?},{:?}",screen_size,world_width_scale,world_height_scale,highx-lowx,highy-lowy);
         println!("camera: x{}, +{:?}",scale_base,offset);
         CameraSetup {scale_base, offset}
     }
@@ -329,7 +328,7 @@ impl RenderDataBase {
         let atoms_copy = atoms;
 		for atom in atoms_copy {
 			let offset = [atom.pos.x, atom.pos.y];
-			for r in 0..6 {
+			for r in 0..3 { //4-6 are done by the other atom
 				let matches = [
 					(Bonds::NORMAL, &self.shapes.texture_bindings[16]),
 					(Bonds::TRIPLEX_R, &self.shapes.texture_bindings[17]),

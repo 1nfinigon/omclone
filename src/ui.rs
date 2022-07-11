@@ -152,14 +152,6 @@ pub struct MyMiniquadApp {
     unloaded_info: PathInfo
 }
 
-pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str){
-    const DEFAULT_PATHS: &str = include_str!("default_paths.txt");
-    let mut path_data = DEFAULT_PATHS.lines();
-    let base = path_data.next().unwrap();
-    let puzzle = path_data.next().unwrap();
-    let solution = path_data.next().unwrap();
-    (base, puzzle, solution)
-}
 impl MyMiniquadApp {
     pub fn new(ctx: &mut Context) -> Self {
         
@@ -189,7 +181,7 @@ impl MyMiniquadApp {
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
-        let camera = CameraSetup::frame_center(&test_world);
+        let camera = CameraSetup::frame_center(&test_world, ctx.screen_size());
         let tracks = setup_tracks(ctx, &test_world.track_map);
         let new_loaded = Loaded{
             base_world: world.clone(),
@@ -221,6 +213,8 @@ use once_cell::sync::Lazy;
 static JS_PUZZLE_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
 #[cfg(feature = "js_ui_mod")]
 static JS_SOLUTION_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
+#[cfg(feature = "js_ui_mod")]
+static JS_SOLUTION_NAME: Lazy<std::sync::Mutex<Option<String>>> = Lazy::new(|| std::sync::Mutex::new(None));
 
 #[cfg(feature = "js_ui_mod")]
 #[no_mangle]
@@ -236,9 +230,15 @@ pub extern "C" fn js_load_solution(solution: sapp_jsutils::JsObject){
     solution.to_byte_buffer(&mut solution_vec);
     *JS_SOLUTION_INPUT.lock().unwrap() = Some(solution_vec);
 }
-
 #[cfg(feature = "js_ui_mod")]
 #[no_mangle]
+pub extern "C" fn js_load_solution_name(name: sapp_jsutils::JsObject){
+    let mut sol_name = String::new();
+    name.to_string(&mut sol_name);
+    *JS_SOLUTION_NAME.lock().unwrap() = Some(sol_name);
+}
+
+#[cfg(all(feature = "js_ui_mod", feature="editor_ui"))]
 extern "C" {
     fn save_file(filedata: sapp_jsutils::JsObject, filename: sapp_jsutils::JsObject);
 }
@@ -393,19 +393,21 @@ impl EventHandler for MyMiniquadApp {
                         if !opened {loaded.message = None;}
                     }
                     egui::Window::new("Camera controls").show(egui_ctx, |ui| {
-                        ui.label("x:");
-                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[0])
-                            .speed(0.1));
-                        ui.label("y:");
-                        ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
-                            .speed(0.1));
+						ui.horizontal(|ui|{
+							ui.label("x:");
+							ui.add(egui::DragValue::new(&mut loaded.camera.offset[0])
+								.speed(0.1));
+							ui.label("y:");
+							ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
+								.speed(0.1));
+						});
                         ui.label("zoom:");
+                        let scale_speed = loaded.camera.scale_base*0.1;
                         ui.add(egui::Slider::new(&mut loaded.camera.scale_base,0.001 ..= 0.1)
                             .logarithmic(true));
                     });
 					
-                    #[cfg(feature = "editor_ui")]
-                    {
+                    #[cfg(feature = "editor_ui")]{
                         egui::Window::new("File info").show(egui_ctx, |ui| {
                             ui.label("solution:");
                             ui.text_edit_singleline(&mut loaded.solution.solution_name);
@@ -414,23 +416,37 @@ impl EventHandler for MyMiniquadApp {
                             ui.horizontal(|ui| {
                                 if ui.button("Save").clicked() {
                                     let dat = &self.unloaded_info;
-                                    let base_path = Path::new(&dat.base);
-                                    let solution_path = base_path.join(&dat.solution);
                                     
                                     #[cfg(not(feature = "js_ui_mod"))]
-                                    let f = File::create(solution_path).unwrap();
+                                    let mut f = {
+                                        let base_path = Path::new(&dat.base);
+                                        let solution_path = base_path.join(&dat.solution);
+                                        File::create(solution_path).unwrap()
+                                    };
                                     #[cfg(feature = "js_ui_mod")]
-                                    let f = Vec::<u8>::new();
+                                    let mut f = {
+                                        Vec::<u8>::new()
+                                    };
 
-                                    let mut writer = BufWriter::new(f);
-                                    let base = &loaded.base_world;
-                                    let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
-                                    parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
-                                    if !loaded.solution.solution_name.contains("omclone"){
-                                        loaded.solution.solution_name += "(omclone)";
+                                    {//scope the writer so it's dropped before trying to save in js
+                                        let mut writer = BufWriter::new(&mut f);
+                                        let base = &loaded.base_world;
+                                        let tape_list = base.arms.iter().map(|a| &a.instruction_tape);
+                                        parser::replace_tapes(&mut loaded.solution, tape_list, base.repeat_length).unwrap();
+                                        if !loaded.solution.solution_name.contains("omclone"){
+                                            loaded.solution.solution_name += "(omclone)";
+                                        }
+                                        parser::write_solution(&mut writer, &loaded.solution).unwrap();
+                                        writer.flush().unwrap();
                                     }
-                                    parser::write_solution(&mut writer, &loaded.solution).unwrap();
-                                    writer.flush().unwrap();
+
+                                    #[cfg(feature = "js_ui_mod")]{
+                                        let data = f;
+                                        let filedata = sapp_jsutils::JsObject::buffer(&data);
+                                        let filename = sapp_jsutils::JsObject::string(&dat.solution);
+										unsafe {save_file(filedata,filename);}
+                                    }
+
                                     loaded.message = Some(String::from("Saved!"));
                                 }
                                 ui.separator();
@@ -440,8 +456,7 @@ impl EventHandler for MyMiniquadApp {
                             });
                         });
                     }
-                    #[cfg(feature = "editor_ui")]
-                    {
+                    #[cfg(feature = "editor_ui")]{
                         egui::Window::new("Arms").hscroll(true).show(egui_ctx, |ui| {
                             ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
                             let curr_timestep = loaded.curr_time.floor() as usize;
@@ -488,8 +503,7 @@ impl EventHandler for MyMiniquadApp {
                         });
                     }
                     egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
-                        #[cfg(not(feature = "js_ui_mod"))]
-                        {
+                        #[cfg(not(feature = "js_ui_mod"))]{
                                 if ui.button("Reload current").clicked() {
                                     do_loading = AppStateUpdate::Load;
                                 }
@@ -497,8 +511,7 @@ impl EventHandler for MyMiniquadApp {
                                     do_loading = AppStateUpdate::ResetHome;
                                 }
                         }
-                        #[cfg(feature = "js_ui_mod")]
-                        {
+                        #[cfg(feature = "js_ui_mod")]{
                             ui.label("Choose files first, then press:");
                             if ui.button("Reset").clicked() {
                                 do_loading = AppStateUpdate::ResetHome;
@@ -508,11 +521,9 @@ impl EventHandler for MyMiniquadApp {
                     });
                 }
                 NotLoaded => {
-                    let dat = &mut self.unloaded_info;
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
-                        
-                        #[cfg(not(feature = "js_ui_mod"))]
-                        {
+                        let dat = &mut self.unloaded_info;
+                        #[cfg(not(feature = "js_ui_mod"))]{
                             ui.horizontal(|ui| {
                                 ui.label("Base path: ");
                                 ui.text_edit_singleline(&mut dat.base);
@@ -547,8 +558,7 @@ impl EventHandler for MyMiniquadApp {
                 self.app_state = NotLoaded;
             }
             AppStateUpdate::Load => {
-                #[cfg(not(feature = "js_ui_mod"))]
-                {
+                #[cfg(not(feature = "js_ui_mod"))]{
                     let dat = &self.unloaded_info;
                     let base_path = Path::new(&dat.base);
                     let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
@@ -556,13 +566,14 @@ impl EventHandler for MyMiniquadApp {
                     let f_sol = File::open(&solution_path).unwrap();
                     self.load(f_puzzle, f_sol, ctx);
                 }
-                #[cfg(feature = "js_ui_mod")]
-                {
+                #[cfg(feature = "js_ui_mod")]{
                     let puzzle = JS_PUZZLE_INPUT.lock().unwrap();
                     let f_puzzle = puzzle.as_ref().unwrap();
                     let solution = JS_SOLUTION_INPUT.lock().unwrap();
                     let f_sol = solution.as_ref().unwrap();
                     self.load(f_puzzle.as_slice(), f_sol.as_slice(), ctx);
+					let name = JS_SOLUTION_NAME.lock().unwrap().take();
+					self.unloaded_info.solution = name.unwrap_or(String::from("omclone.solution"));
                 }
             }
         }
