@@ -431,7 +431,7 @@ fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     for atom in input {
         if atom.atom_type == AtomType::RepeatingOutputMarker {
             output.push(Atom {
-                pos: atom.pos + (reps * rep_offset),
+                pos: atom.pos + ((reps-1) * rep_offset),
                 ..*atom
             });
         } else {

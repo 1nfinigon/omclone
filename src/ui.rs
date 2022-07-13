@@ -318,6 +318,7 @@ impl EventHandler for MyMiniquadApp {
         ctx.end_render_pass();
         
         let mut do_loading = AppStateUpdate::NoChange;
+        let screen_size = ctx.screen_size();
         self.egui_mq.run(ctx, |egui_ctx|{
             match &mut self.app_state{
                 Loaded(loaded) => {
@@ -400,11 +401,15 @@ impl EventHandler for MyMiniquadApp {
 							ui.label("y:");
 							ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
 								.speed(0.1));
+                            if ui.button("Center").clicked(){
+                                loaded.camera = CameraSetup::frame_center(&loaded.base_world, screen_size);
+                            }
 						});
-                        ui.label("zoom:");
-                        let scale_speed = loaded.camera.scale_base*0.1;
-                        ui.add(egui::Slider::new(&mut loaded.camera.scale_base,0.001 ..= 0.1)
-                            .logarithmic(true));
+						ui.horizontal(|ui|{
+                            ui.label("zoom:");
+                            ui.add(egui::Slider::new(&mut loaded.camera.scale_base,0.002 ..= 0.2)
+                                .logarithmic(true));
+                        });
                     });
 					
                     #[cfg(feature = "editor_ui")]{

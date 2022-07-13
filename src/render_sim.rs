@@ -392,18 +392,21 @@ impl RenderDataBase {
         }
         //Draw the Hex grid
         ctx.apply_pipeline(&self.pipeline_textured);
-        ctx.apply_bindings(&self.shapes.texture_bindings[13]);
-        for x in 0..(inv_scale_x/3.0).ceil() as i32 +1{
-            for y in 0..(inv_scale_y/y_factor).ceil() as i32 *2+1{
-                let offset = [base_x+(x as f32*6.0),
-                                base_y+(y as f32*y_factor)];
-                ctx.apply_uniforms(&UvUniforms {
-                    offset, world_offset, angle:0., scale
-                });
-                ctx.draw(0, 6, 1);
+        if camera.scale_base > 0.01{
+            ctx.apply_bindings(&self.shapes.texture_bindings[13]);
+            for x in 0..(inv_scale_x/3.0).ceil() as i32 +1{
+                for y in 0..(inv_scale_y/y_factor).ceil() as i32 *2+1{
+                    let offset = [base_x+(x as f32*6.0),
+                                    base_y+(y as f32*y_factor)];
+                    ctx.apply_uniforms(&UvUniforms {
+                        offset, world_offset, angle:0., scale
+                    });
+                    ctx.draw(0, 6, 1);
+                }
             }
         }
         //Draw glyphs (including half-transparent cover for input/outputs)
+        ctx.apply_pipeline(&self.pipeline_textured);
         for glyph in world.glyphs.iter(){
             let offset = pos_to_xy(&glyph.pos);
             let angle = rot_to_angle(glyph.rot);
