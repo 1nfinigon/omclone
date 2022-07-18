@@ -371,7 +371,9 @@ impl RenderDataBase {
             use GlyphType::*;
             temp_atoms_vec.clear();
             match &glyph.glyph_type{
-                Input(atoms_meta,_) | Output(atoms_meta,_,_) => {
+                Input(atoms_meta,_)
+                | Output(atoms_meta,_,_) 
+                | OutputRepeating(atoms_meta,_,_)=> {
                     for atom in &atoms_meta[0]{
                         temp_atoms_vec.push(atom.into());
                     }
