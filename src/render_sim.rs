@@ -1,7 +1,8 @@
 use miniquad::*;
 use crate::sim::*;
 
-pub type GFXPos = [f32;2];
+use crate::render_library::*;
+
 use std::f32::consts::PI;
 pub fn pos_to_xy(input: &Pos) -> GFXPos{
     let a = input.x as f32;
@@ -12,8 +13,6 @@ pub fn rot_to_angle(r: Rot) -> f32{
     (-r as f32)*PI/3.
 }
 
-type Vert = [f32;2];
-//Vertex format: (x, y)
 //note: 1 hex has inner radius of 1 (width of 2).
 fn setup_arms(ctx: &mut Context) -> Bindings{
     const ARM_VERT_BUF: [Vert;14] = [
@@ -81,8 +80,6 @@ pub fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> TrackBindings{
     }
 }
 
-type UvVert = [f32;4];
-//(x, y), (u, v)
 const TEXTURE_COUNT:usize = 20;
 fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
     const TEXTURE_VERT_BUF: [UvVert;4] = [
@@ -122,7 +119,9 @@ fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
         use image::ImageFormat::Png;
         use std::io::Cursor;
         let img = ImageReader::with_format(Cursor::new(byte_data),Png).decode().unwrap().into_rgba8();
-        let texture = Texture::from_rgba8(ctx, 256, 256, &img);
+        let width = img.width().try_into().unwrap();
+        let height = img.height().try_into().unwrap();
+        let texture = Texture::from_rgba8(ctx, width, height, &img);
         Bindings {
             vertex_buffers: vec![vb],
             index_buffer,
@@ -194,23 +193,9 @@ pub struct RenderDataBase {
     pipeline_textured: Pipeline,
     pipeline_tracks: Pipeline,
     shapes: ShapeStore,
+    font: FontStorage
 }
 
-#[repr(C)]
-struct BasicUniforms{
-    color: [f32;3],
-    offset: GFXPos,
-    world_offset: GFXPos,
-    angle: f32,
-    scale: (f32,f32),
-}
-#[repr(C)]
-struct UvUniforms{
-    offset: GFXPos,
-    world_offset: GFXPos,
-    angle: f32,
-    scale: (f32,f32),
-}
 impl RenderDataBase {
     pub fn new(ctx: &mut Context) -> Self {
         let shader_meta = ShaderMeta {
@@ -284,8 +269,10 @@ impl RenderDataBase {
             texture_bindings: setup_textures(ctx),
         };
         
+        let font = FontStorage::new(ctx);
+
         Self {
-            pipeline,pipeline_textured,pipeline_tracks,shapes
+            pipeline,pipeline_textured,pipeline_tracks,shapes,font
         }
     }
 }
@@ -372,20 +359,23 @@ impl RenderDataBase {
         let base_y = ((-inv_scale_y-world_offset[1])/y_factor).ceil()*y_factor;
 
         ctx.apply_pipeline(&self.pipeline_tracks);
-        ctx.apply_bindings(&tracks.bindings);//Hex grid
+        ctx.apply_bindings(&tracks.bindings);
         ctx.apply_uniforms(&BasicUniforms {
             color:[1., 1., 1.], offset:[0.,0.], world_offset, angle:0., scale
         });
         ctx.draw(0, tracks.vert_count as i32, 1);
 
         //Draw input/output atoms
+        let mut temp_atoms_vec:Vec<FloatAtom> = Vec::new();
         for glyph in world.glyphs.iter(){
             use GlyphType::*;
+            temp_atoms_vec.clear();
             match &glyph.glyph_type{
-                Input(atoms_meta) | Output(atoms_meta,_) => {
-                    let atoms = atoms_meta[0].iter().map(|x| x.into());
-                    let atoms_vec:Vec<FloatAtom> = atoms.collect();
-					self.draw_atoms(ctx, &atoms_vec, camera);
+                Input(atoms_meta,_) | Output(atoms_meta,_,_) => {
+                    for atom in &atoms_meta[0]{
+                        temp_atoms_vec.push(atom.into());
+                    }
+					self.draw_atoms(ctx, &temp_atoms_vec, camera);
                 },
                 _ => continue,
             };
@@ -425,7 +415,7 @@ impl RenderDataBase {
                 TriplexBond     => 10,
                 Unbonding       => 11,
                 Unification     => 12,
-                Input(atoms_meta) | Output(atoms_meta,_) => {
+                Input(atoms_meta,_) | Output(atoms_meta,_,_) | OutputRepeating(atoms_meta,_,_)=> {
                     let atoms = &atoms_meta[0];
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for atom in atoms{ //transparent cover
@@ -437,7 +427,7 @@ impl RenderDataBase {
                     }
                     continue
                 },
-                Track(_) | Conduit(_) => continue,
+                Track(_) | Conduit(_,_) => continue,
             };
             ctx.apply_bindings(&self.shapes.texture_bindings[i]);
             ctx.apply_uniforms(&UvUniforms {
@@ -478,5 +468,12 @@ impl RenderDataBase {
                 ctx.draw((rounded_len-1)*6, triangles_drawn, 1);
             }
         }
+        self.font.set_pipeline(ctx);
+        for (num, f_arm) in float_world.arms_xy.iter().enumerate() {
+            let offset = [f_arm.pos.x, f_arm.pos.y];
+            let string = (num+1).to_string();
+            self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
+        }
+
     }
 }

@@ -311,29 +311,77 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     }
     Ok(solution_output)
 }
-pub fn replace_tapes<'a>(sol: &mut FullSolution, mut tapes: impl Iterator<Item=&'a Tape>, loop_len: usize) -> Result<()>{
-    //Warning: Assumes the tapes are in order with their solution's arms
-    let mut found_first = false;
-    for part in &mut sol.part_list{
-        if let TArm(_) = part.part_type{
-            part.instructions.clear();
-            let tape = tapes.next().ok_or(eyre!("Not enough tapes in iterator"))?;
-            let mut step = tape.first as i32;
-            for &instr in &tape.instructions{
-                if instr != Instr::Empty{
-                    part.instructions.push((step,instr));
-                }
-                step += 1;
+pub fn create_solution(world: &World, puzzle_name: String, solution_name: String) -> FullSolution{
+    let stats = None;
+    let mut solution_output = FullSolution {
+        puzzle_name,
+        solution_name,
+        stats,
+        part_list: Vec::new(),
+    };
+    let part_list = &mut solution_output.part_list;
+    for glyph in &world.glyphs{
+        let rot = glyph.rot;
+        let pos = glyph.pos;
+        let arm_size = 0;
+        let arm_index = 0;
+        let instructions = Vec::new();
+        let (part_type,input_output_index,tracks ) = match &glyph.glyph_type{
+            GlyphType::Track(track) => {
+                (TTrack, 0, Some(track.clone()))
             }
-            let target_loop = (loop_len+tape.first) as i32;
-            if !found_first && step < target_loop{
-                part.instructions.push((target_loop-1,Instr::Noop));
-                found_first = true;
+            GlyphType::Input(_,id) => {
+                (TInput, *id, None)
             }
-        }
+            GlyphType::Output(_, _,id) => {
+                (TOutput, *id, None)
+            }
+            GlyphType::OutputRepeating(_, _,id) => {
+                (TOutputRep, *id, None)
+            }
+            GlyphType::Conduit(_,id) => {
+                (TConduit, *id, None)
+            }
+            normal_glyph_type => {
+                (TGlyph(normal_glyph_type.clone()), 0, None)
+            }
+        };
+        part_list.push(Part {
+            part_type, pos, arm_size, rot, input_output_index,
+            instructions, tracks, arm_index,
+        });
     }
-    ensure!(tapes.next().is_none(),"Excess tapes in iterator");
-    Ok(())
+    let mut found_first = false;
+    let loop_len = world.repeat_length;
+    for (id, arm) in world.arms.iter().enumerate(){
+        let part_type = TArm(arm.arm_type);
+        let pos = arm.pos;
+        let arm_size = arm.len;
+        let rot = arm.rot;
+        let input_output_index = 0;
+
+        let mut instructions = Vec::new();
+        let tape = &arm.instruction_tape;
+        let mut step = tape.first as i32;
+        for &instr in &tape.instructions{
+            if instr != Instr::Empty{
+                instructions.push((step,instr));
+            }
+            step += 1;
+        }
+        let target_loop = (loop_len+tape.first) as i32;
+        if !found_first && step < target_loop{
+            instructions.push((target_loop-1,Instr::Noop));
+            found_first = true;
+        }
+        let tracks = None;
+        let arm_index = id as _;
+        part_list.push(Part {
+            part_type, pos, arm_size, rot, input_output_index,
+            instructions, tracks, arm_index,
+        });
+    }
+    solution_output
 }
 pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
     write_int(f, 7)?;
@@ -525,7 +573,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     id,
                     puzzle.inputs.len()
                 ))?;
-                let input_glyph = GlyphType::Input(molecule.clone());
+                let input_glyph = GlyphType::Input(molecule.clone(), p.input_output_index);
                 glyphs.push(Glyph {
                     glyph_type: input_glyph,
                     pos: p.pos,
@@ -536,7 +584,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 let id = p.input_output_index;
                 let molecule = puzzle.outputs.get(id as usize)
                     .ok_or(eyre!("Output  ID {} not found (max {})", id, puzzle.outputs.len()))?;
-                let output_glyph = GlyphType::Output(molecule.clone(), 6 * puzzle.output_multiplier);
+                let output_glyph = GlyphType::Output(molecule.clone(), 6 * puzzle.output_multiplier, p.input_output_index);
                 glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
             }
             TOutputRep => {
@@ -545,7 +593,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     .ok_or(eyre!("Output(rep) ID {} not found (max {})",id,puzzle.outputs.len()))?;
                 let repeated_molecule = process_repeats(&molecule[0], 6)?;
                 let output_glyph =
-                    GlyphType::Output(repeated_molecule, 6 * puzzle.output_multiplier);
+                    GlyphType::OutputRepeating(repeated_molecule, 6 * puzzle.output_multiplier, p.input_output_index);
                 glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
             }
             TTrack => {

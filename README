@@ -8,11 +8,10 @@ Code is heavily influenced by omsim (https://github.com/ianh/omsim).
 
 
 Enable only one of "editor_ui" or "display_ui" to get the corresponding app
-If one of those is enabled, you can also enable "js_ui_mod" to make the app compile to wasm
-then simply use "cargo build --release --target wasm32-unknown-unknown"
+You can use "cargo build --release --target wasm32-unknown-unknown" to build the js version. Example html pages are in display_html
 You may want to change between opt-level "3" and "s" for executable vs. wasm respectively.
 ----
-Enable feature "color-eye" for improved error reporting. Right now most errors hard crash.
-Enable "benchmark" to get a program which will just run forever (useful for performance analysis)
+Enable feature "color-eyre" for improved error reporting. Right now most errors hard crash.
+Enable "benchmark" to get a program which will just run the default solution forever (useful for performance analysis)
 
 You used to be able to enable "cx_checker" and compile with "wasm-pack build --target no-modules" to get the .wasm and .js in pkg folder. However, this functionality is currently broken.
