@@ -39,7 +39,7 @@ pub struct FontStorage{
     data: [CharStorage;10],
 }
 const FONT_SCALE:f32 = 0.03;
-const FONT_EXTRA_SPACING:f32 = 0.01;
+const FONT_EXTRA_SPACING:f32 = 0.1;
 impl FontStorage{
     pub fn new(ctx: &mut Context) -> FontStorage{
         let shader_meta = ShaderMeta {
