@@ -1,6 +1,7 @@
 
 use crate::sim::*;
 use crate::parser::*;
+const CHECK_AREA:bool = true;
 #[test]
 fn check_all(){
     use std::{fs,fs::File, io::BufReader, collections::HashMap};
@@ -15,9 +16,9 @@ fn check_all(){
                 } else if ftype.is_file(){
                     let f_puzzle = File::open(f.path()).unwrap();
                     if let Ok(puzzle) = parse_puzzle(&mut BufReader::new(f_puzzle)){
-                        if puzzle.production{
+                        /*if puzzle.production{
                             println!("Skipping production: {}",puzzle.puzzle_name);
-                        }else if puzzle.outputs.iter().any(|atoms_meta| atoms_meta[0].iter().any(
+                        }else*/ if puzzle.outputs.iter().any(|atoms_meta| atoms_meta[0].iter().any(
                                         |atom|atom.atom_type == AtomType::RepeatingOutputMarker)){
                             println!("Skipping infinite: {}",puzzle.puzzle_name);
                         } else {
@@ -69,7 +70,7 @@ fn check_all(){
                         };
                         stats.1 += 1;
                         while !world.is_complete() && world.timestep < 500_000 {
-                            let step = world.run_step(true, &mut motions, &mut float_world);
+                            let step = world.run_step(CHECK_AREA, &mut motions, &mut float_world);
                             if let Err(e) = step{
                                 println!("Simulation error on step {} puzzle {}: {:?}: {}",world.timestep,sol.puzzle_name,fpath, e);
                                 continue 'file_loop;
@@ -77,8 +78,7 @@ fn check_all(){
                         }
                         let mut newstats = world.get_stats();
                         let oldstats = sol.stats.unwrap();
-                        //newstats.area = oldstats.area;
-                        //newstats.instructions = oldstats.instructions;
+                        if puzzle.production || !CHECK_AREA {newstats.area = oldstats.area};
                         if newstats == oldstats{
                             stats.0 += 1;
                         } else {

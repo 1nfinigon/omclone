@@ -340,7 +340,6 @@ impl Glyph {
             Conduit(locs,_id) => {
                 let p = self.pos;
                 for a in locs.iter_mut() {
-                    println!("Conduit {_id} at {p:?}+{a:?}");
                     *a = self.pos + rotate(*a, self.rot);
                 }
                 true
@@ -1145,22 +1144,25 @@ impl World {
         }
     }
     fn conduit_process(atoms: &mut WorldAtoms, glyph_id: usize, positions: &Vec<Pos>, origin: Pos, conduit_info: &mut ConduitInfo, motion: &mut WorldStepInfo){
-        conduit_info.waiting_to_clear.retain(|clear_pos| {
-            if let Some(key) = atoms.locs.get(clear_pos){
-                !motion.atoms.contains_key(*key)
-            } else {false}
-        });
         let mut viewed_atoms = FxHashSet::<AtomKey>::default();
         let mut check_atoms = VecDeque::<AtomKey>::new();
-        let mut sending_atoms = Vec::<Atom>::new();
+
+        let mut offset_pos = conduit_info.offset_pos;
+        let mut offset_rot = conduit_info.offset_rot;
+        if conduit_info.vecids.0 == glyph_id{
+            offset_pos *= -1;
+            offset_rot = normalize_dir(offset_rot*-1);
+        } else {
+            assert!(conduit_info.vecids.1 == glyph_id, "Conduit invalid vec id");
+        }
         for pos in positions{
             if conduit_info.waiting_to_clear.contains(pos) {continue;}
             //For each position that isn't in the waiting list, if it has an atom on it:
             if let Some(key) = atoms.locs.get(pos){
-                //Check if all atoms are on the conduit
-                let mut atoms_send_check = |key: &AtomKey| -> bool {
-                    if motion.atoms.contains_key(*key) {return false;}
-                    check_atoms.push_back(*key);
+                //Closure to check if all atoms in the molecule are on the conduit
+                let mut atoms_send_check = |first_key: AtomKey| -> bool {
+                    if motion.atoms.contains_key(first_key) {return false;}
+                    check_atoms.push_back(first_key);
                     while let Some(this_key) = check_atoms.pop_front(){
                         if viewed_atoms.contains(&this_key) {continue;}
                         viewed_atoms.insert(this_key);
@@ -1177,29 +1179,18 @@ impl World {
                     }
                     return true;
                 };
-
-                if atoms_send_check(key){
+                //If they are, move the atoms to the new position via spawning
+                if atoms_send_check(*key){
                     for a in &viewed_atoms{
-                        sending_atoms.push(atoms.take_atom(*a));
+                        let mut atom = atoms.take_atom(*a);
+                        atom.pos = rotate_around(atom.pos,offset_rot,origin)+offset_pos;
+                        atom.rotate_connections(offset_rot);
+                        motion.spawning_atoms.push(atom);
                     }
                 }
                 viewed_atoms.clear();
                 check_atoms.clear();
             }
-        }
-        
-        //Now send all the collected atoms (that have already been removed)
-        let mut offset_pos = conduit_info.offset_pos;
-        let mut offset_rot = conduit_info.offset_rot;
-        if conduit_info.vecids.1 != glyph_id{
-            assert!(conduit_info.vecids.0 == glyph_id, "Conduit invalid vec id");
-            offset_pos *= -1;
-            offset_rot = normalize_dir(offset_rot*-1);
-        }
-        for mut a in sending_atoms{
-            a.rotate_connections(offset_rot);
-            a.pos = rotate_around(a.pos,offset_rot,origin)+offset_pos;
-            motion.spawning_atoms.push(a);
         }
     }
 
@@ -1331,10 +1322,30 @@ impl World {
     }
     pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
-        self.process_glyphs(motion, false);
         for atom in motion.spawning_atoms.drain(..){
-            if self.atoms.locs.get(&atom.pos).is_some() {return Err(sim_error_pos("Spawning atom collision", atom.pos));}
+            if self.atoms.locs.get(&atom.pos).is_some() {
+                return Err(sim_error_pos("Spawning atom collision", atom.pos));
+            }
             self.atoms.create_atom(atom);
+        }
+        self.process_glyphs(motion, false);
+        for (_, conduit_info) in self.conduit_pairs.iter_mut(){
+            conduit_info.waiting_to_clear.clear();
+            let mut do_checks = |pos_list| {
+                for p in pos_list{
+                    if let Some(key) = self.atoms.locs.get(p){
+                        if !motion.atoms.contains_key(*key){
+                            conduit_info.waiting_to_clear.insert(*p);
+                        }
+                    }
+                }
+            };
+            if let GlyphType::Conduit(pos_list1, _) = &self.glyphs[conduit_info.vecids.0].glyph_type{
+                do_checks(pos_list1);
+            }
+            if let GlyphType::Conduit(pos_list2, _) = &self.glyphs[conduit_info.vecids.1].glyph_type{
+                do_checks(pos_list2);
+            }
         }
         motion.clear();
         self.timestep += 1;
