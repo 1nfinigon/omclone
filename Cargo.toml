@@ -46,9 +46,10 @@ smallvec = "1.8"
 
 
 egui = {version = "0.18", optional = true}
-miniquad = { version = "0.3", optional = true}
+#Changes: don't reborrow globals on wasm clipboard_get()
+miniquad = { git = "https://github.com/ssk97/miniquad", branch = "master", optional = true}
 fontdue = { version = "0.7", optional = true}
-egui-miniquad = {git = "https://github.com/not-fl3/egui-miniquad.git", branch = "master", optional = true}
+egui-miniquad = {git = "https://github.com/ssk97/egui-miniquad.git", branch = "master", optional = true}
 image = {version = "0.24.1", optional = true, default-features = false, features = ["png"]}
 
 #wasm-bindgen = {version = "0.2.74", optional = true}

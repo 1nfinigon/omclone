@@ -190,7 +190,7 @@ struct Part {
     instructions: Vec<(i32, Instr)>,
     tracks: Option<Vec<Pos>>,
     arm_index: i32,
-    //conduit stuff here
+    conduit: Option<(i32, Vec<Pos>)>,
 }
 fn name_to_part_type(name: String) -> Result<PartType> {
     use ArmType::*;
@@ -290,23 +290,20 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
             None
         };
         let arm_index = parse_int(f)?;
-        /*TODO: Conduits
-        if (byte_string_is(part->name, "pipe")) {
-            part->conduit_id = read_uint32(&b);
-            part->number_of_conduit_hexes = read_uint32(&b);
-            if (part->number_of_conduit_hexes > 9999) {
-                free_solution_file(solution);
-                return 0;
+        let conduit = if part_type == PartType::TConduit{
+            let conduit_id = parse_int(f)?;
+            let conduit_count = parse_int(f)?;
+            let mut inner_conduits = Vec::new();
+            for _ in 0..conduit_count {
+                inner_conduits.push(parse_pos(f)?);
             }
-            part->conduit_hexes = calloc(part->number_of_conduit_hexes, sizeof(struct solution_hex_offset));
-            for (uint32_t j = 0; j < part->number_of_conduit_hexes; ++j) {
-                part->conduit_hexes[j].offset[0] = read_int32(&b);
-                part->conduit_hexes[j].offset[1] = read_int32(&b);
-            }
-        }*/
+            Some((conduit_id,inner_conduits))
+        } else {
+            None
+        };
         solution_output.part_list.push(Part {
             part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index,
+            instructions, tracks, arm_index, conduit
         });
     }
     Ok(solution_output)
@@ -326,29 +323,29 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         let arm_size = 0;
         let arm_index = 0;
         let instructions = Vec::new();
-        let (part_type,input_output_index,tracks ) = match &glyph.glyph_type{
+        let (part_type,input_output_index,tracks,conduit ) = match &glyph.glyph_type{
             GlyphType::Track(track) => {
-                (TTrack, 0, Some(track.clone()))
+                (TTrack, 0, Some(track.clone()), None)
             }
             GlyphType::Input(_,id) => {
-                (TInput, *id, None)
+                (TInput, *id, None, None)
             }
             GlyphType::Output(_, _,id) => {
-                (TOutput, *id, None)
+                (TOutput, *id, None, None)
             }
             GlyphType::OutputRepeating(_, _,id) => {
-                (TOutputRep, *id, None)
+                (TOutputRep, *id, None, None)
             }
-            GlyphType::Conduit(_,id) => {
-                (TConduit, *id, None)
+            GlyphType::Conduit(conduit,id) => {
+                (TConduit, *id, None, Some((*id, conduit.clone())))
             }
             normal_glyph_type => {
-                (TGlyph(normal_glyph_type.clone()), 0, None)
+                (TGlyph(normal_glyph_type.clone()), 0, None, None)
             }
         };
         part_list.push(Part {
             part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index,
+            instructions, tracks, arm_index, conduit
         });
     }
     let mut found_first = false;
@@ -376,9 +373,10 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         }
         let tracks = None;
         let arm_index = id as _;
+        let conduit = None;
         part_list.push(Part {
             part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index,
+            instructions, tracks, arm_index, conduit,
         });
     }
     solution_output
@@ -511,7 +509,7 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     }
     let output_multiplier = parse_int(f)?;
     let production = parse_byte(f)? != 0;
-    //if production is true, read their stuff
+    //TODO: if production is true, read their stuff
     let puzzle_output = FullPuzzle {
         puzzle_name,
         creator_id,
@@ -602,7 +600,9 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 glyphs.push(Glyph {glyph_type: GlyphType::Track(tracks), pos: p.pos, rot: p.rot });
             }
             TConduit => {
-                //TODO: Everything conduit-related
+                let conduits = p.conduit.clone()
+                    .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
+                glyphs.push(Glyph {glyph_type: GlyphType::Conduit(conduits.1, conduits.0), pos: p.pos, rot: p.rot });
             }
         }
     }

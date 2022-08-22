@@ -293,7 +293,8 @@ pub enum ArmMovement{
 }
 
 pub type AtomPattern = SmallVec<[Vec<Atom>;1]>;
-pub type In_Out_Id = i32;
+pub type InOutId = i32;
+pub type ConduitId = i32;
 //Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlyphType {
@@ -301,10 +302,11 @@ pub enum GlyphType {
     Dispersion, Purification, Duplication, Unification,
     Bonding, Unbonding, TriplexBond, MultiBond,
     Disposal, Equilibrium,
-    Track(Vec<Pos>), Conduit(AtomPattern, In_Out_Id),
-    Input(AtomPattern, In_Out_Id), Output(AtomPattern, i32, In_Out_Id),
-    OutputRepeating(AtomPattern, i32, In_Out_Id),
-}
+    Track(Vec<Pos>), Conduit(Vec<Pos>, ConduitId),
+    Input(AtomPattern, InOutId), Output(AtomPattern, i32, InOutId),
+    OutputRepeating(AtomPattern, i32, InOutId),
+}//Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
+//This should probably be made consistent
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ArmType {
     PlainArm, DoubleArm, TripleArm, HexArm,
@@ -326,13 +328,20 @@ impl Glyph {
         match &mut self.glyph_type {
             Input(meta_pattern,_) 
             | Output(meta_pattern, _,_) 
-            | OutputRepeating(meta_pattern, _,_) 
-            | Conduit(meta_pattern,_) => {
+            | OutputRepeating(meta_pattern, _,_)  => {
                 for pat in meta_pattern{
                     for mut a in pat {
                         a.pos = self.pos + rotate(a.pos, self.rot);
                         a.rotate_connections(self.rot);
                     }
+                }
+                true
+            }
+            Conduit(locs,_id) => {
+                let p = self.pos;
+                for a in locs.iter_mut() {
+                    println!("Conduit {_id} at {p:?}+{a:?}");
+                    *a = self.pos + rotate(*a, self.rot);
                 }
                 true
             }
@@ -400,6 +409,13 @@ pub struct TrackMapData {
     pub plus: Option<Pos>,
 }
 pub type TrackMap = FxHashMap<Pos, TrackMapData>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConduitInfo {
+    pub vecids: (usize, usize),
+    pub offset_pos: Pos,
+    pub offset_rot: Rot, 
+    pub waiting_to_clear: FxHashSet<Pos>,
+}
 #[derive(Debug, Clone)]
 pub struct World {
     pub timestep: u64,
@@ -411,7 +427,9 @@ pub struct World {
     pub track_map: TrackMap,
     pub cost: i32,
     pub instruction_count: i32,
+    pub conduit_pairs: ContuitPairMap,
 }
+type ContuitPairMap = FxHashMap<i32, ConduitInfo>;
 new_key_type! { pub struct AtomKey; }
 #[derive(Debug, Clone)]
 pub struct WorldAtoms {
@@ -462,10 +480,23 @@ impl WorldAtoms {
             panic!("Inconsistent atoms (destroy loc)!");
         }
     }
+    fn take_atom(&mut self, key: AtomKey) -> Atom {
+        let atom = self.atom_map.remove(key)
+            .expect("Inconsistent atoms (take)!");
+        let loc = atom.pos;
+        let atom_key = self.locs.remove(&loc).expect("Destroying nonatom!");
+        if atom_key != key {
+            panic!("Inconsistent atoms (take key)!");
+        }
+        return atom;
+    }
     fn create_atom(&mut self, atom: Atom) -> AtomKey {
         let key = self.atom_map.insert(atom);
         let atom_ref = &self.atom_map[key];
-        self.locs.insert(atom_ref.pos, key);
+        let output = self.locs.insert(atom_ref.pos, key);
+        if let Some(_old_atom) = output{
+            panic!("Atom creation on hex with existing atom!");
+        }
         key
     }
 }
@@ -920,7 +951,7 @@ impl World {
         }
         use AtomType::*;
         use GlyphType::*;
-        for glyph in &mut self.glyphs {
+        for (id, glyph) in self.glyphs.iter_mut().enumerate() {
             let atoms = &mut self.atoms;
             let rot = normalize_dir(glyph.rot) as usize;
 
@@ -1103,14 +1134,74 @@ impl World {
                         }
                     }
                 },
-                Conduit(_atom_teleport,_) => {
-                    //TODO
+                Conduit(atom_teleport,conduit_id) => {
+                    if can_consume{
+                        let conduit_info = self.conduit_pairs.get_mut(conduit_id).expect("conduit info not found!");
+                        World::conduit_process(atoms, id, atom_teleport, glyph.pos, conduit_info, motion);
+                    }
                 },
                 Equilibrium | Track(_) => (),
             }
         }
     }
+    fn conduit_process(atoms: &mut WorldAtoms, glyph_id: usize, positions: &Vec<Pos>, origin: Pos, conduit_info: &mut ConduitInfo, motion: &mut WorldStepInfo){
+        conduit_info.waiting_to_clear.retain(|clear_pos| {
+            if let Some(key) = atoms.locs.get(clear_pos){
+                !motion.atoms.contains_key(*key)
+            } else {false}
+        });
+        let mut viewed_atoms = FxHashSet::<AtomKey>::default();
+        let mut check_atoms = VecDeque::<AtomKey>::new();
+        let mut sending_atoms = Vec::<Atom>::new();
+        for pos in positions{
+            if conduit_info.waiting_to_clear.contains(pos) {continue;}
+            //For each position that isn't in the waiting list, if it has an atom on it:
+            if let Some(key) = atoms.locs.get(pos){
+                //Check if all atoms are on the conduit
+                let mut atoms_send_check = |key: &AtomKey| -> bool {
+                    if motion.atoms.contains_key(*key) {return false;}
+                    check_atoms.push_back(*key);
+                    while let Some(this_key) = check_atoms.pop_front(){
+                        if viewed_atoms.contains(&this_key) {continue;}
+                        viewed_atoms.insert(this_key);
+                        
+                        let atom = &atoms.atom_map[this_key];
+                        for dir in 0..6 {
+                            if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
+                                let newpos = atom.pos + rot_to_pos(dir);
+                                if !positions.contains(&newpos) {return false;}
+                                let newkey = *atoms.locs.get(&newpos).expect("Inconsistent atoms (conduits)");
+                                check_atoms.push_back(newkey);
+                            }
+                        }
+                    }
+                    return true;
+                };
 
+                if atoms_send_check(key){
+                    for a in &viewed_atoms{
+                        sending_atoms.push(atoms.take_atom(*a));
+                    }
+                }
+                viewed_atoms.clear();
+                check_atoms.clear();
+            }
+        }
+        
+        //Now send all the collected atoms (that have already been removed)
+        let mut offset_pos = conduit_info.offset_pos;
+        let mut offset_rot = conduit_info.offset_rot;
+        if conduit_info.vecids.1 != glyph_id{
+            assert!(conduit_info.vecids.0 == glyph_id, "Conduit invalid vec id");
+            offset_pos *= -1;
+            offset_rot = normalize_dir(offset_rot*-1);
+        }
+        for mut a in sending_atoms{
+            a.rotate_connections(offset_rot);
+            a.pos = rotate_around(a.pos,offset_rot,origin)+offset_pos;
+            motion.spawning_atoms.push(a);
+        }
+    }
 
     pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld, spawning_atoms: &[Atom]) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
@@ -1242,6 +1333,7 @@ impl World {
         self.apply_motion(motion)?;
         self.process_glyphs(motion, false);
         for atom in motion.spawning_atoms.drain(..){
+            if self.atoms.locs.get(&atom.pos).is_some() {return Err(sim_error_pos("Spawning atom collision", atom.pos));}
             self.atoms.create_atom(atom);
         }
         motion.clear();
@@ -1513,6 +1605,7 @@ impl World {
             track_map: Default::default(),
             cost: 0,
             instruction_count: 0,
+            conduit_pairs: Default::default(),
         };
         for g in &mut world.glyphs {
             use GlyphType::*;
@@ -1557,7 +1650,8 @@ impl World {
             }
         }
         
-        for glyph in &mut world.glyphs {
+        let mut unfinished_conduit_count = 0;
+        for (id, glyph) in world.glyphs.iter_mut().enumerate() {
             if let GlyphType::Input(meta_pattern,_) = &mut glyph.glyph_type {
                 let atom_spawn_points = &meta_pattern[0];
                 if atom_spawn_points.iter().all(|a| world.atoms.locs.get(&a.pos) == None){
@@ -1568,7 +1662,24 @@ impl World {
                     meta_pattern.push(tmp);
                 }
             }
+            if let GlyphType::Conduit(_pos,conduit_id) = &glyph.glyph_type {
+                if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id){
+                    ensure!(pair_data.vecids.0 == pair_data.vecids.1,"Conduit {conduit_id} already modified!");
+                    pair_data.vecids.1 = id;
+                    unfinished_conduit_count -= 1;
+                    pair_data.offset_pos -= glyph.pos;
+                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot-glyph.rot);
+                } else {
+                    let conduit_info = ConduitInfo{
+                        vecids: (id,id),
+                        offset_pos: glyph.pos, offset_rot: glyph.rot,
+                        waiting_to_clear: Default::default()};
+                    world.conduit_pairs.insert(*conduit_id, conduit_info);
+                    unfinished_conduit_count += 1;
+                }
+            }
         }
+        ensure!(unfinished_conduit_count == 0,"Conduits not properly matched!");
         world.initial_area()?;
         world.timestep = world.get_first_timestep();
         Ok(world)

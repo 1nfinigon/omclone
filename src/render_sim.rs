@@ -429,7 +429,18 @@ impl RenderDataBase {
                     }
                     continue
                 },
-                Track(_) | Conduit(_,_) => continue,
+                Conduit(pos_vec,_) => {
+                    ctx.apply_bindings(&self.shapes.texture_bindings[14]);
+                    for p in pos_vec{
+                        let offset = pos_to_xy(p);
+                        ctx.apply_uniforms(&UvUniforms {
+                            offset, world_offset, angle, scale
+                        });
+                        ctx.draw(0, 6, 1);
+                    }
+                    continue
+                },
+                Track(_) => continue,
             };
             ctx.apply_bindings(&self.shapes.texture_bindings[i]);
             ctx.apply_uniforms(&UvUniforms {
@@ -476,6 +487,12 @@ impl RenderDataBase {
             let string = (num+1).to_string();
             self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
         }
-
+        for glyph in world.glyphs.iter(){
+            if let GlyphType::Conduit(_, id) = glyph.glyph_type{
+                let offset = pos_to_xy(&glyph.pos);
+                let string = id.to_string();
+                self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
+            }
+        }
     }
 }
