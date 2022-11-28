@@ -448,6 +448,15 @@ impl RenderDataBase {
             });
             ctx.draw(0, 6, 1);
         }
+        //Draw conduit numbers
+        self.font.set_pipeline(ctx);
+        for glyph in world.glyphs.iter(){
+            if let GlyphType::Conduit(_, id) = glyph.glyph_type{
+                let offset = pos_to_xy(&glyph.pos);
+                let string = id.to_string();
+                self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
+            }
+        }
         //draw area cover
         if show_area{
             ctx.apply_pipeline(&self.pipeline_textured);
@@ -486,13 +495,6 @@ impl RenderDataBase {
             let offset = [f_arm.pos.x, f_arm.pos.y];
             let string = (num+1).to_string();
             self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
-        }
-        for glyph in world.glyphs.iter(){
-            if let GlyphType::Conduit(_, id) = glyph.glyph_type{
-                let offset = pos_to_xy(&glyph.pos);
-                let string = id.to_string();
-                self.font.render_text_centered(ctx, &string, offset, world_offset, scale);
-            }
         }
     }
 }

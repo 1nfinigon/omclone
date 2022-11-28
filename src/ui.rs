@@ -5,7 +5,7 @@ use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
 use core::ops::Range;
 struct TapeBuffer<'a>{
     tape_ref: &'a mut Tape,
-    force_reload: &'a mut bool,
+    earliest_edit: &'a mut Option<usize>,
     tape_mode: bool,
     held_str: String
 }
@@ -21,6 +21,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         true
     }
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
+        *self.earliest_edit = Some(char_index);
         let tape = &mut self.tape_ref;
         let instr_mapped:Vec<Instr> = text.chars().filter_map(Instr::from_char).collect();
         let inserted = instr_mapped.len();
@@ -41,11 +42,11 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         };
         tape.instructions.splice(splice_range,instr_chain);
 
-        self.held_str = tape.modify_and_string();
-        *self.force_reload = true;
+        self.held_str = tape.noop_clear_and_string();
         inserted
     }
     fn delete_char_range(&mut self, char_range: Range<usize>) {
+        *self.earliest_edit = Some(char_range.start);
         let tape = &mut self.tape_ref;
         if self.tape_mode{
             for x in char_range{
@@ -67,17 +68,17 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
                 tape.instructions.drain(start..end);
             }
         }
-        self.held_str = tape.modify_and_string();
-        *self.force_reload = true;
+        self.held_str = tape.noop_clear_and_string();
     }
 
     fn clear(&mut self) {
+        *self.earliest_edit = Some(0);
         self.tape_ref.instructions.clear();
         self.tape_ref.first = 0;
-        self.held_str = self.tape_ref.modify_and_string();
-        *self.force_reload = true;
+        self.held_str = self.tape_ref.noop_clear_and_string();
     }
     fn replace(&mut self, text: &str) {
+        *self.earliest_edit = Some(0);
         self.tape_ref.instructions.clear();
         self.tape_ref.first = 0;
         self.insert_text(text, 0);
@@ -99,9 +100,11 @@ enum RunState{
 }
 struct Loaded{
     base_world: World,
-    last_world: World,
+    curr_world: World,
+    backup_world: World,
     curr_time: f64,
     curr_substep: usize,
+    backup_step: u64,
     substep_count: usize,
     float_world: FloatWorld,
     saved_motions: WorldStepInfo,
@@ -119,17 +122,35 @@ struct Loaded{
     popup_reload: bool,
 }
 impl Loaded{
-    fn reset_worlds(&mut self) {
+    fn reset_to(&mut self, reset_to:u64){
+        if self.backup_step < reset_to{
+            self.reset_to_backup();
+        } else {
+            self.reset_world();
+        }
+    }
+    fn reset_world(&mut self) {
         self.saved_motions.clear();
-        self.last_world = self.base_world.clone();
+        self.curr_world = self.base_world.clone();
         self.curr_time = 0.;
+        self.substep_count = 8;
+        self.curr_substep = 0;
+        self.message = None;
+
+        self.backup_world = self.base_world.clone();
+        self.backup_step = 0;
+    }
+    fn reset_to_backup(&mut self){
+        self.saved_motions.clear();
+        self.curr_world = self.backup_world.clone();
+        self.curr_time = self.backup_step as f64;
         self.substep_count = 8;
         self.curr_substep = 0;
         self.message = None;
     }
     fn try_set_target_time(&mut self, target: usize){
         if let RunState::Crashed(_) = self.run_state{
-            if self.last_world.timestep as usize > target{
+            if self.curr_world.timestep as usize > target{
                 self.run_state = RunState::Manual(target);
             }
         } else {
@@ -185,9 +206,11 @@ impl MyMiniquadApp {
         let tracks = setup_tracks(ctx, &test_world.track_map);
         let new_loaded = Loaded{
             base_world: world.clone(),
-            last_world: world,
+            backup_world: world.clone(),
+            curr_world: world,
             curr_time: 0.,
             curr_substep: 0,
+            backup_step: 0,
             substep_count: 8,
             float_world,saved_motions,
         
@@ -206,15 +229,12 @@ impl MyMiniquadApp {
 }
 
 
-//Will be able to remove in Rust 1.63
 #[cfg(target_arch = "wasm32")]
-use once_cell::sync::Lazy;
+static JS_PUZZLE_INPUT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 #[cfg(target_arch = "wasm32")]
-static JS_PUZZLE_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
+static JS_SOLUTION_INPUT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 #[cfg(target_arch = "wasm32")]
-static JS_SOLUTION_INPUT: Lazy<std::sync::Mutex<Option<Vec<u8>>>> = Lazy::new(|| std::sync::Mutex::new(None));
-#[cfg(target_arch = "wasm32")]
-static JS_SOLUTION_NAME: Lazy<std::sync::Mutex<Option<String>>> = Lazy::new(|| std::sync::Mutex::new(None));
+static JS_SOLUTION_NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
@@ -251,7 +271,7 @@ impl EventHandler for MyMiniquadApp {
             let target_time = match loaded.run_state{
                 RunState::Manual(target_timestep) => {
                     let target_timestep = target_timestep as f64;
-                    if target_timestep > loaded.curr_time+1.5{
+                    if target_timestep > loaded.curr_time+1.001{
                         target_timestep
                     } else {
                         f64::min(loaded.curr_time+loaded.run_speed,target_timestep)
@@ -261,35 +281,57 @@ impl EventHandler for MyMiniquadApp {
                 RunState::Crashed(_) => return,
             };
             if target_time < loaded.curr_time{
-                loaded.reset_worlds();
+                loaded.reset_to(target_time as u64);
+            } else { //If backup is too out-of-date, catch up
+                if loaded.curr_time as u64 >= loaded.backup_step+200 {
+                    loaded.reset_to_backup()
+                }
             }
-            let mut now_time = (loaded.last_world.timestep as f64)+(loaded.curr_substep as f64 / loaded.substep_count as f64);
-            let mut advance = |now_time: &mut f64, substep_count: &mut usize, substep_time: &mut f64| -> SimResult<()>{
+            let mut now_time = (loaded.curr_world.timestep as f64)+(loaded.curr_substep as f64 / loaded.substep_count as f64);
+
+            let advance = |now_time: &mut f64, substep_time: &mut f64, loaded: &mut Loaded| -> SimResult<()>{
                 if loaded.curr_substep == 0{
-                    let failcheck = loaded.last_world.prepare_step(&mut loaded.saved_motions);
+                    let failcheck = loaded.curr_world.prepare_step(&mut loaded.saved_motions);
                     if failcheck.is_err(){
                         loaded.saved_motions.clear();
                         return failcheck;
                     }
-                    *substep_count = loaded.last_world.substep_count(&loaded.saved_motions);
-                    *substep_time = 1.0/(*substep_count as f64);
+                    loaded.substep_count = loaded.curr_world.substep_count(&loaded.saved_motions);
+                    *substep_time = 1.0/(loaded.substep_count as f64);
                 }
                 loaded.curr_substep += 1;
-                let portion = loaded.curr_substep as f32 / *substep_count as f32;
-                *now_time = (loaded.last_world.timestep as f64)+(portion as f64);
+                let portion = loaded.curr_substep as f32 / loaded.substep_count as f32;
+                *now_time = (loaded.curr_world.timestep as f64)+(portion as f64);
                 if loaded.show_area{
-                    loaded.float_world.regenerate(&loaded.last_world, &loaded.saved_motions, portion);
-                    loaded.last_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
+                    loaded.float_world.regenerate(&loaded.curr_world, &loaded.saved_motions, portion);
+                    loaded.curr_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
                 }
-                if loaded.curr_substep == *substep_count{
+                if loaded.curr_substep == loaded.substep_count{
                     loaded.curr_substep = 0;
-                    loaded.last_world.finalize_step(&mut loaded.saved_motions)?;
+                    loaded.curr_world.finalize_step(&mut loaded.saved_motions)?;
                 }
                 Ok(())
             };
+
             let mut substep_time = 1.0/(loaded.substep_count as f64);
+            let backup_target_time = target_time.floor() - 100.;
+            if now_time <= backup_target_time{
+                while now_time <= backup_target_time{
+                    let output = advance(&mut now_time, &mut substep_time, loaded);
+                    if let Err(output) = output{
+                        loaded.run_state = RunState::Crashed(output.location);
+                        loaded.message = Some(output.to_string());
+                        loaded.curr_time = now_time;
+                        return;
+                    }
+                }
+                loaded.backup_step = backup_target_time as u64;
+                loaded.backup_world = loaded.curr_world.clone();
+                assert_eq!(backup_target_time as u64, loaded.curr_world.timestep);
+            }
+
             while now_time <= target_time-substep_time{
-                let output = advance(&mut now_time, &mut loaded.substep_count, &mut substep_time);
+                let output = advance(&mut now_time, &mut substep_time, loaded);
                 if let Err(output) = output{
                     loaded.run_state = RunState::Crashed(output.location);
                     loaded.message = Some(output.to_string());
@@ -300,9 +342,9 @@ impl EventHandler for MyMiniquadApp {
             loaded.curr_time = target_time;
             let display_portion = target_time.fract() as f32;
             if loaded.saved_motions.arms.is_empty(){
-                loaded.float_world.generate_static(&loaded.last_world);
+                loaded.float_world.generate_static(&loaded.curr_world);
             } else {
-                loaded.float_world.regenerate(&loaded.last_world, &loaded.saved_motions, display_portion);
+                loaded.float_world.regenerate(&loaded.curr_world, &loaded.saved_motions, display_portion);
             }
         }
     }
@@ -311,7 +353,7 @@ impl EventHandler for MyMiniquadApp {
         ctx.clear(Some((1., 1., 1., 1.)), None, None);
         ctx.begin_default_pass(PassAction::clear_color(0.5, 0.5, 0.5, 1.0));
         if let Loaded(loaded) = &mut self.app_state{
-            let world = &loaded.last_world;
+            let world = &loaded.curr_world;
             let float_world = &loaded.float_world;
             self.render_data.draw(ctx, &loaded.camera, &loaded.tracks, loaded.show_area, world, float_world)
         }
@@ -360,11 +402,18 @@ impl EventHandler for MyMiniquadApp {
                                 .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                             ui.label("Loop length:");
 
-                            ui.add_enabled(EDITOR_ENABLED, egui::DragValue::new(&mut loaded.base_world.repeat_length)
+                            let repeat_length_response = ui.add_enabled(EDITOR_ENABLED, egui::DragValue::new(&mut loaded.base_world.repeat_length)
                                 .clamp_range(min_size..=usize::MAX));
-                            
-                            if loaded.max_timestep < loaded.base_world.repeat_length{
-                                loaded.max_timestep = loaded.base_world.repeat_length;
+                            if repeat_length_response.changed(){
+                                let length = loaded.base_world.repeat_length;
+                                loaded.backup_world.repeat_length = length;
+                                loaded.curr_world.repeat_length = length;
+                                if loaded.max_timestep < length{
+                                    loaded.max_timestep = length;
+                                }
+                                if length <= loaded.curr_time as usize{
+                                    loaded.reset_to(length as u64);
+                                }
                             }
                             ui.separator();
                             ui.checkbox(&mut loaded.show_area, "Show Area");
@@ -470,14 +519,15 @@ impl EventHandler for MyMiniquadApp {
                             let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
                             //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                             ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
-                            let mut force_reload = false;
+                            let mut earliest_edit = None;
                             let mut target_time = None;
+                            let mut change_arm_id = None;
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
                                     let text = a.instruction_tape.to_string();
                                     let mut text_buf = TapeBuffer{
                                         tape_ref: &mut a.instruction_tape,
-                                        force_reload: &mut force_reload,
+                                        earliest_edit: &mut earliest_edit,
                                         tape_mode: loaded.tape_mode,
                                         held_str: text
                                     };
@@ -489,23 +539,30 @@ impl EventHandler for MyMiniquadApp {
                                         if let Some(cursor) = text_output.cursor_range{
                                             target_time = Some(cursor.primary.ccursor.index);
                                         }
+                                        if text_output.response.changed(){
+                                            change_arm_id = Some(a_num);
+                                        }
                                     });
                                 }
                             });
                             if let Some(target) = target_time {
                                 loaded.try_set_target_time(target);
                             }
-                            if force_reload {
+                            if let Some(edit_step) = earliest_edit{
+                                let arm_id = change_arm_id.unwrap();//If edit is performed, the change must be recorded
                                 let min_size = loaded.base_world.arms.iter()
                                     .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                                 if loaded.base_world.repeat_length < min_size{
                                     loaded.base_world.repeat_length = min_size;
                                 }
-                                if let RunState::Crashed(_) = loaded.run_state{
-                                    loaded.run_state = RunState::Manual(loaded.last_world.timestep as usize);
+                                if edit_step <= loaded.curr_time as usize {
+                                    if let RunState::Crashed(_) = loaded.run_state{
+                                        loaded.run_state = RunState::Manual(loaded.curr_world.timestep as usize);
+                                    }
+                                    loaded.backup_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
+                                    loaded.reset_to(edit_step as u64);
                                 }
-                                loaded.reset_worlds();
-                            };
+                            }
                         });
                     }
                     egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
@@ -528,8 +585,8 @@ impl EventHandler for MyMiniquadApp {
                 }
                 NotLoaded => {
                     egui::Window::new("World Not Loaded").show(egui_ctx, |ui| {
-                        let dat = &mut self.unloaded_info;
                         #[cfg(not(target_arch = "wasm32"))]{
+                            let dat = &mut self.unloaded_info;
                             ui.horizontal(|ui| {
                                 ui.label("Base path: ");
                                 ui.text_edit_singleline(&mut dat.base);

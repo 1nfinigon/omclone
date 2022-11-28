@@ -158,7 +158,7 @@ impl Tape {
         }
         output
     }
-    pub fn modify_and_string(&mut self) -> String{
+    pub fn noop_clear_and_string(&mut self) -> String{
         while self.instructions.get(0).unwrap_or(&Instr::Noop) == &Instr::Empty
         {
             self.first += 1;
@@ -340,7 +340,7 @@ impl Glyph {
             Conduit(locs,_id) => {
                 let p = self.pos;
                 for a in locs.iter_mut() {
-                    *a = self.pos + rotate(*a, self.rot);
+                    *a = p + rotate(*a, self.rot);
                 }
                 true
             }
@@ -512,6 +512,7 @@ impl WorldStepInfo{
     pub fn clear(&mut self) {
         self.atoms.clear();
         self.arms.clear();
+        self.spawning_atoms.clear();
     }
 }
 

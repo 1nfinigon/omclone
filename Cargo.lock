@@ -644,7 +644,6 @@ dependencies = [
  "miniquad",
  "nalgebra",
  "num-traits",
- "once_cell",
  "rustc-hash",
  "sapp-jsutils",
  "simple-eyre",
