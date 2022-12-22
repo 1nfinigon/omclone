@@ -337,6 +337,7 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
                 (TOutputRep, *id, None, None)
             }
             GlyphType::Conduit(conduit,id) => {
+                //TODO: reposition conduit here instead of in write maybe?
                 (TConduit, *id, None, Some((*id, conduit.clone())))
             }
             normal_glyph_type => {
@@ -407,20 +408,16 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
             }
         }
         write_int(f, part.arm_index)?;
-        /*TODO: Conduits
-        if (byte_string_is(part->name, "pipe")) {
-            part->conduit_id = read_uint32(&b);
-            part->number_of_conduit_hexes = read_uint32(&b);
-            if (part->number_of_conduit_hexes > 9999) {
-                free_solution_file(solution);
-                return 0;
+        if let Some((id, conduits)) = &part.conduit{
+            ensure!(part.part_type == PartType::TConduit, "Conduits on non-conduit piece");
+            write_int(f, *id)?;
+            write_int(f, conduits.len() as i32)?;
+            for c in conduits {
+                //return to relative position (absolute position done in setup_sim/reposition_glyph)
+                let rel_pos =  rotate(c - part.pos, -part.rot);
+                write_pos(f, rel_pos)?;
             }
-            part->conduit_hexes = calloc(part->number_of_conduit_hexes, sizeof(struct solution_hex_offset));
-            for (uint32_t j = 0; j < part->number_of_conduit_hexes; ++j) {
-                part->conduit_hexes[j].offset[0] = read_int32(&b);
-                part->conduit_hexes[j].offset[1] = read_int32(&b);
-            }
-        }*/
+        }
     }
     Ok(())
 }
@@ -433,7 +430,7 @@ pub struct FullPuzzle {
     pub outputs: Vec<AtomPattern>,
     pub output_multiplier: i32,
     pub production: bool,
-    //production data here
+    //TODO: production data here
 }
 fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
     let mut atoms = Vec::new();
@@ -548,7 +545,7 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
     })
 }
 pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
-    //First, fix the atom connections
+    //Convert from generic parts to glyphs, arms, etc.
     let mut glyphs = Vec::new();
     let mut arms = Vec::new();
     for p in &soln.part_list {
