@@ -554,17 +554,25 @@ impl EventHandler for MyMiniquadApp {
                                     .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
                                 if loaded.base_world.repeat_length < min_size{
                                     loaded.base_world.repeat_length = min_size;
+                                    loaded.backup_world.repeat_length = min_size;
+                                    loaded.curr_world.repeat_length = min_size;
                                 }
+                                loaded.backup_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
                                 if edit_step <= loaded.curr_time as usize {
                                     if let RunState::Crashed(_) = loaded.run_state{
                                         loaded.run_state = RunState::Manual(loaded.curr_world.timestep as usize);
                                     }
-                                    loaded.backup_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
                                     loaded.reset_to(edit_step as u64);
+                                } else {
+                                    loaded.curr_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
                                 }
                             }
                         });
                     }
+                    /*egui::Window::new("debug").show(egui_ctx, |ui|{
+                        ui.label(format!("curr time: {}",loaded.curr_time as u64));
+                        ui.label(format!("backup time: {}",loaded.backup_step));
+                    });*/
                     egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
                         #[cfg(not(target_arch = "wasm32"))]{
                                 if ui.button("Reload current").clicked() {
