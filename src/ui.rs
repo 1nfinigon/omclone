@@ -130,6 +130,9 @@ impl Loaded{
         }
     }
     fn reset_world(&mut self) {
+        if let RunState::Crashed(_) = self.run_state{
+            self.run_state = RunState::Manual(self.curr_world.timestep as usize);
+        }
         self.saved_motions.clear();
         self.curr_world = self.base_world.clone();
         self.curr_time = 0.;
@@ -141,6 +144,9 @@ impl Loaded{
         self.backup_step = 0;
     }
     fn reset_to_backup(&mut self){
+        if let RunState::Crashed(_) = self.run_state{
+            self.run_state = RunState::Manual(self.curr_world.timestep as usize);
+        }
         self.saved_motions.clear();
         self.curr_world = self.backup_world.clone();
         self.curr_time = self.backup_step as f64;
@@ -156,6 +162,80 @@ impl Loaded{
         } else {
             self.run_state = RunState::Manual(target);
         }
+    }
+    fn advance(&mut self, substep_time: &mut f64) -> SimResult<()>{
+        if self.curr_substep == 0{
+            let failcheck = self.curr_world.prepare_step(&mut self.saved_motions);
+            if failcheck.is_err(){
+                self.saved_motions.clear();
+                return failcheck;
+            }
+            self.substep_count = self.curr_world.substep_count(&self.saved_motions);
+            *substep_time = 1.0/(self.substep_count as f64);
+        }
+        self.curr_substep += 1;
+        let portion = self.curr_substep as f32 / self.substep_count as f32;
+        if self.show_area{
+            self.float_world.regenerate(&self.curr_world, &self.saved_motions, portion);
+            self.curr_world.mark_area_and_collide(&self.float_world, &self.saved_motions.spawning_atoms)?;
+        }
+        if self.curr_substep == self.substep_count{
+            self.curr_substep = 0;
+            self.curr_world.finalize_step(&mut self.saved_motions)?;
+        }
+        Ok(())
+    }
+    fn update(&mut self){
+            let target_time = match self.run_state{
+                RunState::Manual(target_timestep) => {
+                    let target_timestep = target_timestep as f64;
+                    if target_timestep > self.curr_time+1.001{
+                        target_timestep
+                    } else {
+                        f64::min(self.curr_time+self.run_speed,target_timestep)
+                    }
+                },
+                RunState::FreeRun => self.curr_time+self.run_speed,
+                RunState::Crashed(_) => return,
+            };
+            if target_time < self.curr_time{
+                self.reset_to(target_time as u64);
+            } else { //If backup is too out-of-date, catch up
+                if self.curr_time as u64 >= self.backup_step+200 {
+                    self.reset_to_backup()
+                }
+            }
+
+            let mut substep_time = 1.0/(self.substep_count as f64);
+            let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
+            if self.curr_world.timestep < backup_target_timestep{
+                while self.curr_world.timestep < backup_target_timestep{
+                    let output = self.advance(&mut substep_time);
+                    if let Err(output) = output{
+                        self.run_state = RunState::Crashed(output.location);
+                        self.message = Some(output.to_string());
+                        self.curr_time = self.curr_world.timestep as f64+(substep_time*self.curr_substep as f64);
+                        return;
+                    }
+                }
+                self.backup_step = backup_target_timestep;
+                self.backup_world = self.curr_world.clone();
+                assert_eq!(self.curr_substep, 0);
+                assert_eq!(backup_target_timestep, self.curr_world.timestep);
+            }
+
+            let target_timestep = target_time.floor() as u64;
+            let target_substep = (target_time.fract()*self.substep_count as f64).floor() as usize;
+            while self.curr_world.timestep < target_timestep || (self.curr_world.timestep == target_timestep && self.curr_substep < target_substep){
+                let output = self.advance(&mut substep_time);
+                if let Err(output) = output{
+                    self.run_state = RunState::Crashed(output.location);
+                    self.message = Some(output.to_string());
+                    self.curr_time = self.curr_world.timestep as f64+(substep_time*self.curr_substep as f64);
+                    return;
+                }
+            }
+            self.curr_time = target_time;
     }
 }
 enum AppState{
@@ -267,80 +347,8 @@ const EDITOR_ENABLED: bool = cfg!(feature = "editor_ui");
 impl EventHandler for MyMiniquadApp {
     fn update(&mut self, _: &mut Context) {
         if let Loaded(loaded) = &mut self.app_state{
-            let target_time = match loaded.run_state{
-                RunState::Manual(target_timestep) => {
-                    let target_timestep = target_timestep as f64;
-                    if target_timestep > loaded.curr_time+1.001{
-                        target_timestep
-                    } else {
-                        f64::min(loaded.curr_time+loaded.run_speed,target_timestep)
-                    }
-                },
-                RunState::FreeRun => loaded.curr_time+loaded.run_speed,
-                RunState::Crashed(_) => return,
-            };
-            if target_time < loaded.curr_time{
-                loaded.reset_to(target_time as u64);
-            } else { //If backup is too out-of-date, catch up
-                if loaded.curr_time as u64 >= loaded.backup_step+200 {
-                    loaded.reset_to_backup()
-                }
-            }
-
-            let advance = |substep_time: &mut f64, loaded: &mut Loaded| -> SimResult<()>{
-                if loaded.curr_substep == 0{
-                    let failcheck = loaded.curr_world.prepare_step(&mut loaded.saved_motions);
-                    if failcheck.is_err(){
-                        loaded.saved_motions.clear();
-                        return failcheck;
-                    }
-                    loaded.substep_count = loaded.curr_world.substep_count(&loaded.saved_motions);
-                    *substep_time = 1.0/(loaded.substep_count as f64);
-                }
-                loaded.curr_substep += 1;
-                let portion = loaded.curr_substep as f32 / loaded.substep_count as f32;
-                if loaded.show_area{
-                    loaded.float_world.regenerate(&loaded.curr_world, &loaded.saved_motions, portion);
-                    loaded.curr_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
-                }
-                if loaded.curr_substep == loaded.substep_count{
-                    loaded.curr_substep = 0;
-                    loaded.curr_world.finalize_step(&mut loaded.saved_motions)?;
-                }
-                Ok(())
-            };
-
-            let mut substep_time = 1.0/(loaded.substep_count as f64);
-            let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
-            if loaded.curr_world.timestep < backup_target_timestep{
-                while loaded.curr_world.timestep < backup_target_timestep{
-                    let output = advance(&mut substep_time, loaded);
-                    if let Err(output) = output{
-                        loaded.run_state = RunState::Crashed(output.location);
-                        loaded.message = Some(output.to_string());
-                        loaded.curr_time = loaded.curr_world.timestep as f64+(substep_time*loaded.curr_substep as f64);
-                        return;
-                    }
-                }
-                loaded.backup_step = backup_target_timestep;
-                loaded.backup_world = loaded.curr_world.clone();
-                assert_eq!(loaded.curr_substep, 0);
-                assert_eq!(backup_target_timestep, loaded.curr_world.timestep);
-            }
-
-            let target_timestep = target_time.floor() as u64;
-            let target_substep = (target_time.fract()*loaded.substep_count as f64).floor() as usize;
-            while loaded.curr_world.timestep < target_timestep || (loaded.curr_world.timestep == target_timestep && loaded.curr_substep < target_substep){
-                let output = advance(&mut substep_time, loaded);
-                if let Err(output) = output{
-                    loaded.run_state = RunState::Crashed(output.location);
-                    loaded.message = Some(output.to_string());
-                    loaded.curr_time = loaded.curr_world.timestep as f64+(substep_time*loaded.curr_substep as f64);
-                    return;
-                }
-            }
-            loaded.curr_time = target_time;
-            let display_portion = target_time.fract() as f32;
+            loaded.update();
+            let display_portion = loaded.curr_time.fract() as f32;
             if loaded.saved_motions.arms.is_empty(){
                 loaded.float_world.generate_static(&loaded.curr_world);
             } else {
