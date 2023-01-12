@@ -16,9 +16,7 @@ fn check_all(){
                 } else if ftype.is_file(){
                     let f_puzzle = File::open(f.path()).unwrap();
                     if let Ok(puzzle) = parse_puzzle(&mut BufReader::new(f_puzzle)){
-                        /*if puzzle.production{
-                            println!("Skipping production: {}",puzzle.puzzle_name);
-                        }else*/ if puzzle.outputs.iter().any(|atoms_meta| atoms_meta[0].iter().any(
+                        if puzzle.outputs.iter().any(|atoms_meta| atoms_meta[0].iter().any(
                                         |atom|atom.atom_type == AtomType::RepeatingOutputMarker)){
                             println!("Skipping infinite: {}",puzzle.puzzle_name);
                         } else {

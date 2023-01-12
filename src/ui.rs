@@ -197,13 +197,13 @@ impl MyMiniquadApp {
             println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
         }
         let world = World::setup_sim(&init).unwrap();
-        let test_world = world.clone();
 
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
-        let camera = CameraSetup::frame_center(&test_world, ctx.screen_size());
-        let tracks = setup_tracks(ctx, &test_world.track_map);
+        let camera = CameraSetup::frame_center(&world, ctx.screen_size());
+        let tracks = setup_tracks(ctx, &world.track_map);
+        let max_timestep = 100.max(world.repeat_length);
         let new_loaded = Loaded{
             base_world: world.clone(),
             backup_world: world.clone(),
@@ -214,8 +214,7 @@ impl MyMiniquadApp {
             substep_count: 8,
             float_world,saved_motions,
         
-            max_timestep: 100,//test_world.timestep as usize,
-            camera,tracks,solution,
+            max_timestep,camera,tracks,solution,
             message: None,
         
             tape_mode: false,
@@ -287,9 +286,8 @@ impl EventHandler for MyMiniquadApp {
                     loaded.reset_to_backup()
                 }
             }
-            let mut now_time = (loaded.curr_world.timestep as f64)+(loaded.curr_substep as f64 / loaded.substep_count as f64);
 
-            let advance = |now_time: &mut f64, substep_time: &mut f64, loaded: &mut Loaded| -> SimResult<()>{
+            let advance = |substep_time: &mut f64, loaded: &mut Loaded| -> SimResult<()>{
                 if loaded.curr_substep == 0{
                     let failcheck = loaded.curr_world.prepare_step(&mut loaded.saved_motions);
                     if failcheck.is_err(){
@@ -301,7 +299,6 @@ impl EventHandler for MyMiniquadApp {
                 }
                 loaded.curr_substep += 1;
                 let portion = loaded.curr_substep as f32 / loaded.substep_count as f32;
-                *now_time = (loaded.curr_world.timestep as f64)+(portion as f64);
                 if loaded.show_area{
                     loaded.float_world.regenerate(&loaded.curr_world, &loaded.saved_motions, portion);
                     loaded.curr_world.mark_area_and_collide(&loaded.float_world, &loaded.saved_motions.spawning_atoms)?;
@@ -314,28 +311,31 @@ impl EventHandler for MyMiniquadApp {
             };
 
             let mut substep_time = 1.0/(loaded.substep_count as f64);
-            let backup_target_time = target_time.floor() - 100.;
-            if now_time <= backup_target_time{
-                while now_time <= backup_target_time{
-                    let output = advance(&mut now_time, &mut substep_time, loaded);
+            let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
+            if loaded.curr_world.timestep < backup_target_timestep{
+                while loaded.curr_world.timestep < backup_target_timestep{
+                    let output = advance(&mut substep_time, loaded);
                     if let Err(output) = output{
                         loaded.run_state = RunState::Crashed(output.location);
                         loaded.message = Some(output.to_string());
-                        loaded.curr_time = now_time;
+                        loaded.curr_time = loaded.curr_world.timestep as f64+(substep_time*loaded.curr_substep as f64);
                         return;
                     }
                 }
-                loaded.backup_step = backup_target_time as u64;
+                loaded.backup_step = backup_target_timestep;
                 loaded.backup_world = loaded.curr_world.clone();
-                assert_eq!(backup_target_time as u64, loaded.curr_world.timestep);
+                assert_eq!(loaded.curr_substep, 0);
+                assert_eq!(backup_target_timestep, loaded.curr_world.timestep);
             }
 
-            while now_time <= target_time-substep_time{
-                let output = advance(&mut now_time, &mut substep_time, loaded);
+            let target_timestep = target_time.floor() as u64;
+            let target_substep = (target_time.fract()*loaded.substep_count as f64).floor() as usize;
+            while loaded.curr_world.timestep < target_timestep || (loaded.curr_world.timestep == target_timestep && loaded.curr_substep < target_substep){
+                let output = advance(&mut substep_time, loaded);
                 if let Err(output) = output{
                     loaded.run_state = RunState::Crashed(output.location);
                     loaded.message = Some(output.to_string());
-                    loaded.curr_time = now_time;
+                    loaded.curr_time = loaded.curr_world.timestep as f64+(substep_time*loaded.curr_substep as f64);
                     return;
                 }
             }
@@ -416,7 +416,10 @@ impl EventHandler for MyMiniquadApp {
                                 }
                             }
                             ui.separator();
-                            ui.checkbox(&mut loaded.show_area, "Show Area");
+                            let area_check = ui.checkbox(&mut loaded.show_area, "Collide/Area");
+                            if area_check.changed() && loaded.show_area{
+                                loaded.reset_to(0);
+                            }
                             ui.separator();
                             ui.label("Speed:");
                             ui.add(egui::DragValue::new(&mut loaded.run_speed)
@@ -569,7 +572,7 @@ impl EventHandler for MyMiniquadApp {
                             }
                         });
                     }
-                    /*egui::Window::new("debug").show(egui_ctx, |ui|{
+                    /*egui::Window::new("debug").min_width(128.).show(egui_ctx, |ui|{
                         ui.label(format!("curr time: {}",loaded.curr_time as u64));
                         ui.label(format!("backup time: {}",loaded.backup_step));
                     });*/

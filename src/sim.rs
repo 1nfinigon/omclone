@@ -741,7 +741,7 @@ impl World {
             }
             let current = self.atoms.locs.insert(atom.pos, atom_key);
             if current != None {
-                let error_str = &"Atom moved in multiple directions!";
+                let error_str = &"Multiple atoms in same hex!";
                 return Err(sim_error_pos(error_str,atom.pos));
             }
         }
