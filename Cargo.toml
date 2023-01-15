@@ -37,11 +37,11 @@ sapp-jsutils = "0.1.5"
 [dependencies]
 slotmap = "1.0"
 bitflags = "1.3"
-nalgebra = "0.30"
+nalgebra = "0.31"
 num-traits = "0.2"
 enum-primitive-derive = "0.2.2"
 rustc-hash = "1.1"
-smallvec = "1.8"
+smallvec = "1.10"
 
 
 egui = {version = "0.18", optional = true}
@@ -49,7 +49,7 @@ egui = {version = "0.18", optional = true}
 miniquad = { git = "https://github.com/ssk97/miniquad", branch = "master", optional = true}
 fontdue = { version = "0.7", optional = true}
 egui-miniquad = {git = "https://github.com/ssk97/egui-miniquad.git", branch = "master", optional = true}
-image = {version = "0.24.1", optional = true, default-features = false, features = ["png"]}
+image = {version = "0.24.5", optional = true, default-features = false, features = ["png"]}
 
 #wasm-bindgen = {version = "0.2.74", optional = true}
 #web-sys = {version = "0.3.56", optional = true}

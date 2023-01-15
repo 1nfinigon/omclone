@@ -2,6 +2,11 @@ use miniquad::*;
 use crate::{sim::*, parser, render_sim::*};
 use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
 
+#[cfg(feature = "color_eyre")]
+use color_eyre::eyre::Result;
+#[cfg(not(feature = "color_eyre"))]
+use simple_eyre::eyre::Result;
+
 use core::ops::Range;
 struct TapeBuffer<'a>{
     tape_ref: &'a mut Tape,
@@ -250,7 +255,8 @@ pub struct MyMiniquadApp {
     egui_mq: egui_miniquad::EguiMq,
     render_data: RenderDataBase,
     app_state: AppState,
-    unloaded_info: PathInfo
+    unloaded_info: PathInfo,
+    extra_message: Option<String>,
 }
 
 impl MyMiniquadApp {
@@ -265,18 +271,19 @@ impl MyMiniquadApp {
         let unloaded_info = PathInfo{base, puzzle, solution};
         Self {
             egui_mq: egui_miniquad::EguiMq::new(ctx),
-            render_data,app_state,unloaded_info
+            render_data,app_state,unloaded_info,
+            extra_message:None,
         }
     }
-    pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read, ctx: &mut Context){
-        let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle)).unwrap();
-        let solution = parser::parse_solution(&mut BufReader::new(f_sol)).unwrap();
+    pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read, ctx: &mut Context) -> Result<()>{
+        let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle))?;
+        let solution = parser::parse_solution(&mut BufReader::new(f_sol))?;
         println!("Check: {:?}", solution.stats);
-        let init = parser::puzzle_prep(&puzzle, &solution).unwrap();
+        let init = parser::puzzle_prep(&puzzle, &solution)?;
         for (a_num, a) in init.arms.iter().enumerate(){
             println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
         }
-        let world = World::setup_sim(&init).unwrap();
+        let world = World::setup_sim(&init)?;
 
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
@@ -304,6 +311,7 @@ impl MyMiniquadApp {
             popup_reload: false,
         };
         self.app_state = Loaded(new_loaded);
+        Ok(())
     }
 }
 
@@ -370,6 +378,13 @@ impl EventHandler for MyMiniquadApp {
         let mut do_loading = AppStateUpdate::NoChange;
         let screen_size = ctx.screen_size();
         self.egui_mq.run(ctx, |egui_ctx|{
+            if let Some(msg) = &self.extra_message{
+                let mut opened = true;
+                egui::Window::new("Message").open(&mut opened).show(egui_ctx, |ui| {
+                    ui.label(msg);
+                });
+                if !opened {self.extra_message = None;}
+            }
             match &mut self.app_state{
                 Loaded(loaded) => {
                     egui::Window::new("World loaded").default_pos((0.,0.)).show(egui_ctx, |ui| {
@@ -640,22 +655,34 @@ impl EventHandler for MyMiniquadApp {
                 self.app_state = NotLoaded;
             }
             AppStateUpdate::Load => {
-                #[cfg(not(target_arch = "wasm32"))]{
-                    let dat = &self.unloaded_info;
-                    let base_path = Path::new(&dat.base);
-                    let f_puzzle = File::open(base_path.join(&dat.puzzle)).unwrap();
-                    let solution_path = base_path.join(&dat.solution);
-                    let f_sol = File::open(&solution_path).unwrap();
-                    self.load(f_puzzle, f_sol, ctx);
-                }
-                #[cfg(target_arch = "wasm32")]{
-                    let puzzle = JS_PUZZLE_INPUT.lock().unwrap();
-                    let f_puzzle = puzzle.as_ref().unwrap();
-                    let solution = JS_SOLUTION_INPUT.lock().unwrap();
-                    let f_sol = solution.as_ref().unwrap();
-                    self.load(f_puzzle.as_slice(), f_sol.as_slice(), ctx);
-					let name = JS_SOLUTION_NAME.lock().unwrap().take();
-					self.unloaded_info.solution = name.unwrap_or(String::from("omclone.solution"));
+                let mut do_load = || -> Result<()>{
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let dat = &self.unloaded_info;
+                        let base_path = Path::new(&dat.base);
+                        let f_puzzle = File::open(base_path.join(&dat.puzzle))?;
+                        let solution_path = base_path.join(&dat.solution);
+                        let f_sol = File::open(&solution_path)?;
+                        self.load(f_puzzle, f_sol, ctx)?;
+                        Ok(())
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let puzzle = JS_PUZZLE_INPUT.lock().unwrap();
+                        let f_puzzle = puzzle.as_ref().unwrap();
+                        let solution = JS_SOLUTION_INPUT.lock().unwrap();
+                        let f_sol = solution.as_ref().unwrap();
+                        let name = JS_SOLUTION_NAME.lock().unwrap().take();
+                        self.unloaded_info.solution = name.unwrap_or(String::from("omclone.solution"));
+                        self.load(f_puzzle.as_slice(), f_sol.as_slice(), ctx)?;
+                        Ok(())
+                    }
+                };
+
+                if let Err(err)= do_load(){
+                    self.extra_message = Some(err.to_string());
+                } else {
+                    self.extra_message = None;
                 }
             }
         }
