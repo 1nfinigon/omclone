@@ -413,7 +413,6 @@ pub struct ConduitInfo {
     pub vecids: (usize, usize),
     pub offset_pos: Pos,
     pub offset_rot: Rot, 
-    pub waiting_to_clear: FxHashSet<Pos>,
 }
 #[derive(Debug, Clone)]
 pub struct World {
@@ -511,6 +510,7 @@ pub struct WorldStepInfo{
     pub arms: Vec<ArmMovement>,
     pub spawning_atoms: Vec<Atom>,
     pub recent_bonds: FxHashSet<AtomKey>,
+    pub drop_conduit_check: FxHashSet<AtomKey>, //contains one entry per arm
 }
 impl WorldStepInfo{
     pub fn new() -> Self{
@@ -518,7 +518,8 @@ impl WorldStepInfo{
             atoms: SecondaryMap::new(),
             arms: Vec::new(),
             spawning_atoms:Vec::new(),
-            recent_bonds:FxHashSet::default()
+            recent_bonds:FxHashSet::default(),
+            drop_conduit_check:FxHashSet::default(),
         }
     }
     pub fn clear(&mut self) {
@@ -526,6 +527,7 @@ impl WorldStepInfo{
         self.arms.clear();
         self.spawning_atoms.clear();
         self.recent_bonds.clear();
+        self.drop_conduit_check.clear();
     }
 }
 
@@ -795,6 +797,12 @@ impl World {
             PivotClockwise => Pivot(-1),
             Drop => {
                 if arm_type != VanBerlo {
+                    for r in 0..6{
+                        let grabbed_atom = arm.atoms_grabbed[r];
+                        if !grabbed_atom.is_null(){
+                            motion.drop_conduit_check.insert(grabbed_atom);
+                        }
+                    }
                     arm.atoms_grabbed = [AtomKey::null(); 6];
                     arm.grabbing = false;
                 }
@@ -1191,8 +1199,7 @@ impl World {
             assert!(conduit_info.vecids.1 == glyph_id, "Conduit invalid vec id");
         }
         for pos in positions{
-            if conduit_info.waiting_to_clear.contains(pos) {continue;}
-            //For each position that isn't in the waiting list, if it has an atom on it:
+            //For each position on the conduit, if it has an atom on it:
             if let Some(key) = atoms.locs.get(pos){
                 //Closure to check if all atoms in the molecule are on the conduit
                 let mut atoms_send_check = |first_key: AtomKey| -> bool {
@@ -1214,8 +1221,8 @@ impl World {
                     }
                     return true;
                 };
-                //If they are, move the atoms to the new position via spawning
-                if atoms_send_check(*key){
+                //If the atom was just dropped and all connected are on the conduit, move the atoms to the new position via spawning
+                if motion.drop_conduit_check.contains(key) && atoms_send_check(*key){
                     for a in &viewed_atoms{
                         let mut atom = atoms.take_atom(*a);
                         atom.pos = rotate_around(atom.pos,offset_rot,origin)+offset_pos;
@@ -1367,25 +1374,14 @@ impl World {
         }
         self.process_inputs(motion);
         self.process_glyphs(motion, false);
-        self.process_outputs(motion);
-        for (_, conduit_info) in self.conduit_pairs.iter_mut(){
-            conduit_info.waiting_to_clear.clear();
-            let mut do_checks = |pos_list| {
-                for p in pos_list{
-                    if let Some(key) = self.atoms.locs.get(p){
-                        if !motion.atoms.contains_key(*key){
-                            conduit_info.waiting_to_clear.insert(*p);
-                        }
-                    }
-                }
-            };
-            if let GlyphType::Conduit(pos_list1, _) = &self.glyphs[conduit_info.vecids.0].glyph_type{
-                do_checks(pos_list1);
-            }
-            if let GlyphType::Conduit(pos_list2, _) = &self.glyphs[conduit_info.vecids.1].glyph_type{
-                do_checks(pos_list2);
+        motion.clear();
+        for arm in &self.arms {
+            for atomkey in arm.atoms_grabbed{
+                motion.atoms.insert(atomkey, Movement::HeldStill);
+                //does nothing if atomkey is null
             }
         }
+        self.process_outputs(motion);
         motion.clear();
         self.timestep += 1;
         Ok(())
@@ -1721,9 +1717,7 @@ impl World {
                     pair_data.offset_rot = normalize_dir(pair_data.offset_rot-glyph.rot);
                 } else {
                     let conduit_info = ConduitInfo{
-                        vecids: (id,id),
-                        offset_pos: glyph.pos, offset_rot: glyph.rot,
-                        waiting_to_clear: Default::default()};
+                        vecids: (id,id), offset_pos: glyph.pos, offset_rot: glyph.rot};
                     world.conduit_pairs.insert(*conduit_id, conduit_info);
                     unfinished_conduit_count += 1;
                 }
