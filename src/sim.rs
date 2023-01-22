@@ -864,7 +864,15 @@ impl World {
                     ArmMovement::Move(m) => m,
                     ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store)*a)
                 };
-                motion.atoms.insert(atom, atom_movement);
+                let tmp = motion.atoms.insert(atom, atom_movement);
+                match tmp{
+                    Some(x) if x != atom_movement => {
+                        println!("was {:?},applying {:?}",atom_movement,x);
+                        let error_str = &"Atom moved in multiple directions!";
+                        return Err(sim_error_pos(error_str,self.atoms.atom_map[atom].pos));
+                    }
+                    _ => {}
+                }
             }
         }
         motion.arms.push(action);
@@ -1463,10 +1471,6 @@ impl World {
 impl World {
     fn add_track(track_maps: &mut TrackMaps, track_pos:&Vec<Pos>) -> Result<()> {
         ensure!(track_pos.len() > 0, "Track of length 0!");
-        if track_pos.len() == 1{
-            track_maps.plus.insert(track_pos[0],Pos::new(0,0));
-            track_maps.minus.insert(track_pos[0],Pos::new(0,0));
-        }
         fn try_insert(map: &mut TrackMap, key: Pos, value: Pos){
             if !map.contains_key(&key){
                 map.insert(key,value);
@@ -1486,8 +1490,20 @@ impl World {
         if track_pos.len() > 2 && pos_to_rot(offset).is_some() {
             try_insert(&mut track_maps.minus, first, -offset);
             try_insert(&mut track_maps.plus, last, offset);
+        } else {
+            //If not looping, block future track overlaps here
+            try_insert(&mut track_maps.minus, first, Pos::new(0,0));
+            try_insert(&mut track_maps.plus, last, Pos::new(0,0));
         }
         Ok(())
+    }
+    fn clean_track(track_maps: &mut TrackMaps){
+        //Remove {0,0} track offsets that were used to block track overlaps
+        let pos_nil = Pos::new(0,0);
+        track_maps.plus.retain(|_, v|->bool {
+            v != &pos_nil});
+        track_maps.minus.retain(|_, v|->bool {
+            v != &pos_nil});
     }
 
     //modifies the original arm to have the new instructions
@@ -1710,6 +1726,7 @@ impl World {
                 World::add_track(&mut world.track_maps, track_data)?;
             }
         }
+        World::clean_track(&mut world.track_maps);
         for a in &mut world.arms {
             use ArmType::*;
             world.cost += match a.arm_type {
