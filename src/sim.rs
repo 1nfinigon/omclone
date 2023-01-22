@@ -1252,10 +1252,10 @@ impl World {
             if let Some(key) = atoms.locs.get(pos){
                 //Closure to check if all atoms in the molecule are on the conduit
                 let mut atoms_send_check = |first_key: AtomKey| -> bool {
-                    if motion.atoms.contains_key(first_key) {return false;}
                     check_atoms.push_back(first_key);
                     while let Some(this_key) = check_atoms.pop_front(){
                         if viewed_atoms.contains(&this_key) {continue;}
+                        if motion.atoms.contains_key(this_key) {return false;}
                         viewed_atoms.insert(this_key);
                         
                         let atom = &atoms.atom_map[this_key];
