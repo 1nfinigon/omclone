@@ -289,7 +289,7 @@ impl MyMiniquadApp {
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
         let camera = CameraSetup::frame_center(&world, ctx.screen_size());
-        let tracks = setup_tracks(ctx, &world.track_map);
+        let tracks = setup_tracks(ctx, &world.track_maps);
         let max_timestep = 100.max(world.repeat_length);
         let new_loaded = Loaded{
             base_world: world.clone(),

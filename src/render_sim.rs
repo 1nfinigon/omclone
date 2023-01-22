@@ -52,21 +52,25 @@ pub struct TrackBindings{
     bindings: Bindings,
     vert_count: usize,
 }
-pub fn setup_tracks(ctx: &mut Context, track: &TrackMap) -> TrackBindings{
+pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
     let mut verts_vec:Vec<GFXPos> = Vec::new();
     let mut index_vec:Vec<u16> = Vec::new();
     let mut curr_index = 0;
-    for (center_pos, track_data) in track{
-        //Every minus is matched by a positive so only need one
-        if let Some(plus) = &track_data.plus{
-            verts_vec.push(pos_to_xy(center_pos));
+    let mut add_from = |track: &TrackMap| {
+        for (from, offset) in track{
+            let gfxpos = pos_to_xy(from);
+            verts_vec.push(gfxpos);
             index_vec.push(curr_index);
             curr_index += 1;
-            verts_vec.push(pos_to_xy(&(center_pos+plus)));
+            let gfxoffset = pos_to_xy(offset);
+            let outer_pos = [gfxpos[0]+gfxoffset[0]*0.5,gfxpos[1]+gfxoffset[1]*0.5];
+            verts_vec.push(outer_pos);
             index_vec.push(curr_index);
             curr_index += 1;
         }
-    }
+    };
+    add_from(&tracks.plus);
+    add_from(&tracks.minus);
 
     let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &verts_vec);
     let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &index_vec);
@@ -358,12 +362,6 @@ impl RenderDataBase {
         let base_x = ((-inv_scale_x-world_offset[0])/2.0).ceil()*2.0;
         let base_y = ((-inv_scale_y-world_offset[1])/y_factor).ceil()*y_factor;
 
-        ctx.apply_pipeline(&self.pipeline_tracks);
-        ctx.apply_bindings(&tracks.bindings);
-        ctx.apply_uniforms(&BasicUniforms {
-            color:[1., 1., 1.], offset:[0.,0.], world_offset, angle:0., scale
-        });
-        ctx.draw(0, tracks.vert_count as i32, 1);
 
         //Draw input/output atoms
         let mut temp_atoms_vec:Vec<FloatAtom> = Vec::new();
@@ -469,6 +467,14 @@ impl RenderDataBase {
                 ctx.draw(0, 6, 1);
             }
         }
+        
+        //Draw tracks
+        ctx.apply_pipeline(&self.pipeline_tracks);
+        ctx.apply_bindings(&tracks.bindings);
+        ctx.apply_uniforms(&BasicUniforms {
+            color:[1., 1., 1.], offset:[0.,0.], world_offset, angle:0., scale
+        });
+        ctx.draw(0, tracks.vert_count as i32, 1);
 		
 		//Draw atoms
         let atoms_slice = &float_world.atoms_xy[..];

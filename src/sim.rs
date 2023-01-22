@@ -344,12 +344,12 @@ impl Glyph {
                 }
                 true
             }
-            /*Track(locs) => {
+            Track(locs) => {
                 for a in locs {
                     *a = self.pos + rotate(*a, self.rot);
                 }
                 true
-            }*/
+            }
             _ => false,
         }
     }
@@ -402,12 +402,14 @@ pub struct InitialWorld {
     pub arms: Vec<Arm>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct TrackMapData {
-    pub minus: Option<Pos>,
-    pub plus: Option<Pos>,
+pub type TrackMap = FxHashMap<Pos, Pos>;
+
+#[derive(Debug, Clone, Default)]
+pub struct TrackMaps{
+    pub plus: TrackMap,
+    pub minus: TrackMap,
 }
-pub type TrackMap = FxHashMap<Pos, TrackMapData>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConduitInfo {
     pub vecids: (usize, usize),
@@ -422,7 +424,7 @@ pub struct World {
     pub glyphs: Vec<Glyph>,
     pub arms: Vec<Arm>,
     pub repeat_length: usize,
-    pub track_map: TrackMap,
+    pub track_maps: TrackMaps,
     pub cost: i32,
     pub instruction_count: i32,
     pub conduit_pairs: ContuitPairMap,
@@ -826,18 +828,12 @@ impl World {
                 STILL
             }
             Forward => {
-                let track_data = self.track_map.get(&arm.pos)
-                    .ok_or(sim_error_pos("Forward movement not on track", arm.pos))?;
-                track_data.plus.map_or(STILL, |x| {
-                    Move(Linear(x))
-                })
+                self.track_maps.plus.get(&arm.pos)
+                    .map_or(STILL, |&x| {Move(Linear(x))})
             }
             Back => {
-                let track_data = self.track_map.get(&arm.pos)
-                    .ok_or(sim_error_pos("Backward movement not on track", arm.pos))?;
-                track_data.minus.map_or(STILL, |x| {
-                    Move(Linear(x))
-                })
+                self.track_maps.minus.get(&arm.pos)
+                    .map_or(STILL, |&x| {Move(Linear(x))})
             }
             Repeat | Reset | Noop => {
                 panic!("Unprocessed instruction!");
@@ -852,7 +848,7 @@ impl World {
                     ArmMovement::Move(m) => m,
                     ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store)*a)
                 };
-                self.premove_atoms(motion, atom, atom_movement)?;
+                motion.atoms.insert(atom, atom_movement);
             }
         }
         motion.arms.push(action);
@@ -1347,6 +1343,11 @@ impl World {
                 }
             }
         }
+        let tmp = motion.atoms.clone();
+        motion.atoms.clear();
+        for (atom, movement) in tmp{
+            self.premove_atoms(motion, atom, movement)?;
+        }
         Ok(())
     }
     pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{
@@ -1402,44 +1403,31 @@ impl World {
 
 //Setup stuff
 impl World {
-    fn add_track(track_map: &mut TrackMap, g: &Glyph) -> Result<()> {
-        let track_pos = {
-            if let GlyphType::Track(t) = &g.glyph_type {
-                t
-            } else {
-                bail!("Adding track from nontrack object");
-            }
-        };
+    fn add_track(track_maps: &mut TrackMaps, track_pos:&Vec<Pos>) -> Result<()> {
         ensure!(track_pos.len() > 0, "Track of length 0!");
-        track_map.insert(
-            g.reposition(track_pos[0]),
-            TrackMapData {
-                minus: None,
-                plus: None,
-            },
-        );
+        if track_pos.len() == 1{
+            track_maps.plus.insert(track_pos[0],Pos::new(0,0));
+            track_maps.minus.insert(track_pos[0],Pos::new(0,0));
+        }
+        fn try_insert(map: &mut TrackMap, key: Pos, value: Pos){
+            if !map.contains_key(&key){
+                map.insert(key,value);
+            }
+        }
         //first do all except the possible loopback
         for track_pair in track_pos.windows(2) {
             let (t_prev, t_now) = (track_pair[0], track_pair[1]);
             let offset = t_now - t_prev;
-            track_map.insert(
-                g.reposition(t_now),
-                TrackMapData {
-                    minus: Some(-offset),
-                    plus: None,
-                },
-            );
-            track_map.get_mut(&g.reposition(t_prev)).unwrap().plus = Some(offset);
+            try_insert(&mut track_maps.minus, t_now, -offset);
+            try_insert(&mut track_maps.plus, t_prev, offset);
         }
+        let first = *track_pos.first().unwrap();
+        let last = *track_pos.last().unwrap();
+        let offset = first - last;
         //check for looping on first/last
-        if track_pos.len() > 2 {
-            let first = *track_pos.first().unwrap();
-            let last = *track_pos.last().unwrap();
-            let offset = first - last;
-            if pos_to_rot(offset).is_some() {
-                track_map.get_mut(&g.reposition(first)).unwrap().minus = Some(-offset);
-                track_map.get_mut(&g.reposition(last)).unwrap().plus = Some(offset);
-            }
+        if track_pos.len() > 2 && pos_to_rot(offset).is_some() {
+            try_insert(&mut track_maps.minus, first, -offset);
+            try_insert(&mut track_maps.plus, last, offset);
         }
         Ok(())
     }
@@ -1448,7 +1436,7 @@ impl World {
     //returns the length of the tape (repetition size)
     fn normalize_instructions(
         original: &mut Arm,
-        track_map: &TrackMap,
+        track_maps: &TrackMaps,
     ) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
@@ -1468,14 +1456,14 @@ impl World {
             let mut my_pos = pos;
             let mut loop_length = 0;
             loop{
-                let offset = track_map.get(&my_pos)?.plus?;
+                let offset = track_map.get(&my_pos)?;
                 my_pos += offset;
                 loop_length += 1;
                 if my_pos == pos {return Some(loop_length);}
                 if loop_length as usize > track_map.len() {return None;}
             }
         }
-        let track_loop = get_track_loop_length(track_map, original.pos);
+        let track_loop = get_track_loop_length(&track_maps.plus, original.pos);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
             if !any_nonrepeat && !matches!(instr, Repeat | Empty ){
@@ -1507,19 +1495,15 @@ impl World {
                     Grab => known_grab = true,
                     Drop => known_grab = false,
                     Forward => {
-                        if let Some(track_data) = track_map.get(&position_check){
-                            if let Some(offset) = track_data.plus{
-                                track_steps += 1;
-                                position_check += offset;
-                            }
+                        if let Some(offset) = track_maps.plus.get(&position_check){
+                            track_steps += 1;
+                            position_check += offset;
                         }
                     }
                     Back => {
-                        if let Some(track_data) = track_map.get(&position_check){
-                            if let Some(offset) = track_data.minus{
-                                track_steps -= 1;
-                                position_check += offset;
-                            }
+                        if let Some(offset) = track_maps.minus.get(&position_check){
+                            track_steps -= 1;
+                            position_check += offset;
                         }
                     }
                     PivotCounterClockwise | PivotClockwise | Empty => {}
@@ -1648,7 +1632,7 @@ impl World {
             glyphs: init.glyphs.clone(),
             arms: init.arms.clone(),
             repeat_length: 0,
-            track_map: Default::default(),
+            track_maps: Default::default(),
             cost: 0,
             instruction_count: 0,
             conduit_pairs: Default::default(),
@@ -1663,10 +1647,10 @@ impl World {
                 Disposal | Equilibrium | Output(_, _,_)| OutputRepeating(_, _,_) | Input(_,_) | Conduit(_,_) => 0,
                 Track(v) => (v.len() as i32) * 5,
             };
-            if let Track(_) = &g.glyph_type {
-                World::add_track(&mut world.track_map, g)?;
-            }
             g.reposition_pattern(); //reposition input/output/conduits
+            if let Track(track_data) = &g.glyph_type {
+                World::add_track(&mut world.track_maps, track_data)?;
+            }
         }
         for a in &mut world.arms {
             use ArmType::*;
@@ -1675,7 +1659,7 @@ impl World {
                 DoubleArm | TripleArm | HexArm | VanBerlo => 30,
                 Piston => 40,
             };
-            let instr_len = World::normalize_instructions(a, &world.track_map)?;
+            let instr_len = World::normalize_instructions(a, &world.track_maps)?;
             world.instruction_count += a.instruction_tape.instructions.iter()
                 .filter(|&&a| a != Instr::Empty).count() as i32;
             if world.repeat_length < instr_len {
