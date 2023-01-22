@@ -470,6 +470,19 @@ impl WorldAtoms {
         //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
         Some(atom.atom_type)
     }
+    //Same as above except doesn't have the unbond check
+    fn get_consumable_type_immediate(&self, motion: &WorldStepInfo, loc: Pos) -> Option<AtomType> {
+        let &key = self.locs.get(&loc)?;
+        if motion.atoms.contains_key(key) {
+            return None;
+        }
+        let atom = self.atom_map.get(key).expect("Inconsistent atoms (consume check)");
+        if atom.connections != [Bonds::NO_BOND;6]{
+            return None
+        }
+        //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
+        Some(atom.atom_type)
+    }
     fn check_empty(&self, motion: &WorldStepInfo, loc: Pos) -> bool {
         if self.locs.contains_key(&loc) {
             return false;
@@ -1097,7 +1110,7 @@ impl World {
                     }
                 }
                 Projection => {
-                    let qs = atoms.get_consumable_type(motion, pos);
+                    let qs = atoms.get_consumable_type_immediate(motion, pos);
                     let metal = atoms.get_type(pos_bi);
                     if let (Some(Quicksilver), Some(metal)) = (qs, metal){
                         if let Some(newtype) = metal.promotable_metal(){
@@ -1209,11 +1222,8 @@ impl World {
                     }
                 }
                 Disposal => {
-                    if let Some(&atom_key) = atoms.locs.get(&pos){
-                        if atoms.atom_map[atom_key].connections == [Bonds::NO_BOND;6]
-                        && !motion.atoms.contains_key(atom_key) {
-                            atoms.destroy_atom_at(pos);
-                        }
+                    if let Some(_) = atoms.get_consumable_type_immediate(motion, pos){
+                        atoms.destroy_atom_at(pos);
                     }
                 },
                 Conduit(atom_teleport,conduit_id) => {
