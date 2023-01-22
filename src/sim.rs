@@ -496,32 +496,34 @@ impl WorldAtoms {
         }
         return atom;
     }
-    fn create_atom(&mut self, atom: Atom) -> AtomKey {
+    fn create_atom(&mut self, atom: Atom) -> SimResult<AtomKey> {
         let key = self.atom_map.insert(atom);
         let atom_ref = &self.atom_map[key];
         let output = self.locs.insert(atom_ref.pos, key);
         if let Some(_old_atom) = output{
-            panic!("Atom creation on hex with existing atom!");
+            return Err(SimError{error_str:"Atom creation on hex with existing atom!",location:pos_to_xy(atom_ref.pos)});
         }
-        key
+        Ok(key)
     }
 }
 
 pub struct WorldStepInfo{
     pub atoms: SecondaryMap<AtomKey, Movement>,
     pub arms: Vec<ArmMovement>,
-    pub spawning_atoms: Vec<Atom>,
+    pub spawning_atoms: VecDeque<Atom>,
     pub recent_bonds: FxHashSet<AtomKey>,
     pub drop_conduit_check: FxHashSet<AtomKey>, //contains one entry per arm
+    pub active_glyphs: VecDeque<usize>, //When glyph is a conduit, repeat for number of atoms sent
 }
 impl WorldStepInfo{
     pub fn new() -> Self{
         WorldStepInfo{
             atoms: SecondaryMap::new(),
             arms: Vec::new(),
-            spawning_atoms:Vec::new(),
+            spawning_atoms:VecDeque::new(),
             recent_bonds:FxHashSet::default(),
             drop_conduit_check:FxHashSet::default(),
+            active_glyphs:VecDeque::new(),
         }
     }
     pub fn clear(&mut self) {
@@ -530,6 +532,7 @@ impl WorldStepInfo{
         self.spawning_atoms.clear();
         self.recent_bonds.clear();
         self.drop_conduit_check.clear();
+        self.active_glyphs.clear();
     }
 }
 
@@ -733,7 +736,7 @@ impl World {
     }
 
     //Finalize atom movement
-    fn apply_motion(&mut self, motion: &WorldStepInfo,) -> SimResult<()> {
+    fn apply_motion(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
         for i in 0..self.arms.len() {
             self.arms[i].do_motion(motion.arms[i]);
         }
@@ -939,7 +942,7 @@ impl World {
         }
         Ok(())
     }
-    fn process_inputs(&mut self, motion: &mut WorldStepInfo){
+    fn process_inputs(&mut self, motion: &mut WorldStepInfo) -> SimResult<()>{
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
@@ -948,7 +951,7 @@ impl World {
                     let atom_spawn_points = &meta_pattern[0];
                     if atom_spawn_points.iter().all(|a| atoms.check_empty(motion,a.pos)){
                         for a in atom_spawn_points{
-                            atoms.create_atom(a.clone());
+                            atoms.create_atom(a.clone())?;
                         }
                         let tmp = meta_pattern.remove(0);
                         meta_pattern.push(tmp);
@@ -957,6 +960,7 @@ impl World {
                 _ => {}
             }
         }
+        Ok(())
     }
     fn process_outputs(&mut self, motion: &mut WorldStepInfo){
         use GlyphType::*;
@@ -1003,7 +1007,7 @@ impl World {
             }
         }
     }
-    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, can_consume: bool) {
+    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, can_consume: bool) -> SimResult<()>{
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
@@ -1053,6 +1057,18 @@ impl World {
             let pos_unif2 = glyph.reposition(Pos::new(-1, 1));
             let pos_unif3 = glyph.reposition(Pos::new(0, -1));
             let pos_unif4 = glyph.reposition(Pos::new(1, -1));
+
+            fn pop_check_make(atoms:&mut WorldAtoms, motion:&mut WorldStepInfo, atom: Atom) -> SimResult<()>{
+                let a = motion.spawning_atoms.pop_front().unwrap();
+                assert!(a == atom);
+                atoms.create_atom(a)?;
+                Ok(())
+            }
+            fn pop_make(atoms:&mut WorldAtoms, motion:&mut WorldStepInfo) -> SimResult<()>{
+                atoms.create_atom(motion.spawning_atoms.pop_front().unwrap())?;
+                Ok(())
+            }
+            //println!("{}, {}=>{:?}, {:?}, {:?}", can_consume, id, glyph.glyph_type, motion.active_glyphs, motion.spawning_atoms, );
             match &mut glyph.glyph_type{
                 Calcification => {
                     if let Some(atom) = atoms.get_atom_mut(pos) {
@@ -1062,15 +1078,22 @@ impl World {
                     }
                 }
                 Animismus => {
-                    let a1 = atoms.get_consumable_type(motion, pos);
-                    let a2 = atoms.get_consumable_type(motion, pos_bi);
-                    let o1 = atoms.check_empty(motion, pos_tri);
-                    let o2 = atoms.check_empty(motion, pos_ani);
-                    if (Some(Salt),Some(Salt),true,true) == (a1,a2,o1,o2) && can_consume{
-                        atoms.destroy_atom_at(pos);
-                        atoms.destroy_atom_at(pos_bi);
-                        motion.spawning_atoms.push(Atom::new(pos_tri, Vitae));
-                        motion.spawning_atoms.push(Atom::new(pos_ani, Mors));
+                    if can_consume{
+                        let a1 = atoms.get_consumable_type(motion, pos);
+                        let a2 = atoms.get_consumable_type(motion, pos_bi);
+                        let o1 = atoms.check_empty(motion, pos_tri);
+                        let o2 = atoms.check_empty(motion, pos_ani);
+                        if (Some(Salt),Some(Salt),true,true) == (a1,a2,o1,o2) {
+                            atoms.destroy_atom_at(pos);
+                            atoms.destroy_atom_at(pos_bi);
+                            motion.spawning_atoms.push_back(Atom::new(pos_tri, Vitae));
+                            motion.spawning_atoms.push_back(Atom::new(pos_ani, Mors));
+                            motion.active_glyphs.push_back(id);
+                        }
+                    } else if motion.active_glyphs.front() == Some(&id){
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_tri, Vitae))?;
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_ani, Mors))?;
+                        motion.active_glyphs.pop_front();
                     }
                 }
                 Projection => {
@@ -1084,50 +1107,71 @@ impl World {
                     }
                 }
                 Dispersion => {
-                    let q = atoms.get_consumable_type(motion, pos);
-                    let o1 = atoms.check_empty(motion, pos_bi);
-                    let o2 = atoms.check_empty(motion, pos_disp2);
-                    let o3 = atoms.check_empty(motion, pos_disp3);
-                    let o4 = atoms.check_empty(motion, pos_disp4);
-                    if (Some(Quintessence),true,true,true,true) == (q,o1,o2,o3,o4) && can_consume{
-                        atoms.destroy_atom_at(pos);
-                        motion.spawning_atoms.push(Atom::new(pos_bi, Earth));
-                        motion.spawning_atoms.push(Atom::new(pos_disp2, Water));
-                        motion.spawning_atoms.push(Atom::new(pos_disp3, Fire));
-                        motion.spawning_atoms.push(Atom::new(pos_disp4, Air));
+                    if can_consume{
+                        let q = atoms.get_consumable_type(motion, pos);
+                        let o1 = atoms.check_empty(motion, pos_bi);
+                        let o2 = atoms.check_empty(motion, pos_disp2);
+                        let o3 = atoms.check_empty(motion, pos_disp3);
+                        let o4 = atoms.check_empty(motion, pos_disp4);
+                        if (Some(Quintessence),true,true,true,true) == (q,o1,o2,o3,o4){
+                            atoms.destroy_atom_at(pos);
+                            motion.spawning_atoms.push_back(Atom::new(pos_bi, Earth));
+                            motion.spawning_atoms.push_back(Atom::new(pos_disp2, Water));
+                            motion.spawning_atoms.push_back(Atom::new(pos_disp3, Fire));
+                            motion.spawning_atoms.push_back(Atom::new(pos_disp4, Air));
+                            motion.active_glyphs.push_back(id);
+                        }
+                    } else if motion.active_glyphs.front() == Some(&id){
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_bi, Earth))?;
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_disp2, Water))?;
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_disp3, Fire))?;
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos_disp4, Air))?;
+                        motion.active_glyphs.pop_front();
                     }
                 }
                 Unification => {
-                    let output = atoms.check_empty(motion, pos);
-                    let a1 = atoms.get_consumable_type(motion, pos_tri);
-                    let a2 = atoms.get_consumable_type(motion, pos_unif2);
-                    let a3 = atoms.get_consumable_type(motion, pos_unif3);
-                    let a4 = atoms.get_consumable_type(motion, pos_unif4);
-                    if let (true,Some(a),Some(b),Some(c),Some(d)) = (output, a1, a2, a3, a4){
-                        let set = [a,b,c,d];
-                        if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air) && can_consume{
-                            atoms.destroy_atom_at(pos_tri);
-                            atoms.destroy_atom_at(pos_unif2);
-                            atoms.destroy_atom_at(pos_unif3);
-                            atoms.destroy_atom_at(pos_unif4);
-                            motion.spawning_atoms.push(Atom::new(pos, Quintessence));
+                    if can_consume{
+                        let output = atoms.check_empty(motion, pos);
+                        let a1 = atoms.get_consumable_type(motion, pos_tri);
+                        let a2 = atoms.get_consumable_type(motion, pos_unif2);
+                        let a3 = atoms.get_consumable_type(motion, pos_unif3);
+                        let a4 = atoms.get_consumable_type(motion, pos_unif4);
+                        if let (true,Some(a),Some(b),Some(c),Some(d)) = (output, a1, a2, a3, a4){
+                            let set = [a,b,c,d];
+                            if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air){
+                                atoms.destroy_atom_at(pos_tri);
+                                atoms.destroy_atom_at(pos_unif2);
+                                atoms.destroy_atom_at(pos_unif3);
+                                atoms.destroy_atom_at(pos_unif4);
+                                motion.spawning_atoms.push_back(Atom::new(pos, Quintessence));
+                                motion.active_glyphs.push_back(id);
+                            }
                         }
+                    } else if motion.active_glyphs.front() == Some(&id){
+                        pop_check_make(&mut self.atoms, motion, Atom::new(pos, Quintessence))?;
+                        motion.active_glyphs.pop_front();
                     }
                 }
                 Purification => {
-                    let a1 = atoms.get_consumable_type(motion, pos);
-                    let a2 = atoms.get_consumable_type(motion, pos_bi);
-                    let o = atoms.check_empty(motion, pos_tri);
-                    match (a1,a2,o){
-                        (Some(a1),Some(a2),true) if a1 == a2 && can_consume => {
-                            let next = a1.promotable_metal();
-                            if let Some(newtype) = next {
-                                atoms.destroy_atom_at(pos);
-                                atoms.destroy_atom_at(pos_bi);
-                                motion.spawning_atoms.push(Atom::new(pos_tri, newtype));
+                    if can_consume{
+                        let a1 = atoms.get_consumable_type(motion, pos);
+                        let a2 = atoms.get_consumable_type(motion, pos_bi);
+                        let o = atoms.check_empty(motion, pos_tri);
+                        match (a1,a2,o){
+                            (Some(a1),Some(a2),true) if a1 == a2 => {
+                                let next = a1.promotable_metal();
+                                if let Some(newtype) = next {
+                                    atoms.destroy_atom_at(pos);
+                                    atoms.destroy_atom_at(pos_bi);
+                                    motion.spawning_atoms.push_back(Atom::new(pos_tri, newtype));
+                                    motion.active_glyphs.push_back(id);
+                                }
                             }
+                            _ => ()
                         }
-                        _ => ()
+                    } else if motion.active_glyphs.front() == Some(&id){
+                        pop_make(&mut self.atoms, motion)?;
+                        motion.active_glyphs.pop_front();
                     }
                 }
                 Duplication => {
@@ -1173,14 +1217,23 @@ impl World {
                     }
                 },
                 Conduit(atom_teleport,conduit_id) => {
-                    if can_consume{
+                    if can_consume {
                         let conduit_info = self.conduit_pairs.get_mut(conduit_id).expect("conduit info not found!");
                         World::conduit_process(atoms, id, atom_teleport, glyph.pos, conduit_info, motion);
+                    } else if motion.active_glyphs.front() == Some(&id){
+                        while motion.active_glyphs.front() == Some(&id){
+                            motion.active_glyphs.pop_front();
+                            pop_make(&mut self.atoms, motion)?;
+                        }
                     }
                 },
                 Equilibrium | Track(_) | Input(..) | Output(..) | OutputRepeating(..) => {},
             }
         }
+        if !can_consume{
+            assert_eq!((motion.active_glyphs.len(), motion.spawning_atoms.len()), (0,0));
+        }
+        Ok(())
     }
     fn conduit_process(atoms: &mut WorldAtoms, glyph_id: usize, positions: &Vec<Pos>, origin: Pos, conduit_info: &mut ConduitInfo, motion: &mut WorldStepInfo){
         let mut viewed_atoms = FxHashSet::<AtomKey>::default();
@@ -1223,7 +1276,8 @@ impl World {
                         let mut atom = atoms.take_atom(*a);
                         atom.pos = rotate_around(atom.pos,offset_rot,origin)+offset_pos;
                         atom.rotate_connections(offset_rot);
-                        motion.spawning_atoms.push(atom);
+                        motion.spawning_atoms.push_back(atom);
+                        motion.active_glyphs.push_back(glyph_id);
                     }
                 }
                 viewed_atoms.clear();
@@ -1232,7 +1286,7 @@ impl World {
         }
     }
 
-    pub fn mark_area_and_collide(&mut self, float_world: &FloatWorld, spawning_atoms: &[Atom]) -> SimResult<()>{
+    pub fn mark_area_and_collide<'a>(&mut self, float_world: &FloatWorld, spawning_atoms: impl Iterator<Item = &'a Atom>) -> SimResult<()>{
         //atom radius = 29/41 or 1/sqrt(2)
         //spawning atom = 15/41
         //arm base = 20/41
@@ -1318,7 +1372,7 @@ impl World {
             for substep in 0..substep_count{
                 let portion = substep as f32 / substep_count as f32;
                 float_world.regenerate(self, motion, portion);
-                self.mark_area_and_collide(float_world, &motion.spawning_atoms)?;
+                self.mark_area_and_collide(float_world, motion.spawning_atoms.iter())?;
             }
         }
         self.finalize_step(motion)?;
@@ -1330,8 +1384,8 @@ impl World {
         for i in 0..self.arms.len() {
             self.do_instruction(motion, i, self.timestep)?;
         }
-        self.process_inputs(motion);
-        self.process_glyphs(motion, true);
+        self.process_inputs(motion)?;
+        self.process_glyphs(motion, true)?;
         self.process_outputs(motion);
         
         for i in 0..self.arms.len() {
@@ -1367,14 +1421,8 @@ impl World {
     }
     pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
-        for atom in motion.spawning_atoms.drain(..){
-            if self.atoms.locs.get(&atom.pos).is_some() {
-                return Err(sim_error_pos("Spawning atom collision", atom.pos));
-            }
-            self.atoms.create_atom(atom);
-        }
-        self.process_inputs(motion);
-        self.process_glyphs(motion, false);
+        self.process_inputs(motion)?;
+        self.process_glyphs(motion, false)?;
         motion.clear();
         for arm in &self.arms {
             for atomkey in arm.atoms_grabbed{
@@ -1674,7 +1722,7 @@ impl World {
                     let atom_type = ATOM_SETUP[i];
                     let key = world.atoms.create_atom(Atom {
                         pos, atom_type, connections: [Bonds::NO_BOND; 6], is_berlo: true
-                    });
+                    })?;
                     a.atoms_grabbed[i] = key;
                 }
             }
@@ -1686,7 +1734,7 @@ impl World {
                 let atom_spawn_points = &meta_pattern[0];
                 if atom_spawn_points.iter().all(|a| world.atoms.locs.get(&a.pos) == None){
                     for a in atom_spawn_points{
-                        world.atoms.create_atom(a.clone());
+                        world.atoms.create_atom(a.clone())?;
                     }
                     let tmp = meta_pattern.remove(0);
                     meta_pattern.push(tmp);
