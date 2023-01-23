@@ -87,16 +87,19 @@ fn check_all(){
                 } else if ftype.is_file(){
                     let fpath = f.path();
                     let lname = fpath.to_str().unwrap().to_ascii_lowercase();
-                    if lname.contains("overlap") || lname.contains("tourney-2019\\week6") || lname.contains("tourney-2021\\week 6"){
+                    /*if lname.contains("overlap") || lname.contains("tourney-2019\\week6") || lname.contains("tourney-2021\\week 6"){
+                        //println!("----{:?}",fpath);
                         continue;
+                    }*/
+                    if lname.contains(".solution"){
+                        check_solution(stats, &fpath, puzzle_map);
                     }
-                    check_solution(stats, &fpath, puzzle_map)
-                    //println!("----{:?}",fpath);
                 }
             }
         }
     }
     let mut stats = (0,0);
     read_solution_recurse(&mut stats, &puzzle_map, fs::read_dir("test/solution").unwrap());
+    read_solution_recurse(&mut stats, &puzzle_map, fs::read_dir("test/om-leaderboard-master").unwrap());
     println!("final score = {}/{}",stats.0,stats.1);
 }

@@ -1028,7 +1028,7 @@ impl World {
             }
         }
     }
-    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, can_consume: bool) -> SimResult<()>{
+    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, first_half: bool) -> SimResult<()>{
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
@@ -1089,7 +1089,6 @@ impl World {
                 atoms.create_atom(motion.spawning_atoms.pop_front().unwrap())?;
                 Ok(())
             }
-            //println!("{}, {}=>{:?}, {:?}, {:?}", can_consume, id, glyph.glyph_type, motion.active_glyphs, motion.spawning_atoms, );
             match &mut glyph.glyph_type{
                 Calcification => {
                     if let Some(atom) = atoms.get_atom_mut(pos) {
@@ -1099,7 +1098,7 @@ impl World {
                     }
                 }
                 Animismus => {
-                    if can_consume{
+                    if first_half{
                         let a1 = atoms.get_consumable_type(motion, pos);
                         let a2 = atoms.get_consumable_type(motion, pos_bi);
                         let o1 = atoms.check_empty(motion, pos_tri);
@@ -1118,7 +1117,7 @@ impl World {
                     }
                 }
                 Projection => {
-                    let qs = atoms.get_consumable_type_immediate(motion, pos);
+                    let qs = atoms.get_consumable_type(motion, pos);
                     let metal = atoms.get_type(pos_bi);
                     if let (Some(Quicksilver), Some(metal)) = (qs, metal){
                         if let Some(newtype) = metal.promotable_metal(){
@@ -1128,7 +1127,7 @@ impl World {
                     }
                 }
                 Dispersion => {
-                    if can_consume{
+                    if first_half{
                         let q = atoms.get_consumable_type(motion, pos);
                         let o1 = atoms.check_empty(motion, pos_bi);
                         let o2 = atoms.check_empty(motion, pos_disp2);
@@ -1151,7 +1150,7 @@ impl World {
                     }
                 }
                 Unification => {
-                    if can_consume{
+                    if first_half{
                         let output = atoms.check_empty(motion, pos);
                         let a1 = atoms.get_consumable_type(motion, pos_tri);
                         let a2 = atoms.get_consumable_type(motion, pos_unif2);
@@ -1174,7 +1173,7 @@ impl World {
                     }
                 }
                 Purification => {
-                    if can_consume{
+                    if first_half{
                         let a1 = atoms.get_consumable_type(motion, pos);
                         let a2 = atoms.get_consumable_type(motion, pos_bi);
                         let o = atoms.check_empty(motion, pos_tri);
@@ -1235,7 +1234,7 @@ impl World {
                     }
                 },
                 Conduit(atom_teleport,conduit_id) => {
-                    if can_consume {
+                    if first_half {
                         let conduit_info = self.conduit_pairs.get_mut(conduit_id).expect("conduit info not found!");
                         World::conduit_process(atoms, id, atom_teleport, glyph.pos, conduit_info, motion);
                     } else if motion.active_glyphs.front() == Some(&id){
@@ -1248,7 +1247,7 @@ impl World {
                 Equilibrium | Track(_) | Input(..) | Output(..) | OutputRepeating(..) => {},
             }
         }
-        if !can_consume{
+        if !first_half{
             assert_eq!((motion.active_glyphs.len(), motion.spawning_atoms.len()), (0,0));
         }
         Ok(())
@@ -1420,6 +1419,7 @@ impl World {
         for (atom, movement) in tmp{
             self.premove_atoms(motion, atom, movement)?;
         }
+        motion.recent_bonds.clear();
         Ok(())
     }
     pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{
