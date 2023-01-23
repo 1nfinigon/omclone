@@ -396,8 +396,8 @@ impl RenderDataBase {
         if camera.scale_base > 0.01{
             let (inv_scale_x, inv_scale_y)= (1./scale.0,1./scale.1);
             let y_factor = f32::sqrt(3.);
-            let xc = -world_offset[0]/2.-0.25;
-            let yc = (-world_offset[1]/2.)/y_factor+0.10;
+            let xc = (-world_offset[0]/2.-0.25).fract();
+            let yc = ((-world_offset[1]/2.)/y_factor+0.10).fract();
             let xdf = inv_scale_x/2.;
             let ydf = inv_scale_y/(2.*y_factor);
             
