@@ -84,8 +84,8 @@ pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
     }
 }
 
-const TEXTURE_COUNT:usize = 20;
-fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
+const HEX_GRID_ID:usize = 13;
+fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
     const TEXTURE_VERT_BUF: [UvVert;4] = [
         [-3.,-3.,    0., 1.],
         [-3., 3.,    0., 0.],
@@ -96,7 +96,7 @@ fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
         1, 2, 3];
     let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &TEXTURE_VERT_BUF);
     let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &TEXTURE_INDEX_BUF);
-    let texture_list:[&[u8];TEXTURE_COUNT] = [
+    let texture_list:Vec<&[u8]> = vec![
         include_bytes!("../images/Ani.png"),
         include_bytes!("../images/Bonder.png"),
         include_bytes!("../images/Calcification.png"),
@@ -110,7 +110,7 @@ fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
         include_bytes!("../images/Triplex.png"),
         include_bytes!("../images/Unbonder.png"),
         include_bytes!("../images/Unification.png"),
-        include_bytes!("../images/HexGrid.png"),//13
+        include_bytes!("../images/HexGridTiling.png"),//13
         include_bytes!("../images/ShadeAtomInOut.png"),
         include_bytes!("../images/ShadeAreaFill.png"),
         include_bytes!("../images/BondNormal.png"),//16
@@ -118,20 +118,36 @@ fn setup_textures(ctx: &mut Context) -> [Bindings;TEXTURE_COUNT]{
 		include_bytes!("../images/BondWhite.png"),
 		include_bytes!("../images/BondYellow.png"),
     ];
-    texture_list.map(|byte_data| -> Bindings{
+    texture_list.iter().enumerate().map(|(id, byte_data)| -> Bindings{
         use image::io::Reader as ImageReader;
         use image::ImageFormat::Png;
         use std::io::Cursor;
         let img = ImageReader::with_format(Cursor::new(byte_data),Png).decode().unwrap().into_rgba8();
         let width = img.width().try_into().unwrap();
         let height = img.height().try_into().unwrap();
-        let texture = Texture::from_rgba8(ctx, width, height, &img);
-        Bindings {
-            vertex_buffers: vec![vb],
-            index_buffer,
-            images:vec![texture],
+        let params = TextureParams {
+            format: TextureFormat::RGBA8,
+            wrap: TextureWrap::Repeat,
+            filter: FilterMode::Linear,
+            width, height, 
+        };
+        let texture = Texture::from_data_and_format(ctx, &img, params);
+        //let texture = Texture::from_rgba8(ctx, width, height, &img);
+        if id == HEX_GRID_ID{
+            let tmp_vb = Buffer::stream(ctx, BufferType::VertexBuffer, 4*std::mem::size_of::<UvVert>());
+            Bindings {
+                vertex_buffers: vec![tmp_vb],
+                index_buffer,
+                images:vec![texture],
+            }
+        } else {
+            Bindings {
+                vertex_buffers: vec![vb],
+                index_buffer,
+                images:vec![texture],
+            }
         }
-    })
+    }).collect()
 }
 const CIRCLE_VERT_COUNT:usize = 20;
 fn setup_circle(ctx: &mut Context) -> Bindings{
@@ -156,7 +172,7 @@ fn setup_circle(ctx: &mut Context) -> Bindings{
 struct ShapeStore{
     arm_bindings: Bindings,
     circle_bindings: Bindings,
-    texture_bindings: [Bindings;TEXTURE_COUNT],
+    texture_bindings: Vec<Bindings>,
 }
 pub struct CameraSetup{
     pub scale_base: f32,
@@ -357,10 +373,6 @@ impl RenderDataBase {
     {
         let scale = camera.scale(ctx.screen_size());
         let world_offset = camera.offset;
-        let y_factor = f32::sqrt(3.)*2.0;
-        let (inv_scale_x, inv_scale_y)= (1./scale.0,1./scale.1);
-        let base_x = ((-inv_scale_x-world_offset[0])/2.0).ceil()*2.0;
-        let base_y = ((-inv_scale_y-world_offset[1])/y_factor).ceil()*y_factor;
 
 
         //Draw input/output atoms
@@ -381,19 +393,26 @@ impl RenderDataBase {
             };
         }
         //Draw the Hex grid
-        ctx.apply_pipeline(&self.pipeline_textured);
         if camera.scale_base > 0.01{
+            let (inv_scale_x, inv_scale_y)= (1./scale.0,1./scale.1);
+            let y_factor = f32::sqrt(3.);
+            let xc = -world_offset[0]/2.-0.25;
+            let yc = (-world_offset[1]/2.)/y_factor+0.10;
+            let xdf = inv_scale_x/2.;
+            let ydf = inv_scale_y/(2.*y_factor);
+            
+            let hex_grid_data: [UvVert;4] = [
+                [-1.,-1.,    xc-xdf, yc-ydf],
+                [-1., 1.,    xc-xdf, yc+ydf],
+                [ 1.,-1.,    xc+xdf, yc-ydf],
+                [ 1., 1.,    xc+xdf, yc+ydf]];
+            self.shapes.texture_bindings[HEX_GRID_ID].vertex_buffers[0].update(ctx, &hex_grid_data);
+            ctx.apply_pipeline(&self.pipeline_textured);
             ctx.apply_bindings(&self.shapes.texture_bindings[13]);
-            for x in 0..(inv_scale_x/3.0).ceil() as i32 +1{
-                for y in 0..(inv_scale_y/y_factor).ceil() as i32 *2+1{
-                    let offset = [base_x+(x as f32*6.0),
-                                    base_y+(y as f32*y_factor)];
-                    ctx.apply_uniforms(&UvUniforms {
-                        offset, world_offset, angle:0., scale
-                    });
-                    ctx.draw(0, 6, 1);
-                }
-            }
+            ctx.apply_uniforms(&UvUniforms {
+                offset:[0.,0.], world_offset:[0.,0.], angle:0., scale:(1.,1.)
+            });
+            ctx.draw(0, 6, 1);
         }
         //Draw glyphs (including half-transparent cover for input/outputs)
         ctx.apply_pipeline(&self.pipeline_textured);
