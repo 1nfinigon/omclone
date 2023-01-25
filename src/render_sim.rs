@@ -14,6 +14,8 @@ pub fn rot_to_angle(r: Rot) -> f32{
 }
 
 //note: 1 hex has inner radius of 1 (width of 2).
+//hex height, 3 tiles tip-to-tip=sqrt(3)*5/6
+const Y_FACTOR:f32 = 1.7320508075688772935274463415;
 fn setup_arms(ctx: &mut Context) -> Bindings{
     const ARM_VERT_BUF: [Vert;14] = [
         //Arm Base
@@ -86,11 +88,12 @@ pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
 
 const HEX_GRID_ID:usize = 13;
 fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
+    const HL:f32 = Y_FACTOR*5./3.;//height of 1.5 hex (from tip to tip)
     const TEXTURE_VERT_BUF: [UvVert;4] = [
-        [-3.,-3.,    0., 1.],
-        [-3., 3.,    0., 0.],
-        [ 3.,-3.,    1., 1.],
-        [ 3., 3.,    1., 0.]];
+        [-3.,HL-6.,  0., 1.],
+        [-3., HL,    0., 0.],
+        [ 3.,HL-6.,  1., 1.],
+        [ 3., HL,    1., 0.]];
     const TEXTURE_INDEX_BUF: [u16;6] = [
         0, 1, 2,
         1, 2, 3];
@@ -395,11 +398,10 @@ impl RenderDataBase {
         //Draw the Hex grid
         if camera.scale_base > 0.01{
             let (inv_scale_x, inv_scale_y)= (1./scale.0,1./scale.1);
-            let y_factor = f32::sqrt(3.);
             let xc = (-world_offset[0]/2.-0.25).fract();
-            let yc = ((-world_offset[1]/2.)/y_factor+0.10).fract();
+            let yc = ((-world_offset[1]/2.)/Y_FACTOR+0.10).fract();
             let xdf = inv_scale_x/2.;
-            let ydf = inv_scale_y/(2.*y_factor);
+            let ydf = inv_scale_y/(2.*Y_FACTOR);
             
             let hex_grid_data: [UvVert;4] = [
                 [-1.,-1.,    xc-xdf, yc-ydf],
