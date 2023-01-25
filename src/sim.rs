@@ -948,7 +948,7 @@ impl World {
                     add_all(&mut self.area_touched,atom_points.iter().map(|a|a.pos))
                 }
                 Track(pos_list) => {
-                    add_all(&mut self.area_touched,pos_list.iter().map(|a|glyph.reposition(*a)))
+                    add_all(&mut self.area_touched,pos_list.iter().copied())
                 },
                 Disposal => {
                     add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp3,pos_disp4,pos_unif2])
