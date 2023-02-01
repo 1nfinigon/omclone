@@ -28,7 +28,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         *self.earliest_edit = Some(char_index);
         let tape = &mut self.tape_ref;
-        let instr_mapped:Vec<Instr> = text.chars().filter_map(Instr::from_char).collect();
+        let instr_mapped:Vec<Instr> = text.chars().filter_map(|x| Instr::from_char(x.to_ascii_lowercase())).collect();
         let inserted = instr_mapped.len();
 
         let empty_extension = if char_index < tape.first{
