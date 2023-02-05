@@ -93,6 +93,9 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         self.clear();
         s
     }
+    fn as_str(&self) -> &str {
+        self.as_ref()
+    }
 }
 
 struct PathInfo{
@@ -377,7 +380,7 @@ impl EventHandler for MyMiniquadApp {
         
         let mut do_loading = AppStateUpdate::NoChange;
         let screen_size = ctx.screen_size();
-        self.egui_mq.run(ctx, |egui_ctx|{
+        self.egui_mq.run(ctx, |_mq_ctx, egui_ctx|{
             if let Some(msg) = &self.extra_message{
                 let mut opened = true;
                 egui::Window::new("Message").open(&mut opened).show(egui_ctx, |ui| {
@@ -696,11 +699,11 @@ impl EventHandler for MyMiniquadApp {
     }
 
     fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32) {
-        self.egui_mq.mouse_motion_event(ctx, x, y);
+        self.egui_mq.mouse_motion_event( x, y);
     }
 
     fn mouse_wheel_event(&mut self, ctx: &mut Context, dx: f32, dy: f32) {
-        self.egui_mq.mouse_wheel_event(ctx, dx, dy);
+        self.egui_mq.mouse_wheel_event(dx, dy);
     }
 
     fn mouse_button_down_event(

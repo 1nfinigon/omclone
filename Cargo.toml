@@ -44,7 +44,7 @@ rustc-hash = "1.1"
 smallvec = "1.10"
 
 
-egui = {version = "0.18", optional = true}
+egui = {version = "0.20", optional = true}
 #Changes: don't reborrow globals on wasm clipboard_get()
 miniquad = { git = "https://github.com/ssk97/miniquad", branch = "master", optional = true}
 fontdue = { version = "0.7", optional = true}
