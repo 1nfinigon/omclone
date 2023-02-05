@@ -440,8 +440,11 @@ impl EventHandler for MyMiniquadApp {
                             }
                             ui.separator();
                             let area_check = ui.checkbox(&mut loaded.show_area, "Collide/Area");
-                            if area_check.changed() && loaded.show_area{
-                                loaded.reset_to(0);
+                            if loaded.show_area{
+                                if area_check.changed() {
+                                    loaded.reset_to(0);
+                                }
+                                ui.monospace(format!("{:5}",loaded.curr_world.area_touched.len()));
                             }
                             ui.separator();
                             ui.label("Speed:");
