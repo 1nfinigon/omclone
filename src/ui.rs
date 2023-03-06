@@ -556,8 +556,27 @@ impl EventHandler for MyMiniquadApp {
                     }
                     #[cfg(feature = "editor_ui")]{
                         egui::Window::new("Arms").default_width(600.).show(egui_ctx, |ui| {
-                            ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
                             ui.horizontal( |ui| {
+                                ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
+                                ui.separator();
+                                if ui.button("space ends").clicked() {
+                                    for a in &mut loaded.base_world.arms{
+                                        let instr = &mut a.instruction_tape;
+                                        for _ in (instr.first+instr.instructions.len())..loaded.base_world.repeat_length{
+                                            a.instruction_tape.instructions.push(Instr::Empty);
+                                        }
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("clear ends").clicked() {
+                                    for a in &mut loaded.base_world.arms{
+                                        let instr = &mut a.instruction_tape;
+                                        while instr.instructions.last() == Some(&Instr::Empty){
+                                            instr.instructions.pop();
+                                        }
+                                    }
+                                }
+                                ui.separator();
                                 ui.label("Arm Display Offset (from this to +4k):");
                                 ui.add(egui::DragValue::new(&mut loaded.arm_text_offset)
                                     .clamp_range(0..=loaded.base_world.repeat_length));
