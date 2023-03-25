@@ -11,6 +11,7 @@ default = ["editor_ui"]
 benchmark = []
 editor_ui = ["display_ui"]
 display_ui = ["egui", "miniquad", "egui-miniquad", "image", "fontdue"]
+bindgen = ["wasm-bindgen","web-sys","console_error_panic_hook"]
 
 [[bin]]
 name="omclone"
@@ -21,6 +22,13 @@ path = "src/main.rs"
 name="omclone_benchmark"
 required-features = ["benchmark"]
 path = "src/benchmark.rs"
+
+#[lib]
+#crate-type = ["cdylib"]
+#name="omclone_habcheck"
+#required-features = ["bindgen"]
+#path = "src/hab_checker.rs"
+#required features doesn't work, need to add it manually during compilation
 
 [profile.dev]
 opt-level = 3
@@ -49,12 +57,11 @@ egui = {version = "0.20", optional = true}
 miniquad = { git = "https://github.com/ssk97/miniquad", branch = "master", optional = true}
 fontdue = { version = "0.7", optional = true}
 egui-miniquad = {git = "https://github.com/ssk97/egui-miniquad.git", branch = "master", optional = true}
-image = {version = "0.24.5", optional = true, default-features = false, features = ["png"]}
+image = {version = "0.24.6", optional = true, default-features = false, features = ["png"]}
 
-#wasm-bindgen = {version = "0.2.74", optional = true}
-#web-sys = {version = "0.3.56", optional = true}
-#console_error_panic_hook = { version = "0.1.6", optional = true }
-
+wasm-bindgen = {version = "0.2.84", optional = true}
+web-sys = {version = "0.3.61", optional = true}
+console_error_panic_hook = { version = "0.1.7", optional = true }
 
 color-eyre = {version = "0.6", optional = true}
 simple-eyre = "0.3"

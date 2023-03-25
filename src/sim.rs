@@ -16,6 +16,7 @@ use std::collections::{VecDeque, HashMap};
 use smallvec::SmallVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{f32::consts::PI,fmt,error};
+use enum_primitive_derive::Primitive;
 
 #[derive(Debug)]
 pub struct SimError{
@@ -226,7 +227,7 @@ bitflags! {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, enum_primitive_derive::Primitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Primitive)]
 #[repr(u8)]
 pub enum AtomType {
     ConduitSpace = 0,
