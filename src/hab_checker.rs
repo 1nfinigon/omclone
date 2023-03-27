@@ -10,6 +10,24 @@ extern "C" {
     fn add_text(s: &str);
 }
 
+
+static PARSED_PUZZLE: std::sync::Mutex<Option<parser::FullPuzzle>> = std::sync::Mutex::new(None);
+static PARSED_SOLUTION: std::sync::Mutex<Option<parser::FullSolution>> = std::sync::Mutex::new(None);
+#[wasm_bindgen(start)]
+pub fn init_puzzle() {
+    console_error_panic_hook::set_once();
+    let puzzle_baseline = include_bytes!("../OM2023_W8_HabitabilityDetector.puzzle");
+    let puzzle_read = &mut puzzle_baseline.as_slice();
+    let puzzle = parser::parse_puzzle(puzzle_read).unwrap();
+    *PARSED_PUZZLE.lock().unwrap() = Some(puzzle);
+}
+#[wasm_bindgen]
+pub fn init_sol(solution: &[u8]){
+    let mut reader = solution;
+    let sol = parser::parse_solution(&mut reader).unwrap();
+    *PARSED_SOLUTION.lock().unwrap() = Some(sol);
+}
+
 fn to_output(a: bool) -> sim::Atom{
     let atom_type = if a{ sim::AtomType::Gold } else { sim::AtomType::Salt };
     sim::Atom{atom_type, pos: sim::Pos::new(0,0),connections:[sim::Bonds::NO_BOND;6],is_berlo:false}
@@ -64,16 +82,15 @@ pub fn setup_stats() -> OutputStats{
     return OutputStats { completed: true, cycles: 0, cost: 0, area: 0 };
 }
 #[wasm_bindgen]
-pub fn run_test(solution: &[u8], first: usize, variants: &[usize], test_area: bool) -> OutputStats{
-    console_error_panic_hook::set_once();
+pub fn run_test(first: usize, variants: &[usize], test_area: bool) -> OutputStats{
 
     let fail_stats = OutputStats{completed: false, cycles:0, cost:0, area:0};
-    let puzzle_baseline = include_bytes!("../OM2023_W8_HabitabilityDetector.puzzle");
-    let puzzle_read = &mut puzzle_baseline.as_slice();
-    let mut puzzle = parser::parse_puzzle(puzzle_read).unwrap();
-    let mut reader = solution;
-    let sol = parser::parse_solution(&mut reader).unwrap();
-
+    let mut puzzle_bind = PARSED_PUZZLE.lock().unwrap();
+    let puzzle = puzzle_bind.as_mut().unwrap();
+    //Note that this changes the internal puzzle each time
+    //But that's fine since it'll be changed next time anyway
+    let sol_bind = PARSED_SOLUTION.lock().unwrap();
+    let sol = sol_bind.as_ref().unwrap();
     let input_small = &puzzle.inputs[0][0];
     let input_small = make_variant(first, input_small);
     puzzle.inputs[0][0] = input_small.atoms;

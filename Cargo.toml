@@ -26,9 +26,9 @@ path = "src/benchmark.rs"
 #[lib]
 #crate-type = ["cdylib"]
 #name="omclone_habcheck"
-#required-features = ["bindgen"]
 #path = "src/hab_checker.rs"
-#required features doesn't work, need to add it manually during compilation
+#required features doesn't work, need to add it manually
+#required-features = ["bindgen"]
 
 [profile.dev]
 opt-level = 3
