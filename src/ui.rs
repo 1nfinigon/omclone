@@ -1,5 +1,5 @@
 use miniquad::*;
-use crate::{sim::*, parser, render_sim::*};
+use crate::{sim::*, parser, render_sim::*, render_library::GFXPos};
 use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
 
 #[cfg(feature = "color_eyre")]
@@ -270,6 +270,7 @@ pub struct MyMiniquadApp {
     app_state: AppState,
     unloaded_info: PathInfo,
     extra_message: Option<String>,
+    dragging: Option<GFXPos>,
 }
 
 impl MyMiniquadApp {
@@ -285,7 +286,7 @@ impl MyMiniquadApp {
         Self {
             egui_mq: egui_miniquad::EguiMq::new(ctx),
             render_data,app_state,unloaded_info,
-            extra_message:None,
+            extra_message:None, dragging: None,
         }
     }
     pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read, ctx: &mut Context) -> Result<()>{
@@ -293,17 +294,19 @@ impl MyMiniquadApp {
         let solution = parser::parse_solution(&mut BufReader::new(f_sol))?;
         println!("Check: {:?}", solution.stats);
         let init = parser::puzzle_prep(&puzzle, &solution)?;
+		let mut max_timestep = 0;
         for (a_num, a) in init.arms.iter().enumerate(){
             println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
+			max_timestep = max_timestep.max(a.instruction_tape.first)
         }
         let world = World::setup_sim(&init)?;
+		max_timestep += world.repeat_length*2+100;
 
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
         let camera = CameraSetup::frame_center(&world, ctx.screen_size());
         let tracks = setup_tracks(ctx, &world.track_maps);
-        let max_timestep = 100.max(world.repeat_length);
         let new_loaded = Loaded{
             base_world: world.clone(),
             backup_world: world.clone(),
@@ -562,7 +565,7 @@ impl EventHandler for MyMiniquadApp {
                                 if ui.button("space ends").clicked() {
                                     for a in &mut loaded.base_world.arms{
                                         let instr = &mut a.instruction_tape;
-                                        for _ in (instr.first+instr.instructions.len())..loaded.base_world.repeat_length{
+                                        for _ in instr.instructions.len()..loaded.base_world.repeat_length{
                                             a.instruction_tape.instructions.push(Instr::Empty);
                                         }
                                     }
@@ -632,15 +635,17 @@ impl EventHandler for MyMiniquadApp {
                             }
                             if let Some(edit_step) = earliest_edit{
                                 let arm_id = change_arm_id.unwrap();//If edit is performed, the change must be recorded
-                                let min_size = loaded.base_world.arms.iter()
-                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
-                                if loaded.max_timestep < min_size{
-                                    loaded.max_timestep = min_size;
+                                let min_time = loaded.base_world.arms.iter()
+                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()+arm.instruction_tape.first));
+                                if loaded.max_timestep < min_time{
+                                    loaded.max_timestep = min_time;
                                 }
-                                if loaded.base_world.repeat_length < min_size{
-                                    loaded.base_world.repeat_length = min_size;
-                                    loaded.backup_world.repeat_length = min_size;
-                                    loaded.curr_world.repeat_length = min_size;
+                                let min_loop = loaded.base_world.arms.iter()
+                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                                if loaded.base_world.repeat_length < min_loop{
+                                    loaded.base_world.repeat_length = min_loop;
+                                    loaded.backup_world.repeat_length = min_loop;
+                                    loaded.curr_world.repeat_length = min_loop;
                                 }
                                 loaded.backup_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
                                 if edit_step <= loaded.curr_time as usize {
@@ -753,10 +758,29 @@ impl EventHandler for MyMiniquadApp {
 
     fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32) {
         self.egui_mq.mouse_motion_event( x, y);
+        if let Some(drag_last) = &mut self.dragging{
+            if let Loaded(loaded) = &mut self.app_state{
+                let cam = &mut loaded.camera;
+                cam.offset[0] += (x-drag_last[0])/cam.scale_base*0.002;
+                cam.offset[1] -= (y-drag_last[1])/cam.scale_base*0.002;
+                *drag_last = [x,y];
+            }
+        }
     }
 
     fn mouse_wheel_event(&mut self, ctx: &mut Context, dx: f32, dy: f32) {
         self.egui_mq.mouse_wheel_event(dx, dy);
+        if !self.egui_mq.egui_ctx().is_pointer_over_area(){
+            if let Loaded(loaded) = &mut self.app_state{
+                let scale = &mut loaded.camera.scale_base;
+                if dy.is_sign_negative() && *scale > 0.002{
+                     *scale *= 0.9;
+                }
+                if dy.is_sign_positive() && *scale < 0.2{
+                     *scale *= 1.1;
+                }
+            }
+        }
     }
 
     fn mouse_button_down_event(
@@ -767,6 +791,9 @@ impl EventHandler for MyMiniquadApp {
         y: f32,
     ) {
         self.egui_mq.mouse_button_down_event(ctx, mb, x, y);
+        if !self.egui_mq.egui_ctx().is_pointer_over_area() && (mb == MouseButton::Right || mb == MouseButton::Middle){
+            self.dragging = Some([x,y]);
+        }
     }
 
     fn mouse_button_up_event(
@@ -777,6 +804,7 @@ impl EventHandler for MyMiniquadApp {
         y: f32,
     ) {
         self.egui_mq.mouse_button_up_event(ctx, mb, x, y);
+        self.dragging = None;
     }
 
     fn char_event(
