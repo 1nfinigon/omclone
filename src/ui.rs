@@ -561,7 +561,10 @@ impl EventHandler for MyMiniquadApp {
                         });
                     }
                     {
-                        let arm_window = egui::Window::new("Arms");
+                        let mut arm_window = egui::Window::new("Arms");
+                        #[cfg(not(feature = "editor_ui"))]{
+                            arm_window = arm_window.default_open(false);
+                        }
                         arm_window.default_width(600.).show(egui_ctx, |ui| {
                             #[cfg(not(feature = "editor_ui"))]{
                                 ui.label("Editing Disabled");

@@ -52,11 +52,10 @@ rustc-hash = "1.1"
 smallvec = "1.10"
 
 
-egui = {version = "0.20", optional = true}
-#Changes: don't reborrow globals on wasm clipboard_get()
-miniquad = { git = "https://github.com/ssk97/miniquad", branch = "master", optional = true}
+egui = {version = "0.21", optional = true}
+miniquad = { version = "0.3", optional = true}
 fontdue = { version = "0.7", optional = true}
-egui-miniquad = {git = "https://github.com/ssk97/egui-miniquad.git", branch = "master", optional = true}
+egui-miniquad = {version = "0.14", optional = true}
 image = {version = "0.24.6", optional = true, default-features = false, features = ["png"]}
 
 wasm-bindgen = {version = "0.2.84", optional = true}
