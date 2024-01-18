@@ -1,6 +1,9 @@
 use miniquad::*;
 use crate::{sim::*, parser, render_sim::*, render_library::GFXPos};
-use std::{fs::File, io::BufReader, io::BufWriter, io::prelude::*, path::Path};
+use std::{io::BufReader, io::BufWriter, io::prelude::*};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::{fs::File, path::Path};
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::eyre::Result;
@@ -557,29 +560,53 @@ impl EventHandler for MyMiniquadApp {
                             });
                         });
                     }
-                    #[cfg(feature = "editor_ui")]{
-                        egui::Window::new("Arms").default_width(600.).show(egui_ctx, |ui| {
+                    {
+                        let arm_window = egui::Window::new("Arms");
+                        arm_window.default_width(600.).show(egui_ctx, |ui| {
+                            #[cfg(not(feature = "editor_ui"))]{
+                                ui.label("Editing Disabled");
+                            }
                             ui.horizontal( |ui| {
-                                ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
-                                ui.separator();
-                                if ui.button("space ends").clicked() {
-                                    for a in &mut loaded.base_world.arms{
-                                        let instr = &mut a.instruction_tape;
-                                        for _ in instr.instructions.len()..loaded.base_world.repeat_length{
-                                            a.instruction_tape.instructions.push(Instr::Empty);
+                                #[cfg(feature = "editor_ui")]{
+                                    ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
+                                    ui.separator();
+                                    if ui.button("space ends").clicked() {
+                                        for a in &mut loaded.base_world.arms{
+                                            let instr = &mut a.instruction_tape;
+                                            for _ in instr.instructions.len()..loaded.base_world.repeat_length{
+                                                a.instruction_tape.instructions.push(Instr::Empty);
+                                            }
                                         }
                                     }
-                                }
-                                ui.separator();
-                                if ui.button("clear ends").clicked() {
-                                    for a in &mut loaded.base_world.arms{
-                                        let instr = &mut a.instruction_tape;
-                                        while instr.instructions.last() == Some(&Instr::Empty){
-                                            instr.instructions.pop();
+                                    ui.separator();
+                                    if ui.button("clear ends").clicked() {
+                                        for a in &mut loaded.base_world.arms{
+                                            let instr = &mut a.instruction_tape;
+                                            while instr.instructions.last() == Some(&Instr::Empty){
+                                                instr.instructions.pop();
+                                            }
                                         }
                                     }
+                                    if ui.button("Optimize Pistons").clicked() {
+                                        let mut pistons_added = 0;
+                                        let mut pistons_removed = 0;
+                                        for a in &mut loaded.base_world.arms{
+                                            if a.instruction_tape.instructions.contains(&Instr::Extend) || a.instruction_tape.instructions.contains(&Instr::Retract) {
+                                                if a.arm_type == ArmType::PlainArm {
+                                                    a.arm_type = ArmType::Piston;
+                                                    pistons_added += 1;
+                                                }
+                                            } else {
+                                                if a.arm_type == ArmType::Piston {
+                                                    a.arm_type = ArmType::PlainArm;
+                                                    pistons_removed += 1;
+                                                }
+                                            }
+                                        }
+                                        self.extra_message = Some(format!("{pistons_added} pistons added, {pistons_removed} pistons removed"));
+                                    }
+                                    ui.separator();
                                 }
-                                ui.separator();
                                 ui.label("Arm Display Offset (from this to +4k):");
                                 ui.add(egui::DragValue::new(&mut loaded.arm_text_offset)
                                     .clamp_range(0..=loaded.base_world.repeat_length));
@@ -617,9 +644,12 @@ impl EventHandler for MyMiniquadApp {
                                         };
                                         ui.horizontal(|ui| {
                                             ui.label(format!("{:02}",a_num+1));
-                                            let text_output = egui::TextEdit::singleline(&mut text_buf)
-                                                .code_editor().desired_width(f32::INFINITY)
-                                                .show(ui);
+                                            let mut line_edit = egui::TextEdit::singleline(&mut text_buf)
+                                            .code_editor().desired_width(f32::INFINITY);
+                                            #[cfg(not(feature = "editor_ui"))]{
+                                                line_edit = line_edit.interactive(false);
+                                            }
+                                            let text_output = line_edit.show(ui);
                                             if let Some(cursor) = text_output.cursor_range{
                                                 target_time = Some(cursor.primary.ccursor.index+loaded.arm_text_offset);
                                             }
@@ -703,9 +733,13 @@ impl EventHandler for MyMiniquadApp {
                         }
                         #[cfg(target_arch = "wasm32")]
                         {
-                            ui.label("Upload the puzzle and the solution");
-                            if JS_PUZZLE_INPUT.lock().unwrap().is_some() && JS_SOLUTION_INPUT.lock().unwrap().is_some(){
-                                do_loading = AppStateUpdate::Load;
+                            let puzzle_loaded = JS_PUZZLE_INPUT.lock().unwrap().is_some();
+                            let solution_loaded = JS_SOLUTION_INPUT.lock().unwrap().is_some();
+                            match (puzzle_loaded, solution_loaded) {
+                                (false, false) => {ui.label("Upload puzzle and solution files");},
+                                (false, true) => {ui.label("Upload puzzle file");},
+                                (true, false) => {ui.label("Upload solution file");},
+                                (true, true) => {do_loading = AppStateUpdate::Load;}
                             }
                         }
                     });
@@ -745,6 +779,10 @@ impl EventHandler for MyMiniquadApp {
 
                 if let Err(err)= do_load(){
                     self.extra_message = Some(err.to_string());
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        *JS_SOLUTION_INPUT.lock().unwrap() = None;
+                    }
                 } else {
                     self.extra_message = None;
                 }
@@ -752,7 +790,6 @@ impl EventHandler for MyMiniquadApp {
         }
 
         // Draw things in front of egui here
-
         ctx.commit_frame();
     }
 
@@ -772,12 +809,12 @@ impl EventHandler for MyMiniquadApp {
         self.egui_mq.mouse_wheel_event(dx, dy);
         if !self.egui_mq.egui_ctx().is_pointer_over_area(){
             if let Loaded(loaded) = &mut self.app_state{
-                let scale = &mut loaded.camera.scale_base;
-                if dy.is_sign_negative() && *scale > 0.002{
-                     *scale *= 0.9;
+                let cam = &mut loaded.camera;
+                if dy.is_sign_negative() && cam.scale_base > 0.002{
+                    cam.scale_base *= 0.9;
                 }
-                if dy.is_sign_positive() && *scale < 0.2{
-                     *scale *= 1.1;
+                if dy.is_sign_positive() && cam.scale_base < 0.2{
+                    cam.scale_base *= 1.1;
                 }
             }
         }
