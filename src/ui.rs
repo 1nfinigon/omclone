@@ -9,22 +9,16 @@ use std::{fs::File, path::Path};
 use color_eyre::eyre::Result;
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::eyre::Result;
-
-const MAX_CHARS: usize = 4000;
-
 use core::ops::Range;
 struct TapeBuffer<'a>{
     tape_ref: &'a mut Tape,
     earliest_edit: &'a mut Option<usize>,
     tape_mode: bool,
     held_str: String,
-    offset: usize,
 }
 impl AsRef<str> for TapeBuffer<'_>{
     fn as_ref(&self) -> &str {
-        let min = self.held_str.len().min(self.offset);
-        let max = self.held_str.len().min(self.offset+MAX_CHARS);
-        &self.held_str[min..max]
+        &self.held_str
     }
 }
 //Note: this implementation assumes all characters in the string are ASCII/1 byte long
@@ -34,7 +28,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         true
     }
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
-        let char_index = char_index+self.offset;
+        let char_index = char_index;
         *self.earliest_edit = Some(char_index);
         let tape = &mut self.tape_ref;
         let instr_mapped:Vec<Instr> = text.chars().filter_map(|x| Instr::from_char(x.to_ascii_lowercase())).collect();
@@ -49,8 +43,8 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         };
         let instr_chain = instr_mapped.into_iter().chain(std::iter::repeat(Instr::Empty).take(empty_extension));
         let splice_index = char_index-tape.first;
-        let splice_range = if self.tape_mode && splice_index+inserted > empty_extension{
-            splice_index..usize::min(splice_index+inserted-empty_extension,tape.instructions.len())
+        let splice_range = if self.tape_mode {
+            splice_index..usize::min(splice_index+text.len(),tape.instructions.len())
         } else {
             splice_index..splice_index
         };
@@ -60,9 +54,6 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         inserted
     }
     fn delete_char_range(&mut self, char_range: Range<usize>) {
-        let start = char_range.start+self.offset;
-        let end = char_range.end+self.offset;
-        let char_range = Range{start, end};
         *self.earliest_edit = Some(char_range.start);
         let tape = &mut self.tape_ref;
         if self.tape_mode{
@@ -134,7 +125,6 @@ struct Loaded{
     show_area: bool,
     run_speed: f64,
     popup_reload: bool,
-    arm_text_offset: usize,
 }
 impl Loaded{
     fn reset_to(&mut self, reset_to:u64){
@@ -324,7 +314,6 @@ impl MyMiniquadApp {
             show_area: false,
             run_speed: 0.05,
             popup_reload: false,
-            arm_text_offset: 0,
         };
         self.app_state = Loaded(new_loaded);
         Ok(())
@@ -558,11 +547,10 @@ impl EventHandler for MyMiniquadApp {
                         });
                     }
                     {
-                        let mut arm_window = egui::Window::new("Arms");
+                        let arm_window = egui::Window::new("Arms");
                         #[cfg(not(feature = "editor_ui"))]{
                             arm_window = arm_window.default_open(false);
                         }
-                        let mut reset_undo = false;
                         arm_window.default_width(600.).show(egui_ctx, |ui| {
                             #[cfg(not(feature = "editor_ui"))]{
                                 ui.label("Editing Disabled");
@@ -608,27 +596,10 @@ impl EventHandler for MyMiniquadApp {
                                     }
                                     ui.separator();
                                 }
-                                ui.label("Arm Display Offset (from this to +4k):");
-                                ui.add(egui::DragValue::new(&mut loaded.arm_text_offset)
-                                    .clamp_range(0..=loaded.base_world.repeat_length));
-                                if ui.button("-2k").clicked() {
-                                    reset_undo = true;
-                                    if loaded.arm_text_offset >= 2000 {
-                                        loaded.arm_text_offset -= 2000;
-                                    } else {
-                                        loaded.arm_text_offset = 0;
-                                    }
-                                }
-                                if ui.button("+2k").clicked() {
-                                    reset_undo = true;
-                                    loaded.arm_text_offset += 2000;
-                                }
                             });
                             let curr_timestep = loaded.curr_time.floor() as usize;
-                            let total_spaces = (loaded.max_timestep).saturating_sub(loaded.arm_text_offset).min(MAX_CHARS)+5;
-                            let opening_space = (curr_timestep+3).saturating_sub(loaded.arm_text_offset);
-                            let end_spacing = total_spaces.saturating_sub(opening_space);
-                            let marker = " ".repeat(opening_space)+"V"+&" ".repeat(end_spacing);
+                            let end_spacing = loaded.max_timestep.saturating_sub(curr_timestep);
+                            let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
                             //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
                             let mut earliest_edit = None;
                             let mut target_time = None;
@@ -643,21 +614,17 @@ impl EventHandler for MyMiniquadApp {
                                             earliest_edit: &mut earliest_edit,
                                             tape_mode: loaded.tape_mode,
                                             held_str: text,
-                                            offset: loaded.arm_text_offset,
                                         };
                                         ui.horizontal(|ui| {
                                             ui.label(format!("{:02}",a_num+1));
-                                            let mut line_edit = egui::TextEdit::singleline(&mut text_buf)
+                                            let line_edit = egui::TextEdit::singleline(&mut text_buf)
                                             .code_editor().desired_width(f32::INFINITY);
                                             #[cfg(not(feature = "editor_ui"))]{
                                                 line_edit = line_edit.interactive(false);
                                             }
-                                            let mut text_output = line_edit.show(ui);
-                                            if reset_undo{
-                                                text_output.state.clear_undoer();
-                                            }
+                                            let text_output = line_edit.show(ui);
                                             if let Some(cursor) = text_output.cursor_range{
-                                                target_time = Some(cursor.primary.ccursor.index+loaded.arm_text_offset);
+                                                target_time = Some(cursor.primary.ccursor.index);
                                             }
                                             if text_output.response.changed(){
                                                 change_arm_id = Some(a_num);
