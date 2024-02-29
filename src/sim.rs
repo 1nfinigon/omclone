@@ -2,17 +2,17 @@
 use bitflags::bitflags;
 #[cfg(feature = "color_eyre")]
 use color_eyre::{
-    eyre::{bail, ensure, eyre},
+    eyre::{bail, ensure},
     Result,
 };
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::{
-    eyre::{bail, ensure, eyre},
+    eyre::{bail, ensure},
     Result,
 };
 pub use nalgebra::{Vector2, Point2};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
-use std::collections::{VecDeque, HashMap};
+use std::collections::VecDeque;
 use smallvec::SmallVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{f32::consts::PI,fmt,error};
@@ -331,7 +331,7 @@ impl Glyph {
             | Output(meta_pattern, _,_) 
             | OutputRepeating(meta_pattern, _,_)  => {
                 for pat in meta_pattern{
-                    for mut a in pat {
+                    for a in pat {
                         a.pos = self.pos + rotate(a.pos, self.rot);
                         a.rotate_connections(self.rot);
                     }
