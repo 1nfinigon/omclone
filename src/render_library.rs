@@ -41,7 +41,7 @@ pub struct FontStorage{
 const FONT_SCALE:f32 = 0.03;
 const FONT_EXTRA_SPACING:f32 = 0.1;
 impl FontStorage{
-    pub fn new(ctx: &mut Context) -> FontStorage{
+    pub fn new(ctx: &mut dyn RenderingBackend) -> FontStorage{
         let shader_meta = ShaderMeta {
             images: vec!["tex".to_string()],
             uniforms: UniformBlockLayout {
@@ -54,10 +54,9 @@ impl FontStorage{
         };
         const V_SHADE: &str = include_str!("text_vert.vs");
         const F_SHADE: &str = include_str!("text_frag.fs");
-        let shader_uv = Shader::new(ctx, V_SHADE, F_SHADE, shader_meta).unwrap();
+        let shader_uv = ctx.new_shader(ShaderSource::Glsl { vertex: V_SHADE, fragment: F_SHADE } , shader_meta).unwrap();
         use miniquad::graphics::*;
-        let pipeline = Pipeline::with_params(
-            ctx,
+        let pipeline = ctx.new_pipeline(
             &[BufferLayout::default()],
             &[
                 VertexAttribute::new("local_pos", VertexFormat::Float2),
@@ -77,7 +76,6 @@ impl FontStorage{
         const TEXTURE_INDEX_BUF: [u16;6] = [
             0, 1, 2,
             1, 2, 3];
-        let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &TEXTURE_INDEX_BUF);
         let chars = ['0','1','2','3','4','5','6','7','8','9'];
         let font = fontdue::Font::from_bytes(&include_bytes!("Montserrat-Light.ttf")[..],fontdue::FontSettings::default()).unwrap();
         let data = chars.map(|char| -> CharStorage {
@@ -86,10 +84,9 @@ impl FontStorage{
                 width: metrics.width as _,
                 height: metrics.height as _,
                 format: TextureFormat::Alpha,
-                wrap: TextureWrap::Clamp,
-                filter: FilterMode::Linear,
+                ..Default::default()
             };
-            let texture = Texture::from_data_and_format(ctx, &bitmap, datatype);
+            let texture = ctx.new_texture_from_data_and_format(&bitmap, datatype);
 
             let xx = metrics.width as f32 * FONT_SCALE * 0.5;
             let yy = metrics.height as f32 * FONT_SCALE * 0.5;
@@ -98,7 +95,9 @@ impl FontStorage{
                 [-xx, yy,    0., 0.],
                 [ xx,-yy,    1., 1.],
                 [ xx, yy,    1., 0.]];
-            let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &texture_vert_buf);
+            let vb = ctx.new_buffer(BufferType::VertexBuffer,BufferUsage::Immutable, BufferSource::slice(&texture_vert_buf));
+            let index_buffer = ctx.new_buffer(BufferType::IndexBuffer,BufferUsage::Immutable, BufferSource::slice(&TEXTURE_INDEX_BUF));
+
             let binding = Bindings {
                 vertex_buffers: vec![vb],
                 index_buffer,
@@ -109,11 +108,11 @@ impl FontStorage{
         FontStorage { pipeline, data }
     }
 
-    pub fn set_pipeline(&self, ctx: &mut Context){
+    pub fn set_pipeline(&self, ctx: &mut dyn RenderingBackend){
         ctx.apply_pipeline(&self.pipeline);
     }
     //WARNING: Assumes pipeline has been set already
-    pub fn render_text_centered(&self, ctx: &mut Context, text: &str, pos: GFXPos, world_offset: GFXPos, scale: (f32, f32)){
+    pub fn render_text_centered(&self, ctx: &mut dyn RenderingBackend, text: &str, pos: GFXPos, world_offset: GFXPos, scale: (f32, f32)){
         let mut width_total = 0.;
         for char in text.chars(){
             let char_data = &self.data[char as usize-'0' as usize];
@@ -125,9 +124,9 @@ impl FontStorage{
             let metrics = char_data.metrics;
             ctx.apply_bindings(&char_data.binding);
             let offset = [x+(metrics.xmin as f32 *FONT_SCALE), pos[1]+(metrics.ymin as f32 *FONT_SCALE)];
-            ctx.apply_uniforms(&TextUniforms {
+            ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
                 offset, world_offset, scale
-            });
+            }));
             ctx.draw(0, 6, 1);
             x += metrics.advance_width * FONT_SCALE + FONT_EXTRA_SPACING;
         }

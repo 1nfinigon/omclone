@@ -94,12 +94,6 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_>{
         self.tape_ref.first = 0;
         self.held_str = self.tape_ref.noop_clear_and_string();
     }
-    fn replace(&mut self, text: &str) {
-        *self.earliest_edit = Some(0);
-        self.tape_ref.instructions.clear();
-        self.tape_ref.first = 0;
-        self.insert_text(text, 0);
-    }
     fn take(&mut self) -> String {
         let s = self.as_ref().to_owned();
         self.clear();
@@ -268,6 +262,7 @@ enum AppStateUpdate{
 use AppState::*;
 
 pub struct MyMiniquadApp {
+    mq_ctx: Box<dyn RenderingBackend>,
     egui_mq: egui_miniquad::EguiMq,
     render_data: RenderDataBase,
     app_state: AppState,
@@ -277,22 +272,23 @@ pub struct MyMiniquadApp {
 }
 
 impl MyMiniquadApp {
-    pub fn new(ctx: &mut Context) -> Self {
-        
-        let render_data = RenderDataBase::new(ctx);
+    pub fn new() -> Self {
+        let mut mq_ctx = window::new_rendering_backend();
+        let render_data = RenderDataBase::new(mq_ctx.as_mut());
         let (base_str, puzzle_str, solution_str) = get_default_path_strs();
         let base = String::from(base_str);
         let puzzle = String::from(puzzle_str);
         let solution = String::from(solution_str);
         let app_state = AppState::NotLoaded;
         let unloaded_info = PathInfo{base, puzzle, solution};
+        let egui_mq = egui_miniquad::EguiMq::new(mq_ctx.as_mut());
         Self {
-            egui_mq: egui_miniquad::EguiMq::new(ctx),
+            mq_ctx, egui_mq,
             render_data,app_state,unloaded_info,
             extra_message:None, dragging: None,
         }
     }
-    pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read, ctx: &mut Context) -> Result<()>{
+    pub fn load(&mut self, f_puzzle: impl Read, f_sol: impl Read) -> Result<()>{
         let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle))?;
         let solution = parser::parse_solution(&mut BufReader::new(f_sol))?;
         println!("Check: {:?}", solution.stats);
@@ -308,8 +304,8 @@ impl MyMiniquadApp {
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
-        let camera = CameraSetup::frame_center(&world, ctx.screen_size());
-        let tracks = setup_tracks(ctx, &world.track_maps);
+        let camera = CameraSetup::frame_center(&world, window::screen_size());
+        let tracks = setup_tracks(self.mq_ctx.as_mut(), &world.track_maps);
         let new_loaded = Loaded{
             base_world: world.clone(),
             backup_world: world.clone(),
@@ -373,7 +369,7 @@ extern "C" {
 const EDITOR_ENABLED: bool = cfg!(feature = "editor_ui");
 
 impl EventHandler for MyMiniquadApp {
-    fn update(&mut self, _: &mut Context) {
+    fn update(&mut self) {
         if let Loaded(loaded) = &mut self.app_state{
             loaded.update();
             let display_portion = loaded.curr_time.fract() as f32;
@@ -385,7 +381,8 @@ impl EventHandler for MyMiniquadApp {
         }
     }
 
-    fn draw(&mut self, ctx: &mut Context) {
+    fn draw(&mut self) {
+        let ctx = self.mq_ctx.as_mut();
         ctx.clear(Some((1., 1., 1., 1.)), None, None);
         ctx.begin_default_pass(PassAction::clear_color(0.5, 0.5, 0.5, 1.0));
         if let Loaded(loaded) = &mut self.app_state{
@@ -396,7 +393,7 @@ impl EventHandler for MyMiniquadApp {
         ctx.end_render_pass();
         
         let mut do_loading = AppStateUpdate::NoChange;
-        let screen_size = ctx.screen_size();
+        let screen_size = window::screen_size();
         self.egui_mq.run(ctx, |_mq_ctx, egui_ctx|{
             if let Some(msg) = &self.extra_message{
                 let mut opened = true;
@@ -565,6 +562,7 @@ impl EventHandler for MyMiniquadApp {
                         #[cfg(not(feature = "editor_ui"))]{
                             arm_window = arm_window.default_open(false);
                         }
+                        let mut reset_undo = false;
                         arm_window.default_width(600.).show(egui_ctx, |ui| {
                             #[cfg(not(feature = "editor_ui"))]{
                                 ui.label("Editing Disabled");
@@ -614,6 +612,7 @@ impl EventHandler for MyMiniquadApp {
                                 ui.add(egui::DragValue::new(&mut loaded.arm_text_offset)
                                     .clamp_range(0..=loaded.base_world.repeat_length));
                                 if ui.button("-2k").clicked() {
+                                    reset_undo = true;
                                     if loaded.arm_text_offset >= 2000 {
                                         loaded.arm_text_offset -= 2000;
                                     } else {
@@ -621,6 +620,7 @@ impl EventHandler for MyMiniquadApp {
                                     }
                                 }
                                 if ui.button("+2k").clicked() {
+                                    reset_undo = true;
                                     loaded.arm_text_offset += 2000;
                                 }
                             });
@@ -652,7 +652,10 @@ impl EventHandler for MyMiniquadApp {
                                             #[cfg(not(feature = "editor_ui"))]{
                                                 line_edit = line_edit.interactive(false);
                                             }
-                                            let text_output = line_edit.show(ui);
+                                            let mut text_output = line_edit.show(ui);
+                                            if reset_undo{
+                                                text_output.state.clear_undoer();
+                                            }
                                             if let Some(cursor) = text_output.cursor_range{
                                                 target_time = Some(cursor.primary.ccursor.index+loaded.arm_text_offset);
                                             }
@@ -764,7 +767,7 @@ impl EventHandler for MyMiniquadApp {
                         let f_puzzle = File::open(base_path.join(&dat.puzzle))?;
                         let solution_path = base_path.join(&dat.solution);
                         let f_sol = File::open(&solution_path)?;
-                        self.load(f_puzzle, f_sol, ctx)?;
+                        self.load(f_puzzle, f_sol)?;
                         Ok(())
                     }
                     #[cfg(target_arch = "wasm32")]
@@ -775,7 +778,7 @@ impl EventHandler for MyMiniquadApp {
                         let f_sol = solution.as_ref().unwrap();
                         let name = JS_SOLUTION_NAME.lock().unwrap().take();
                         self.unloaded_info.solution = name.unwrap_or(String::from("omclone.solution"));
-                        self.load(f_puzzle.as_slice(), f_sol.as_slice(), ctx)?;
+                        self.load(f_puzzle.as_slice(), f_sol.as_slice())?;
                         Ok(())
                     }
                 };
@@ -793,10 +796,10 @@ impl EventHandler for MyMiniquadApp {
         }
 
         // Draw things in front of egui here
-        ctx.commit_frame();
+        self.mq_ctx.commit_frame();
     }
 
-    fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32) {
+    fn mouse_motion_event(&mut self, x: f32, y: f32) {
         self.egui_mq.mouse_motion_event( x, y);
         if let Some(drag_last) = &mut self.dragging{
             if let Loaded(loaded) = &mut self.app_state{
@@ -808,7 +811,7 @@ impl EventHandler for MyMiniquadApp {
         }
     }
 
-    fn mouse_wheel_event(&mut self, ctx: &mut Context, dx: f32, dy: f32) {
+    fn mouse_wheel_event(&mut self, dx: f32, dy: f32) {
         self.egui_mq.mouse_wheel_event(dx, dy);
         if !self.egui_mq.egui_ctx().is_pointer_over_area(){
             if let Loaded(loaded) = &mut self.app_state{
@@ -825,12 +828,11 @@ impl EventHandler for MyMiniquadApp {
 
     fn mouse_button_down_event(
         &mut self,
-        ctx: &mut Context,
         mb: MouseButton,
         x: f32,
         y: f32,
     ) {
-        self.egui_mq.mouse_button_down_event(ctx, mb, x, y);
+        self.egui_mq.mouse_button_down_event(mb, x, y);
         if !self.egui_mq.egui_ctx().is_pointer_over_area() && (mb == MouseButton::Right || mb == MouseButton::Middle){
             self.dragging = Some([x,y]);
         }
@@ -838,18 +840,16 @@ impl EventHandler for MyMiniquadApp {
 
     fn mouse_button_up_event(
         &mut self,
-        ctx: &mut Context,
         mb: MouseButton,
         x: f32,
         y: f32,
     ) {
-        self.egui_mq.mouse_button_up_event(ctx, mb, x, y);
+        self.egui_mq.mouse_button_up_event(mb, x, y);
         self.dragging = None;
     }
 
     fn char_event(
         &mut self,
-        _ctx: &mut Context,
         character: char,
         _keymods: KeyMods,
         _repeat: bool,
@@ -859,15 +859,14 @@ impl EventHandler for MyMiniquadApp {
 
     fn key_down_event(
         &mut self,
-        ctx: &mut Context,
         keycode: KeyCode,
         keymods: KeyMods,
         _repeat: bool,
     ) {
-        self.egui_mq.key_down_event(ctx, keycode, keymods);
+        self.egui_mq.key_down_event(keycode, keymods);
     }
 
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, keymods: KeyMods) {
+    fn key_up_event(&mut self, keycode: KeyCode, keymods: KeyMods) {
         self.egui_mq.key_up_event(keycode, keymods);
     }
 }

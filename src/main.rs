@@ -26,8 +26,8 @@ fn main() -> Result< () >{
         fullscreen: false,
         .. Default::default()
     };
-    miniquad::start(conf, |mut ctx| {
-        Box::new(ui::MyMiniquadApp::new(&mut ctx))
+    miniquad::start(conf, || {
+        Box::new(ui::MyMiniquadApp::new())
     });
     Ok(())
 }

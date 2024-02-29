@@ -16,7 +16,7 @@ pub fn rot_to_angle(r: Rot) -> f32{
 //note: 1 hex has inner radius of 1 (width of 2).
 //hex height, 3 tiles tip-to-tip=sqrt(3)*5/6
 const Y_FACTOR:f32 = 1.7320508075688772935274463415;
-fn setup_arms(ctx: &mut Context) -> Bindings{
+fn setup_arms(ctx: &mut dyn RenderingBackend) -> Bindings{
     const ARM_VERT_BUF: [Vert;14] = [
         //Arm Base
         [ 0.,-0.4,],
@@ -41,8 +41,8 @@ fn setup_arms(ctx: &mut Context) -> Bindings{
         0, 1, 2,    5, 6, 7,
         0, 1, 3,    8, 9, 10,
         0, 1, 4,    11, 12, 13,];
-    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &ARM_VERT_BUF);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &ARM_INDEX_BUF);
+    let vb = ctx.new_buffer(BufferType::VertexBuffer,BufferUsage::Immutable, BufferSource::slice(&ARM_VERT_BUF));
+    let index_buffer = ctx.new_buffer(BufferType::IndexBuffer,BufferUsage::Immutable, BufferSource::slice(&ARM_INDEX_BUF));
     Bindings {
         vertex_buffers: vec![vb],
         index_buffer,
@@ -54,7 +54,7 @@ pub struct TrackBindings{
     bindings: Bindings,
     vert_count: usize,
 }
-pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
+pub fn setup_tracks(ctx: &mut dyn RenderingBackend, tracks: &TrackMaps) -> TrackBindings{
     let mut verts_vec:Vec<GFXPos> = Vec::new();
     let mut index_vec:Vec<u16> = Vec::new();
     let mut curr_index = 0;
@@ -74,8 +74,8 @@ pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
     add_from(&tracks.plus);
     add_from(&tracks.minus);
 
-    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &verts_vec);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &index_vec);
+    let vb = ctx.new_buffer(BufferType::VertexBuffer,BufferUsage::Immutable, BufferSource::slice(&verts_vec));
+    let index_buffer = ctx.new_buffer(BufferType::IndexBuffer,BufferUsage::Immutable, BufferSource::slice(&index_vec));
     TrackBindings{
         bindings: Bindings {
             vertex_buffers: vec![vb],
@@ -87,7 +87,7 @@ pub fn setup_tracks(ctx: &mut Context, tracks: &TrackMaps) -> TrackBindings{
 }
 
 const HEX_GRID_ID:usize = 13;
-fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
+fn setup_textures(ctx: &mut dyn RenderingBackend) -> Vec<Bindings>{
     const HL:f32 = Y_FACTOR*5./3.;//height of 1.5 hex (from tip to tip)
     const TEXTURE_VERT_BUF: [UvVert;4] = [
         [-3.,HL-6.,  0., 1.],
@@ -97,8 +97,8 @@ fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
     const TEXTURE_INDEX_BUF: [u16;6] = [
         0, 1, 2,
         1, 2, 3];
-    let vb = Buffer::immutable(ctx, BufferType::VertexBuffer, &TEXTURE_VERT_BUF);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &TEXTURE_INDEX_BUF);
+    let vb = ctx.new_buffer(BufferType::VertexBuffer,BufferUsage::Immutable, BufferSource::slice(&TEXTURE_VERT_BUF));
+    let index_buffer = ctx.new_buffer(BufferType::IndexBuffer,BufferUsage::Immutable, BufferSource::slice(&TEXTURE_INDEX_BUF));
     let texture_list:Vec<&[u8]> = vec![
         include_bytes!("../images/Ani.png"),
         include_bytes!("../images/Bonder.png"),
@@ -131,13 +131,14 @@ fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
         let params = TextureParams {
             format: TextureFormat::RGBA8,
             wrap: TextureWrap::Repeat,
-            filter: FilterMode::Linear,
-            width, height, 
+            width, height,
+            ..Default::default()
         };
-        let texture = Texture::from_data_and_format(ctx, &img, params);
+        let texture = ctx.new_texture_from_data_and_format(&img, params);
         //let texture = Texture::from_rgba8(ctx, width, height, &img);
         if id == HEX_GRID_ID{
-            let tmp_vb = Buffer::stream(ctx, BufferType::VertexBuffer, 4*std::mem::size_of::<UvVert>());
+            let tmp_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, 
+                BufferSource::empty::<UvVert>(4));
             Bindings {
                 vertex_buffers: vec![tmp_vb],
                 index_buffer,
@@ -153,7 +154,7 @@ fn setup_textures(ctx: &mut Context) -> Vec<Bindings>{
     }).collect()
 }
 const CIRCLE_VERT_COUNT:usize = 20;
-fn setup_circle(ctx: &mut Context) -> Bindings{
+fn setup_circle(ctx: &mut dyn RenderingBackend) -> Bindings{
     let mut verts = [[0.;2];CIRCLE_VERT_COUNT+1];
     let angle_per = PI*2./(CIRCLE_VERT_COUNT as f32);
     //verts[CIRCLE_VERT_COUNT] = [0.,0.];
@@ -164,8 +165,8 @@ fn setup_circle(ctx: &mut Context) -> Bindings{
         indices[i*3+1] = (i) as u16;
         indices[i*3+2] = ((i+1)%CIRCLE_VERT_COUNT) as u16;
     }
-    let vertex_buffer = Buffer::immutable(ctx, BufferType::VertexBuffer, &verts);
-    let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &indices);
+    let vertex_buffer = ctx.new_buffer(BufferType::VertexBuffer,BufferUsage::Immutable, BufferSource::slice(&verts));
+    let index_buffer = ctx.new_buffer(BufferType::IndexBuffer,BufferUsage::Immutable, BufferSource::slice(&indices));
     Bindings {
         vertex_buffers: vec![vertex_buffer],
         index_buffer,
@@ -220,7 +221,7 @@ pub struct RenderDataBase {
 }
 
 impl RenderDataBase {
-    pub fn new(ctx: &mut Context) -> Self {
+    pub fn new(ctx: &mut dyn RenderingBackend) -> Self {
         let shader_meta = ShaderMeta {
             images: vec![],
             uniforms: UniformBlockLayout {
@@ -235,13 +236,13 @@ impl RenderDataBase {
         };
         const V_SHADE: &str = include_str!("basic_vert.vs");
         const F_SHADE: &str = include_str!("basic_frag.fs");
-        let shader = Shader::new(ctx, V_SHADE, F_SHADE, shader_meta).unwrap();
+        
+        let shader = ctx.new_shader(ShaderSource::Glsl { vertex: V_SHADE, fragment: F_SHADE } , shader_meta).unwrap();
 
-        let pipeline = Pipeline::new(
-            ctx,
+        let pipeline = ctx.new_pipeline(
             &[BufferLayout::default()],
             &[VertexAttribute::new("local_pos", VertexFormat::Float2)],
-            shader,
+            shader, Default::default()
         );
         
         let shader_meta_uv = ShaderMeta {
@@ -257,10 +258,9 @@ impl RenderDataBase {
         };
         const V_UV_SHADE: &str = include_str!("uv_vert.vs");
         const F_UV_SHADE: &str = include_str!("uv_frag.fs");
-        let shader_uv = Shader::new(ctx, V_UV_SHADE, F_UV_SHADE, shader_meta_uv).unwrap();
+        let shader_uv = ctx.new_shader(ShaderSource::Glsl { vertex: V_UV_SHADE, fragment: F_UV_SHADE } , shader_meta_uv).unwrap();
         use miniquad::graphics::*;
-        let pipeline_textured = Pipeline::with_params(
-            ctx,
+        let pipeline_textured = ctx.new_pipeline(
             &[BufferLayout::default()],
             &[
                 VertexAttribute::new("local_pos", VertexFormat::Float2),
@@ -276,8 +276,7 @@ impl RenderDataBase {
                 ..Default::default()
             }
         );
-        let pipeline_tracks = Pipeline::with_params(
-            ctx,
+        let pipeline_tracks = ctx.new_pipeline(
             &[BufferLayout::default()],
             &[VertexAttribute::new("local_pos", VertexFormat::Float2)],
             shader,
@@ -330,7 +329,7 @@ fn atom_color(t: AtomType) -> [f32;3]{
 
 impl RenderDataBase {
 	fn draw_atoms(&self, ctx: &mut Context, atoms:&[FloatAtom], camera: &CameraSetup){
-        let scale = camera.scale(ctx.screen_size());
+        let scale = camera.scale(window::screen_size());
         let world_offset = camera.offset;
         ctx.apply_pipeline(&self.pipeline_textured);
 
@@ -349,9 +348,9 @@ impl RenderDataBase {
 					if bond.intersects(bondtype){
 						let angle = rot_to_angle(r as Rot)+atom.rot;
 						ctx.apply_bindings(bindtype);
-						ctx.apply_uniforms(&UvUniforms {
+						ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
 							offset, world_offset, angle, scale
-						});
+						}));
 						ctx.draw(0, 6, 1);
 					}
 				}
@@ -364,9 +363,9 @@ impl RenderDataBase {
 			let color = atom_color(atom.atom_type);
 			let offset = [atom.pos.x, atom.pos.y];
 			let angle = 0.;
-			ctx.apply_uniforms(&BasicUniforms {
+			ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
 				color, offset, world_offset, angle, scale
-			});
+			}));
 			ctx.draw(0, (CIRCLE_VERT_COUNT*3) as i32, 1);
 		}
 	}
@@ -374,7 +373,7 @@ impl RenderDataBase {
     pub fn draw(&self, ctx: &mut Context, camera: &CameraSetup, tracks: &TrackBindings,
          show_area: bool, world: &World, float_world: &FloatWorld)
     {
-        let scale = camera.scale(ctx.screen_size());
+        let scale = camera.scale(window::screen_size());
         let world_offset = camera.offset;
 
 
@@ -408,12 +407,12 @@ impl RenderDataBase {
                 [-1., 1.,    xc-xdf, yc+ydf],
                 [ 1.,-1.,    xc+xdf, yc-ydf],
                 [ 1., 1.,    xc+xdf, yc+ydf]];
-            self.shapes.texture_bindings[HEX_GRID_ID].vertex_buffers[0].update(ctx, &hex_grid_data);
+            ctx.buffer_update(self.shapes.texture_bindings[HEX_GRID_ID].vertex_buffers[0], BufferSource::slice(&hex_grid_data));
             ctx.apply_pipeline(&self.pipeline_textured);
             ctx.apply_bindings(&self.shapes.texture_bindings[13]);
-            ctx.apply_uniforms(&UvUniforms {
+            ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                 offset:[0.,0.], world_offset:[0.,0.], angle:0., scale:(1.,1.)
-            });
+            }));
             ctx.draw(0, 6, 1);
         }
         //Draw glyphs (including half-transparent cover for input/outputs)
@@ -441,9 +440,9 @@ impl RenderDataBase {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for atom in atoms{ //transparent cover
                         let offset = pos_to_xy(&atom.pos);
-                        ctx.apply_uniforms(&UvUniforms {
+                        ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                             offset, world_offset, angle, scale
-                        });
+                        }));
                         ctx.draw(0, 6, 1);
                     }
                     continue
@@ -452,9 +451,9 @@ impl RenderDataBase {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for p in pos_vec{
                         let offset = pos_to_xy(p);
-                        ctx.apply_uniforms(&UvUniforms {
+                        ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                             offset, world_offset, angle, scale
-                        });
+                        }));
                         ctx.draw(0, 6, 1);
                     }
                     continue
@@ -462,9 +461,9 @@ impl RenderDataBase {
                 Track(_) => continue,
             };
             ctx.apply_bindings(&self.shapes.texture_bindings[i]);
-            ctx.apply_uniforms(&UvUniforms {
+            ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                 offset, world_offset, angle, scale
-            });
+            }));
             ctx.draw(0, 6, 1);
         }
         //Draw conduit numbers
@@ -482,9 +481,9 @@ impl RenderDataBase {
             ctx.apply_bindings(&self.shapes.texture_bindings[15]);                
             for p in &world.area_touched{
                 let offset = pos_to_xy(p);
-                ctx.apply_uniforms(&UvUniforms {
+                ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                     offset, world_offset, angle:0., scale
-                });
+                }));
                 ctx.draw(0, 6, 1);
             }
         }
@@ -492,9 +491,9 @@ impl RenderDataBase {
         //Draw tracks
         ctx.apply_pipeline(&self.pipeline_tracks);
         ctx.apply_bindings(&tracks.bindings);
-        ctx.apply_uniforms(&BasicUniforms {
+        ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
             color:[1., 1., 1.], offset:[0.,0.], world_offset, angle:0., scale
-        });
+        }));
         ctx.draw(0, tracks.vert_count as i32, 1);
 		
 		//Draw atoms
@@ -510,9 +509,9 @@ impl RenderDataBase {
             let triangles_drawn = if f_arm.grabbing {6} else {3};
             for r in (0..6).step_by(Arm::angles_between_arm(f_arm.arm_type) as usize) {
                 let angle = f_arm.rot+rot_to_angle(r);
-                ctx.apply_uniforms(&BasicUniforms {
+                ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
                     color, offset, world_offset, angle, scale
-                });
+                }));
                 let rounded_len = (f_arm.len.round() as i32)/2;
                 ctx.draw((rounded_len-1)*6, triangles_drawn, 1);
             }
