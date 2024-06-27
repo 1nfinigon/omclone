@@ -57,7 +57,7 @@ miniquad = { version = "0.4", optional = true}
 fontdue = { version = "0.9", optional = true}
 #egui-miniquad = {version = "0.14", optional = true}
 egui-miniquad = { git = "https://github.com/sornas/egui-miniquad", rev="cf599784e20322d335f53f6b678948b4d43c6776", optional = true }
-image = {version = "0.24.6", optional = true, default-features = false, features = ["png"]}
+image = {version = "0.25", optional = true, default-features = false, features = ["png"]}
 
 wasm-bindgen = {version = "0.2.84", optional = true}
 web-sys = {version = "0.3.61", optional = true}
