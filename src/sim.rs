@@ -5,21 +5,21 @@ use color_eyre::{
     eyre::{bail, ensure},
     Result,
 };
+use enum_primitive_derive::Primitive;
+pub use nalgebra::{Point2, Vector2};
+use rustc_hash::{FxHashMap, FxHashSet};
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::{
     eyre::{bail, ensure},
     Result,
 };
-pub use nalgebra::{Vector2, Point2};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
-use std::collections::VecDeque;
 use smallvec::SmallVec;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::{f32::consts::PI,fmt,error};
-use enum_primitive_derive::Primitive;
+use std::collections::VecDeque;
+use std::{error, f32::consts::PI, fmt};
 
 #[derive(Debug)]
-pub struct SimError{
+pub struct SimError {
     pub error_str: &'static str,
     pub location: XYPos,
 }
@@ -27,17 +27,24 @@ impl fmt::Display for SimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hex = xy_to_pos(self.location);
         let hex_pos = pos_to_xy(hex);
-        if nalgebra::distance_squared(&hex_pos,&self.location) < 0.1{
-            write!(f, "{} at {:?}", self.error_str,hex)
+        if nalgebra::distance_squared(&hex_pos, &self.location) < 0.1 {
+            write!(f, "{} at {:?}", self.error_str, hex)
         } else {
-            write!(f, "{} near {:?} (at {:?})", self.error_str,hex,self.location)
+            write!(
+                f,
+                "{} near {:?} (at {:?})",
+                self.error_str, hex, self.location
+            )
         }
     }
 }
-impl error::Error for SimError{}
-pub type SimResult<T> = std::result::Result<T,SimError>;
-fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError{
-    SimError{error_str, location: pos_to_xy(location)}
+impl error::Error for SimError {}
+pub type SimResult<T> = std::result::Result<T, SimError>;
+fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError {
+    SimError {
+        error_str,
+        location: pos_to_xy(location),
+    }
 }
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
@@ -45,32 +52,39 @@ pub type Pos = Vector2<i32>;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Instr {
-    RotateClockwise, RotateCounterClockwise,
-    Extend, Retract,
-    Grab, Drop,
-    PivotClockwise, PivotCounterClockwise,
-    Forward, Back,
-    Repeat, Reset,
-    Noop, Empty,
+    RotateClockwise,
+    RotateCounterClockwise,
+    Extend,
+    Retract,
+    Grab,
+    Drop,
+    PivotClockwise,
+    PivotCounterClockwise,
+    Forward,
+    Back,
+    Repeat,
+    Reset,
+    Noop,
+    Empty,
 }
 impl Instr {
     pub fn to_byte(&self) -> u8 {
         use Instr::*;
         match self {
-            RotateClockwise         => b'R',
-            RotateCounterClockwise  => b'r',
-            Extend                  => b'E',
-            Retract                 => b'e',
-            Grab                    => b'G',
-            Drop                    => b'g',
-            PivotClockwise          => b'P',
-            PivotCounterClockwise   => b'p',
-            Forward                 => b'A',
-            Back                    => b'a',
-            Repeat                  => b'C',
-            Reset                   => b'X',
-            Noop                    => b'O',
-            Empty                   => b' ',
+            RotateClockwise => b'R',
+            RotateCounterClockwise => b'r',
+            Extend => b'E',
+            Retract => b'e',
+            Grab => b'G',
+            Drop => b'g',
+            PivotClockwise => b'P',
+            PivotCounterClockwise => b'p',
+            Forward => b'A',
+            Back => b'a',
+            Repeat => b'C',
+            Reset => b'X',
+            Noop => b'O',
+            Empty => b' ',
         }
     }
     pub fn from_byte(input: u8) -> Option<Self> {
@@ -96,40 +110,40 @@ impl Instr {
     pub fn to_char(&self) -> char {
         use Instr::*;
         match self {
-            RotateClockwise         => 'd',
-            RotateCounterClockwise  => 'a',
-            Extend                  => 'w',
-            Retract                 => 's',
-            Grab                    => 'f',
-            Drop                    => 'r',
-            PivotClockwise          => 'e',
-            PivotCounterClockwise   => 'q',
-            Forward                 => 'g',
-            Back                    => 't',
-            Repeat                  => 'C',
-            Reset                   => 'X',
-            Noop                    => 'O',
-            Empty                   => ' ',
+            RotateClockwise => 'd',
+            RotateCounterClockwise => 'a',
+            Extend => 'w',
+            Retract => 's',
+            Grab => 'f',
+            Drop => 'r',
+            PivotClockwise => 'e',
+            PivotCounterClockwise => 'q',
+            Forward => 'g',
+            Back => 't',
+            Repeat => 'C',
+            Reset => 'X',
+            Noop => 'O',
+            Empty => ' ',
         }
     }
     pub fn from_char(input: char) -> Option<Self> {
         use Instr::*;
         match input {
-             'd' =>  Some(RotateClockwise       ),
-             'a' =>  Some(RotateCounterClockwise),
-             'w' =>  Some(Extend                ),
-             's' =>  Some(Retract               ),
-             'f' =>  Some(Grab                  ),
-             'r' =>  Some(Drop                  ),
-             'e' =>  Some(PivotClockwise        ),
-             'q' =>  Some(PivotCounterClockwise ),
-             'g' =>  Some(Forward               ),
-             't' =>  Some(Back                  ),
-             //'C' =>  Some(Repeat                ),
-             //'X' =>  Some(Reset                 ),
-             //'O' =>  Some(Noop                  ),
-             ' ' =>  Some(Empty                 ),
-             _ => None
+            'd' => Some(RotateClockwise),
+            'a' => Some(RotateCounterClockwise),
+            'w' => Some(Extend),
+            's' => Some(Retract),
+            'f' => Some(Grab),
+            'r' => Some(Drop),
+            'e' => Some(PivotClockwise),
+            'q' => Some(PivotCounterClockwise),
+            'g' => Some(Forward),
+            't' => Some(Back),
+            //'C' =>  Some(Repeat                ),
+            //'X' =>  Some(Reset                 ),
+            //'O' =>  Some(Noop                  ),
+            ' ' => Some(Empty),
+            _ => None,
         }
     }
 }
@@ -142,7 +156,7 @@ pub struct Tape {
 impl Tape {
     pub fn get(&self, timestep: usize, loop_len: usize) -> Instr {
         use Instr::Empty;
-        if timestep >= self.first && loop_len > 0{
+        if timestep >= self.first && loop_len > 0 {
             let after_first = timestep - self.first;
             *self
                 .instructions
@@ -152,16 +166,15 @@ impl Tape {
             Empty
         }
     }
-    pub fn to_string(&self) -> String{
+    pub fn to_string(&self) -> String {
         let mut output = " ".repeat(self.first);
-        for i in &self.instructions{
+        for i in &self.instructions {
             output.push(i.to_char());
         }
         output
     }
-    pub fn noop_clear_and_string(&mut self) -> String{
-        while self.instructions.get(0).unwrap_or(&Instr::Noop) == &Instr::Empty
-        {
+    pub fn noop_clear_and_string(&mut self) -> String {
+        while self.instructions.get(0).unwrap_or(&Instr::Noop) == &Instr::Empty {
             self.first += 1;
             self.instructions.remove(0);
         }
@@ -175,23 +188,23 @@ pub fn normalize_dir(r: Rot) -> Rot {
 
 pub fn pos_to_rot(input: Pos) -> Option<Rot> {
     match (input.x, input.y) {
-        ( 1, 0) => Some(0),
-        ( 0, 1) => Some(1),
+        (1, 0) => Some(0),
+        (0, 1) => Some(1),
         (-1, 1) => Some(2),
         (-1, 0) => Some(3),
-        ( 0,-1) => Some(4),
-        ( 1,-1) => Some(5),
+        (0, -1) => Some(4),
+        (1, -1) => Some(5),
         _ => None,
     }
 }
 pub fn rot_dist_to_pos(n: i32, angle: Rot) -> Pos {
     match normalize_dir(angle) {
-        0 => Pos::new( n, 0),
-        1 => Pos::new( 0, n),
+        0 => Pos::new(n, 0),
+        1 => Pos::new(0, n),
         2 => Pos::new(-n, n),
         3 => Pos::new(-n, 0),
-        4 => Pos::new( 0,-n),
-        5 => Pos::new( n,-n),
+        4 => Pos::new(0, -n),
+        5 => Pos::new(n, -n),
         _ => panic!("Invalid Rotation"),
     }
 }
@@ -201,11 +214,11 @@ pub fn rot_to_pos(angle: Rot) -> Pos {
 pub fn rotate(pos: Pos, angle: Rot) -> Pos {
     match normalize_dir(angle) {
         0 => pos, //  ( pos.x      ,       pos.y)
-        1 => Pos::new(      -pos.y , pos.x+pos.y),
-        2 => Pos::new(-pos.x-pos.y , pos.x      ),
-        3 => Pos::new(-pos.x       ,      -pos.y),
-        4 => Pos::new(       pos.y ,-pos.x-pos.y),
-        5 => Pos::new( pos.x+pos.y ,-pos.x      ),
+        1 => Pos::new(-pos.y, pos.x + pos.y),
+        2 => Pos::new(-pos.x - pos.y, pos.x),
+        3 => Pos::new(-pos.x, -pos.y),
+        4 => Pos::new(pos.y, -pos.x - pos.y),
+        5 => Pos::new(pos.x + pos.y, -pos.x),
         _ => panic!("Invalid Rotation"),
     }
 }
@@ -231,9 +244,22 @@ bitflags! {
 #[repr(u8)]
 pub enum AtomType {
     ConduitSpace = 0,
-    Salt=1, Air=2, Earth=3, Fire=4, Water=5,
-    Quicksilver=6, Gold=7, Silver=8, Copper=9, Iron=10, Tin=11, Lead=12,
-    Vitae=13, Mors=14, RepeatingOutputMarker=15, Quintessence=16,
+    Salt = 1,
+    Air = 2,
+    Earth = 3,
+    Fire = 4,
+    Water = 5,
+    Quicksilver = 6,
+    Gold = 7,
+    Silver = 8,
+    Copper = 9,
+    Iron = 10,
+    Tin = 11,
+    Lead = 12,
+    Vitae = 13,
+    Mors = 14,
+    RepeatingOutputMarker = 15,
+    Quintessence = 16,
 }
 impl AtomType {
     pub fn is_element(&self) -> bool {
@@ -287,31 +313,46 @@ pub enum Movement {
     Rotation(Rot, Pos),
 }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ArmMovement{
+pub enum ArmMovement {
     Move(Movement),
     Pivot(Rot),
     LengthAdjust(i32),
 }
 
-pub type AtomPattern = SmallVec<[Vec<Atom>;1]>;
+pub type AtomPattern = SmallVec<[Vec<Atom>; 1]>;
 pub type InOutId = i32;
 pub type ConduitId = i32;
 //Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlyphType {
-    Calcification, Animismus, Projection,
-    Dispersion, Purification, Duplication, Unification,
-    Bonding, Unbonding, TriplexBond, MultiBond,
-    Disposal, Equilibrium,
-    Track(Vec<Pos>), Conduit(Vec<Pos>, ConduitId),
-    Input(AtomPattern, InOutId), Output(AtomPattern, i32, InOutId),
+    Calcification,
+    Animismus,
+    Projection,
+    Dispersion,
+    Purification,
+    Duplication,
+    Unification,
+    Bonding,
+    Unbonding,
+    TriplexBond,
+    MultiBond,
+    Disposal,
+    Equilibrium,
+    Track(Vec<Pos>),
+    Conduit(Vec<Pos>, ConduitId),
+    Input(AtomPattern, InOutId),
+    Output(AtomPattern, i32, InOutId),
     OutputRepeating(AtomPattern, i32, InOutId),
-}//Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
-//This should probably be made consistent
+} //Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
+  //This should probably be made consistent
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ArmType {
-    PlainArm, DoubleArm, TripleArm, HexArm,
-    Piston, VanBerlo,
+    PlainArm,
+    DoubleArm,
+    TripleArm,
+    HexArm,
+    Piston,
+    VanBerlo,
 }
 #[derive(Debug, Clone)]
 pub struct Glyph {
@@ -327,10 +368,10 @@ impl Glyph {
     pub fn reposition_pattern(&mut self) -> bool {
         use GlyphType::*;
         match &mut self.glyph_type {
-            Input(meta_pattern,_) 
-            | Output(meta_pattern, _,_) 
-            | OutputRepeating(meta_pattern, _,_)  => {
-                for pat in meta_pattern{
+            Input(meta_pattern, _)
+            | Output(meta_pattern, _, _)
+            | OutputRepeating(meta_pattern, _, _) => {
+                for pat in meta_pattern {
                     for a in pat {
                         a.pos = self.pos + rotate(a.pos, self.rot);
                         a.rotate_connections(self.rot);
@@ -338,7 +379,7 @@ impl Glyph {
                 }
                 true
             }
-            Conduit(locs,_id) => {
+            Conduit(locs, _id) => {
                 let p = self.pos;
                 for a in locs.iter_mut() {
                     *a = p + rotate(*a, self.rot);
@@ -369,7 +410,12 @@ pub struct Arm {
 
 impl Arm {
     pub fn new(pos: Pos, rot: Rot, len: i32, arm_type: ArmType, instruction_tape: Tape) -> Self {
-        Arm { pos, rot, len, arm_type, instruction_tape,
+        Arm {
+            pos,
+            rot,
+            len,
+            arm_type,
+            instruction_tape,
             grabbing: false,
             atoms_grabbed: [AtomKey::null(); 6],
         }
@@ -388,11 +434,11 @@ impl Arm {
     fn do_motion(&mut self, action: ArmMovement) {
         use ArmMovement::*;
         use Movement::*;
-        match action{
+        match action {
             Move(Linear(p)) => self.pos += p,
-            Move(Rotation(r,_)) => self.rot += r,
+            Move(Rotation(r, _)) => self.rot += r,
             LengthAdjust(a) => self.len += a,
-            Move(HeldStill) | Pivot(_) => {},
+            Move(HeldStill) | Pivot(_) => {}
         }
     }
 }
@@ -406,7 +452,7 @@ pub struct InitialWorld {
 pub type TrackMap = FxHashMap<Pos, Pos>;
 
 #[derive(Debug, Clone, Default)]
-pub struct TrackMaps{
+pub struct TrackMaps {
     pub plus: TrackMap,
     pub minus: TrackMap,
 }
@@ -415,7 +461,7 @@ pub struct TrackMaps{
 pub struct ConduitInfo {
     pub vecids: (usize, usize),
     pub offset_pos: Pos,
-    pub offset_rot: Rot, 
+    pub offset_rot: Rot,
 }
 #[derive(Debug, Clone)]
 pub struct World {
@@ -450,13 +496,21 @@ impl WorldAtoms {
     }
     fn get_type(&self, loc: Pos) -> Option<AtomType> {
         let &key = self.locs.get(&loc)?;
-        let atom = self.atom_map.get(key).expect("Inconsistent atoms (type check)");
+        let atom = self
+            .atom_map
+            .get(key)
+            .expect("Inconsistent atoms (type check)");
         Some(atom.atom_type)
     }
     fn get_nonberlo_type(&self, loc: Pos) -> Option<AtomType> {
         let &key = self.locs.get(&loc)?;
-        let atom = self.atom_map.get(key).expect("Inconsistent atoms (nonberlo type check)");
-        if atom.is_berlo {return None};
+        let atom = self
+            .atom_map
+            .get(key)
+            .expect("Inconsistent atoms (nonberlo type check)");
+        if atom.is_berlo {
+            return None;
+        };
         Some(self.atom_map.get(key)?.atom_type)
     }
     fn get_consumable_type(&self, motion: &WorldStepInfo, loc: Pos) -> Option<AtomType> {
@@ -464,9 +518,12 @@ impl WorldAtoms {
         if motion.atoms.contains_key(key) || motion.recent_bonds.contains(&key) {
             return None;
         }
-        let atom = self.atom_map.get(key).expect("Inconsistent atoms (consume check)");
-        if atom.connections != [Bonds::NO_BOND;6]{
-            return None
+        let atom = self
+            .atom_map
+            .get(key)
+            .expect("Inconsistent atoms (consume check)");
+        if atom.connections != [Bonds::NO_BOND; 6] {
+            return None;
         }
         //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
         Some(atom.atom_type)
@@ -477,9 +534,12 @@ impl WorldAtoms {
         if motion.atoms.contains_key(key) {
             return None;
         }
-        let atom = self.atom_map.get(key).expect("Inconsistent atoms (consume check)");
-        if atom.connections != [Bonds::NO_BOND;6]{
-            return None
+        let atom = self
+            .atom_map
+            .get(key)
+            .expect("Inconsistent atoms (consume check)");
+        if atom.connections != [Bonds::NO_BOND; 6] {
+            return None;
         }
         //Don't need to check is_berlo since the berlo arm will always be grabbing it (applying a motion)
         Some(atom.atom_type)
@@ -494,14 +554,18 @@ impl WorldAtoms {
     //Note: only use on non-grabbed atoms!
     fn destroy_atom_at(&mut self, loc: Pos) {
         let atom_key = self.locs.remove(&loc).expect("Destroying nonatom!");
-        let atom = self.atom_map.remove(atom_key)
+        let atom = self
+            .atom_map
+            .remove(atom_key)
             .expect("Inconsistent atoms (destroy)!");
         if atom.pos != loc {
             panic!("Inconsistent atoms (destroy loc)!");
         }
     }
     fn take_atom(&mut self, key: AtomKey) -> Atom {
-        let atom = self.atom_map.remove(key)
+        let atom = self
+            .atom_map
+            .remove(key)
             .expect("Inconsistent atoms (take)!");
         let loc = atom.pos;
         let atom_key = self.locs.remove(&loc).expect("Destroying nonatom!");
@@ -514,14 +578,17 @@ impl WorldAtoms {
         let key = self.atom_map.insert(atom);
         let atom_ref = &self.atom_map[key];
         let output = self.locs.insert(atom_ref.pos, key);
-        if let Some(_old_atom) = output{
-            return Err(SimError{error_str:"Atom creation on hex with existing atom!",location:pos_to_xy(atom_ref.pos)});
+        if let Some(_old_atom) = output {
+            return Err(SimError {
+                error_str: "Atom creation on hex with existing atom!",
+                location: pos_to_xy(atom_ref.pos),
+            });
         }
         Ok(key)
     }
 }
 
-pub struct WorldStepInfo{
+pub struct WorldStepInfo {
     pub atoms: SecondaryMap<AtomKey, Movement>,
     pub arms: Vec<ArmMovement>,
     pub spawning_atoms: VecDeque<Atom>,
@@ -529,15 +596,15 @@ pub struct WorldStepInfo{
     pub drop_conduit_check: FxHashSet<AtomKey>, //contains one entry per arm
     pub active_glyphs: VecDeque<usize>, //When glyph is a conduit, repeat for number of atoms sent
 }
-impl WorldStepInfo{
-    pub fn new() -> Self{
-        WorldStepInfo{
+impl WorldStepInfo {
+    pub fn new() -> Self {
+        WorldStepInfo {
             atoms: SecondaryMap::new(),
             arms: Vec::new(),
-            spawning_atoms:VecDeque::new(),
-            recent_bonds:FxHashSet::default(),
-            drop_conduit_check:FxHashSet::default(),
-            active_glyphs:VecDeque::new(),
+            spawning_atoms: VecDeque::new(),
+            recent_bonds: FxHashSet::default(),
+            drop_conduit_check: FxHashSet::default(),
+            active_glyphs: VecDeque::new(),
         }
     }
     pub fn clear(&mut self) {
@@ -561,72 +628,85 @@ pub struct SolutionStats {
 pub type XYPos = Point2<f32>;
 pub type XYVec = Vector2<f32>;
 #[derive(Debug, Copy, Clone)]
-pub struct FloatAtom{
+pub struct FloatAtom {
     pub pos: XYPos,
     pub rot: f32,
     pub atom_type: AtomType,
     pub connections: [Bonds; 6],
 }
-impl From<&Atom> for FloatAtom{
-	fn from(a: &Atom) -> FloatAtom {
-		return FloatAtom{
-			pos: pos_to_xy(a.pos),
-			rot: 0.,
-			atom_type: a.atom_type,
-			connections: a.connections,
-		}
-	}
+impl From<&Atom> for FloatAtom {
+    fn from(a: &Atom) -> FloatAtom {
+        return FloatAtom {
+            pos: pos_to_xy(a.pos),
+            rot: 0.,
+            atom_type: a.atom_type,
+            connections: a.connections,
+        };
+    }
 }
-pub struct FloatArm{
+pub struct FloatArm {
     pub pos: XYPos,
     pub rot: f32,
     pub len: f32,
     pub arm_type: ArmType,
     pub grabbing: bool,
 }
-pub struct FloatWorld{//Might add arms, maybe some other animation stuff too
+pub struct FloatWorld {
+    //Might add arms, maybe some other animation stuff too
     pub portion: f32,
     pub atoms_xy: Vec<FloatAtom>,
-    pub arms_xy: Vec<FloatArm>
+    pub arms_xy: Vec<FloatArm>,
 }
-fn pos_to_xy(input: Pos) -> XYPos{
+fn pos_to_xy(input: Pos) -> XYPos {
     let a = input.x as f32;
     let b = input.y as f32;
-    XYPos::new(a*2.+b,b*f32::sqrt(3.))
+    XYPos::new(a * 2. + b, b * f32::sqrt(3.))
 }
-fn rot_to_angle(r: Rot) -> f32{
-    (-r as f32)*PI/3.
+fn rot_to_angle(r: Rot) -> f32 {
+    (-r as f32) * PI / 3.
 }
-fn xy_to_simple_pos(input: XYPos) -> Pos{
-    let b = input.y/f32::sqrt(3.);
-    let a = (input.x-b)/2.;
+fn xy_to_simple_pos(input: XYPos) -> Pos {
+    let b = input.y / f32::sqrt(3.);
+    let a = (input.x - b) / 2.;
     Pos::new(a.round() as i32, b.round() as i32)
 }
 //https://stackoverflow.com/questions/7705228/hexagonal-grids-how-do-you-find-which-hexagon-a-point-is-in/23370350#23370350
-fn xy_to_pos(input: XYPos) -> Pos{
+fn xy_to_pos(input: XYPos) -> Pos {
     //x=a*2.+b, y=b*f32::sqrt(3.)
-    let b = input.y/f32::sqrt(3.);
-    let a = (input.x-b)/2.;
+    let b = input.y / f32::sqrt(3.);
+    let a = (input.x - b) / 2.;
     // check closest to (p+1,q), (p,q+1), (p-1,q) or (p,q-1)
     let (p, q) = (a.round(), b.round());
-    let (lambda, mu) = (a-p, b-q);
+    let (lambda, mu) = (a - p, b - q);
     // opposite signs, so we are guaranteed to be inside hexagon (p,q)
     let base_hex = Pos::new(p as i32, q as i32);
-    if lambda * mu < 0.0 {return base_hex;}
-    let distance = nalgebra::distance_squared(&pos_to_xy(base_hex),&input);
+    if lambda * mu < 0.0 {
+        return base_hex;
+    }
+    let distance = nalgebra::distance_squared(&pos_to_xy(base_hex), &input);
     // inside circle, so guaranteed inside hexagon (p,q)
-    if distance < 1. {return base_hex;}
+    if distance < 1. {
+        return base_hex;
+    }
 
     // same sign, but which end of the parallelogram are we?
     let sign = lambda.signum();
-    let candidate = if ( lambda.abs() > mu.abs() ) {(p+sign,q)} else {(p,q+sign)};
+    let candidate = if (lambda.abs() > mu.abs()) {
+        (p + sign, q)
+    } else {
+        (p, q + sign)
+    };
     let candidate_hex = Pos::new(candidate.0 as i32, candidate.1 as i32);
-    let distance2 = nalgebra::distance_squared(&pos_to_xy(candidate_hex),&input);
-    if distance < distance2 {base_hex} else {candidate_hex}
+    let distance2 = nalgebra::distance_squared(&pos_to_xy(candidate_hex), &input);
+    if distance < distance2 {
+        base_hex
+    } else {
+        candidate_hex
+    }
 }
-impl FloatWorld{
-    pub fn new() -> Self{
-        FloatWorld{
+impl FloatWorld {
+    pub fn new() -> Self {
+        FloatWorld {
             portion: 0.,
             atoms_xy: Vec::new(),
             arms_xy: Vec::new(),
@@ -636,30 +716,28 @@ impl FloatWorld{
         self.arms_xy.clear();
         self.atoms_xy.clear();
         self.portion = portion;
-        use Movement::*;
         use ArmMovement::*;
-        fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32){
+        use Movement::*;
+        fn apply_movement(base: Pos, movement: Movement, amount: f32) -> (XYPos, f32) {
             let xy = pos_to_xy(base);
-            match movement{
+            match movement {
                 Linear(offset) => {
-                    let offset_xy = pos_to_xy(offset)-XYPos::origin();
-                    return (xy+(offset_xy*amount), 0.)
-                },
+                    let offset_xy = pos_to_xy(offset) - XYPos::origin();
+                    return (xy + (offset_xy * amount), 0.);
+                }
                 Rotation(r, pivot) => {
                     let pivot_xy = pos_to_xy(pivot);
-                    let offset = xy-pivot_xy;
-                    let rot = rot_to_angle(r)*amount;
-                    return (pivot_xy+(nalgebra::Rotation2::new(-rot)*offset), rot)
+                    let offset = xy - pivot_xy;
+                    let rot = rot_to_angle(r) * amount;
+                    return (pivot_xy + (nalgebra::Rotation2::new(-rot) * offset), rot);
                 }
-                HeldStill => {
-                    return (xy, 0.)
-                }
+                HeldStill => return (xy, 0.),
             }
         }
-        for (atom_key, atom) in &world.atoms.atom_map{
+        for (atom_key, atom) in &world.atoms.atom_map {
             let movement = motion.atoms.get(atom_key).unwrap_or(&HeldStill);
             let (xy, angle) = apply_movement(atom.pos, *movement, portion);
-            let f_atom = FloatAtom{
+            let f_atom = FloatAtom {
                 pos: xy,
                 rot: angle,
                 atom_type: atom.atom_type,
@@ -668,23 +746,23 @@ impl FloatWorld{
             self.atoms_xy.push(f_atom);
         }
         assert_eq!(motion.arms.len(), world.arms.len());
-        for a_index in 0..world.arms.len(){
+        for a_index in 0..world.arms.len() {
             let arm = &world.arms[a_index];
             let mut arm_len = arm.len as f32;
             let motion = motion.arms[a_index];
-            let new_motion = match motion{
+            let new_motion = match motion {
                 Move(m) => m,
                 LengthAdjust(l) => {
-                    arm_len += (l as f32)*portion;
+                    arm_len += (l as f32) * portion;
                     HeldStill
-                },
+                }
                 Pivot(_) => HeldStill,
             };
             let (xy, angle) = apply_movement(arm.pos, new_motion, portion);
-            let new_arm = FloatArm{
+            let new_arm = FloatArm {
                 pos: xy,
-                rot: angle+rot_to_angle(arm.rot),
-                len: arm_len*2.,
+                rot: angle + rot_to_angle(arm.rot),
+                len: arm_len * 2.,
                 arm_type: arm.arm_type,
                 grabbing: arm.grabbing,
             };
@@ -694,9 +772,9 @@ impl FloatWorld{
     pub fn generate_static(&mut self, world: &World) {
         self.arms_xy.clear();
         self.atoms_xy.clear();
-        for (_atom_key, atom) in &world.atoms.atom_map{
+        for (_atom_key, atom) in &world.atoms.atom_map {
             let xy = pos_to_xy(atom.pos);
-            let f_atom = FloatAtom{
+            let f_atom = FloatAtom {
                 pos: xy,
                 rot: 0.,
                 atom_type: atom.atom_type,
@@ -704,13 +782,13 @@ impl FloatWorld{
             };
             self.atoms_xy.push(f_atom);
         }
-        for a_index in 0..world.arms.len(){
+        for a_index in 0..world.arms.len() {
             let arm = &world.arms[a_index];
             let arm_len = arm.len as f32;
-            let new_arm = FloatArm{
+            let new_arm = FloatArm {
                 pos: pos_to_xy(arm.pos),
                 rot: rot_to_angle(arm.rot),
-                len: arm_len*2.,
+                len: arm_len * 2.,
                 arm_type: arm.arm_type,
                 grabbing: arm.grabbing,
             };
@@ -722,7 +800,12 @@ impl FloatWorld{
 //Running the world
 impl World {
     //sets up a move for the specified atom and all atoms connected to it
-    fn premove_atoms(&self, motion: &mut WorldStepInfo, atom_key: AtomKey, movement: Movement) -> SimResult<()> {
+    fn premove_atoms(
+        &self,
+        motion: &mut WorldStepInfo,
+        atom_key: AtomKey,
+        movement: Movement,
+    ) -> SimResult<()> {
         let mut moving_atoms = VecDeque::<AtomKey>::new();
         moving_atoms.push_back(atom_key);
 
@@ -730,9 +813,9 @@ impl World {
             let maybe_move = motion.atoms.get(this_key);
             if let Some(curr_move) = maybe_move {
                 if curr_move != &movement {
-                    println!("was {:?},applying {:?}",curr_move,movement);
+                    println!("was {:?},applying {:?}", curr_move, movement);
                     let error_str = &"Atom moved in multiple directions!";
-                    return Err(sim_error_pos(error_str,self.atoms.atom_map[this_key].pos));
+                    return Err(sim_error_pos(error_str, self.atoms.atom_map[this_key].pos));
                 }
             } else {
                 motion.atoms.insert(this_key, movement);
@@ -740,7 +823,11 @@ impl World {
                 for dir in 0..6 {
                     if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
                         let newpos = atom.pos + rot_to_pos(dir);
-                        let newkey = *self.atoms.locs.get(&newpos).expect("Inconsistent atoms (movement prep)");
+                        let newkey = *self
+                            .atoms
+                            .locs
+                            .get(&newpos)
+                            .expect("Inconsistent atoms (movement prep)");
                         moving_atoms.push_back(newkey);
                     }
                 }
@@ -776,20 +863,29 @@ impl World {
             let current = self.atoms.locs.insert(atom.pos, atom_key);
             if current != None {
                 let error_str = &"Multiple atoms in same hex!";
-                return Err(sim_error_pos(error_str,atom.pos));
+                return Err(sim_error_pos(error_str, atom.pos));
             }
         }
         Ok(())
     }
 
     //Returns the movement the arm is going to do. Returns size of the largest molecule rotated
-    fn do_instruction(&mut self, motion: &mut WorldStepInfo, arm_id: usize, timestep: u64) -> SimResult<()>{
-        assert_eq!(motion.arms.len(), arm_id, "Arm motion array not same as arm ID");
+    fn do_instruction(
+        &mut self,
+        motion: &mut WorldStepInfo,
+        arm_id: usize,
+        timestep: u64,
+    ) -> SimResult<()> {
+        assert_eq!(
+            motion.arms.len(),
+            arm_id,
+            "Arm motion array not same as arm ID"
+        );
         let arm = &mut self.arms[arm_id];
+        use ArmMovement::*;
         use ArmType::*;
         use Instr::*;
         use Movement::*;
-        use ArmMovement::*;
         let arm_type = arm.arm_type;
         let tape = &arm.instruction_tape;
         let timestep = timestep as usize;
@@ -799,26 +895,26 @@ impl World {
             Extend => {
                 if arm_type == Piston && arm.len < 3 {
                     LengthAdjust(1)
-                } else { STILL }
+                } else {
+                    STILL
+                }
             }
             Retract => {
                 if arm_type == Piston && arm.len > 1 {
                     LengthAdjust(-1)
-                } else { STILL }
+                } else {
+                    STILL
+                }
             }
-            RotateCounterClockwise => {
-                Move(Rotation(1, arm.pos))
-            }
-            RotateClockwise => {
-                Move(Rotation(-1, arm.pos))
-            }
+            RotateCounterClockwise => Move(Rotation(1, arm.pos)),
+            RotateClockwise => Move(Rotation(-1, arm.pos)),
             PivotCounterClockwise => Pivot(1),
             PivotClockwise => Pivot(-1),
             Drop => {
                 if arm_type != VanBerlo {
-                    for r in 0..6{
+                    for r in 0..6 {
                         let grabbed_atom = arm.atoms_grabbed[r];
-                        if !grabbed_atom.is_null(){
+                        if !grabbed_atom.is_null() {
                             motion.drop_conduit_check.insert(grabbed_atom);
                         }
                     }
@@ -834,8 +930,8 @@ impl World {
                         let grab_pos = arm.pos + (rot_to_pos(arm.rot + r) * arm.len);
                         let null_key = AtomKey::null();
                         let mut current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
-                        if current != &null_key{
-                            if self.atoms.atom_map[*current].is_berlo{
+                        if current != &null_key {
+                            if self.atoms.atom_map[*current].is_berlo {
                                 current = &null_key;
                             }
                         }
@@ -844,14 +940,16 @@ impl World {
                 }
                 STILL
             }
-            Forward => {
-                self.track_maps.plus.get(&arm.pos)
-                    .map_or(STILL, |&x| {Move(Linear(x))})
-            }
-            Back => {
-                self.track_maps.minus.get(&arm.pos)
-                    .map_or(STILL, |&x| {Move(Linear(x))})
-            }
+            Forward => self
+                .track_maps
+                .plus
+                .get(&arm.pos)
+                .map_or(STILL, |&x| Move(Linear(x))),
+            Back => self
+                .track_maps
+                .minus
+                .get(&arm.pos)
+                .map_or(STILL, |&x| Move(Linear(x))),
             Repeat | Reset | Noop => {
                 panic!("Unprocessed instruction!");
             }
@@ -860,17 +958,17 @@ impl World {
         let rotation_store = arm.rot;
         for atom in arm.atoms_grabbed {
             if !atom.is_null() {
-                let atom_movement = match action{
+                let atom_movement = match action {
                     ArmMovement::Pivot(r) => Movement::Rotation(r, self.atoms.atom_map[atom].pos),
                     ArmMovement::Move(m) => m,
-                    ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store)*a)
+                    ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store) * a),
                 };
                 let tmp = motion.atoms.insert(atom, atom_movement);
-                match tmp{
+                match tmp {
                     Some(x) if x != atom_movement => {
-                        println!("was {:?},applying {:?}",atom_movement,x);
+                        println!("was {:?},applying {:?}", atom_movement, x);
                         let error_str = &"Atom moved in multiple directions!";
-                        return Err(sim_error_pos(error_str,self.atoms.atom_map[atom].pos));
+                        return Err(sim_error_pos(error_str, self.atoms.atom_map[atom].pos));
                     }
                     _ => {}
                 }
@@ -880,7 +978,7 @@ impl World {
         Ok(())
     }
 
-    fn initial_area(&mut self) -> SimResult<()>{
+    fn initial_area(&mut self) -> SimResult<()> {
         use GlyphType::*;
         for glyph in &mut self.glyphs {
             let pos = glyph.pos; //primary position
@@ -899,8 +997,11 @@ impl World {
             let pos_unif2 = glyph.reposition(Pos::new(-1, 1));
             let pos_unif3 = glyph.reposition(Pos::new(0, -1));
             let pos_unif4 = glyph.reposition(Pos::new(1, -1));
-            fn add_all(area_set: &mut FxHashSet<Pos>,input: impl IntoIterator<Item=Pos>) -> SimResult<()>{
-                for p in input{
+            fn add_all(
+                area_set: &mut FxHashSet<Pos>,
+                input: impl IntoIterator<Item = Pos>,
+            ) -> SimResult<()> {
+                for p in input {
                     area_set.insert(p);
                     /*if !area_set.insert(p){
                         return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
@@ -908,71 +1009,60 @@ impl World {
                 }
                 Ok(())
             }
-            match &glyph.glyph_type{
-                Calcification => {
-                    add_all(&mut self.area_touched,[pos])
-                }
-                Animismus => {
-                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani])
-                }
-                Projection => {
-                    add_all(&mut self.area_touched,[pos, pos_bi])
-                }
-                Dispersion => {
-                    add_all(&mut self.area_touched,[pos, pos_bi,pos_disp2,pos_disp3,pos_disp4])
-                }
-                Unification => {
-                    add_all(&mut self.area_touched,[pos, pos_tri,pos_unif2,pos_unif3,pos_unif4])
-                }
-                Purification => {
-                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri])
-                }
-                Duplication => {
-                    add_all(&mut self.area_touched,[pos, pos_bi])
-                }
-                Bonding => {
-                    add_all(&mut self.area_touched,[pos, pos_bi])
-                }
-                MultiBond => {
-                    add_all(&mut self.area_touched,[pos, pos_bi,pos_multi2,pos_multi3])
-                }
-                TriplexBond => {
-                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri])
-                }
-                Unbonding => {
-                    add_all(&mut self.area_touched,[pos, pos_bi])
-                }
-                Input(meta_pattern,_) 
-                | Output(meta_pattern, _,_)
-                | OutputRepeating(meta_pattern, _,_)=> {
+            match &glyph.glyph_type {
+                Calcification => add_all(&mut self.area_touched, [pos]),
+                Animismus => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri, pos_ani]),
+                Projection => add_all(&mut self.area_touched, [pos, pos_bi]),
+                Dispersion => add_all(
+                    &mut self.area_touched,
+                    [pos, pos_bi, pos_disp2, pos_disp3, pos_disp4],
+                ),
+                Unification => add_all(
+                    &mut self.area_touched,
+                    [pos, pos_tri, pos_unif2, pos_unif3, pos_unif4],
+                ),
+                Purification => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
+                Duplication => add_all(&mut self.area_touched, [pos, pos_bi]),
+                Bonding => add_all(&mut self.area_touched, [pos, pos_bi]),
+                MultiBond => add_all(
+                    &mut self.area_touched,
+                    [pos, pos_bi, pos_multi2, pos_multi3],
+                ),
+                TriplexBond => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
+                Unbonding => add_all(&mut self.area_touched, [pos, pos_bi]),
+                Input(meta_pattern, _)
+                | Output(meta_pattern, _, _)
+                | OutputRepeating(meta_pattern, _, _) => {
                     let atom_points = &meta_pattern[0];
-                    add_all(&mut self.area_touched,atom_points.iter().map(|a|a.pos))
+                    add_all(&mut self.area_touched, atom_points.iter().map(|a| a.pos))
                 }
-                Track(pos_list) => {
-                    add_all(&mut self.area_touched,pos_list.iter().copied())
-                },
-                Disposal => {
-                    add_all(&mut self.area_touched,[pos, pos_bi, pos_tri, pos_ani, pos_disp3,pos_disp4,pos_unif2])
-                },
-                Conduit(_atom_teleport,_) => {
-                    Ok(())//TODO
-                },
-                Equilibrium => {
-                    add_all(&mut self.area_touched,[pos])
+                Track(pos_list) => add_all(&mut self.area_touched, pos_list.iter().copied()),
+                Disposal => add_all(
+                    &mut self.area_touched,
+                    [
+                        pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,
+                    ],
+                ),
+                Conduit(_atom_teleport, _) => {
+                    Ok(()) //TODO
                 }
+                Equilibrium => add_all(&mut self.area_touched, [pos]),
             }?;
         }
         Ok(())
     }
-    fn process_inputs(&mut self, motion: &mut WorldStepInfo) -> SimResult<()>{
+    fn process_inputs(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
-            match &mut glyph.glyph_type{
-                Input(meta_pattern,_) => {
+            match &mut glyph.glyph_type {
+                Input(meta_pattern, _) => {
                     let atom_spawn_points = &meta_pattern[0];
-                    if atom_spawn_points.iter().all(|a| atoms.check_empty(motion,a.pos)){
-                        for a in atom_spawn_points{
+                    if atom_spawn_points
+                        .iter()
+                        .all(|a| atoms.check_empty(motion, a.pos))
+                    {
+                        for a in atom_spawn_points {
                             atoms.create_atom(a.clone())?;
                         }
                         let tmp = meta_pattern.remove(0);
@@ -984,73 +1074,97 @@ impl World {
         }
         Ok(())
     }
-    fn process_outputs(&mut self, motion: &mut WorldStepInfo){
+    fn process_outputs(&mut self, motion: &mut WorldStepInfo) {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
-            match &mut glyph.glyph_type{
-                Output(meta_pattern, output_count,_) => {
+            match &mut glyph.glyph_type {
+                Output(meta_pattern, output_count, _) => {
                     let atom_drop_points = &meta_pattern[0];
-                    let full_match = atom_drop_points.iter().all( |a|-> bool {
-                            let try_key = atoms.locs.get(&a.pos);
-                            if let Some(&atom_key) = try_key{
-                                &atoms.atom_map[atom_key] == a && !motion.atoms.contains_key(atom_key)
-                            } else {false}
-                        });
+                    let full_match = atom_drop_points.iter().all(|a| -> bool {
+                        let try_key = atoms.locs.get(&a.pos);
+                        if let Some(&atom_key) = try_key {
+                            &atoms.atom_map[atom_key] == a && !motion.atoms.contains_key(atom_key)
+                        } else {
+                            false
+                        }
+                    });
                     if full_match {
-                        for a in atom_drop_points{
+                        for a in atom_drop_points {
                             atoms.destroy_atom_at(a.pos);
                         }
-                        if *output_count > 0{
+                        if *output_count > 0 {
                             *output_count -= 1;
                         }
                         let tmp = meta_pattern.remove(0);
                         meta_pattern.push(tmp);
                     }
-                },
-                OutputRepeating(meta_pattern, output_count,_) => {
+                }
+                OutputRepeating(meta_pattern, output_count, _) => {
                     let atom_drop_points = &meta_pattern[0];
-                    let full_match = atom_drop_points.iter().all( |a|-> bool {
-                            let try_key = atoms.locs.get(&a.pos);
-                            if let Some(&atom_key) = try_key{
-                                &atoms.atom_map[atom_key] == a
-                            } else {false}
-                        });
+                    let full_match = atom_drop_points.iter().all(|a| -> bool {
+                        let try_key = atoms.locs.get(&a.pos);
+                        if let Some(&atom_key) = try_key {
+                            &atoms.atom_map[atom_key] == a
+                        } else {
+                            false
+                        }
+                    });
                     if full_match {
                         //TODO: Accurately detect partial infinites
                         let tmp = meta_pattern.remove(0);
                         meta_pattern.push(tmp);
-                        if *output_count > 0{
+                        if *output_count > 0 {
                             *output_count = 0;
                         }
                     }
-                },
+                }
                 _ => {}
             }
         }
     }
-    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, first_half: bool) -> SimResult<()>{
+    fn process_glyphs(&mut self, motion: &mut WorldStepInfo, first_half: bool) -> SimResult<()> {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
-                let [atom1,atom2] = atoms.atom_map.get_disjoint_mut([key1,key2]).expect("Inconsistent atoms!");
-                if (atom1.is_berlo || atom2.is_berlo) {return;}
+                let [atom1, atom2] = atoms
+                    .atom_map
+                    .get_disjoint_mut([key1, key2])
+                    .expect("Inconsistent atoms!");
+                if (atom1.is_berlo || atom2.is_berlo) {
+                    return;
+                }
                 let bond1 = atom1.connections[rot];
-                assert_eq!(atom2.connections[(rot + 3) % 6], bond1, "Inconsistent bonds");
+                assert_eq!(
+                    atom2.connections[(rot + 3) % 6],
+                    bond1,
+                    "Inconsistent bonds"
+                );
                 if bond1 == Bonds::NO_BOND {
                     atom1.connections[rot] = Bonds::NORMAL;
                     atom2.connections[(rot + 3) % 6] = Bonds::NORMAL;
                 }
             }
         }
-        fn try_triplex_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos, bond_type: Bonds ) {
+        fn try_triplex_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos, bond_type: Bonds) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
-                let [atom1,atom2] = atoms.atom_map.get_disjoint_mut([key1,key2]).expect("Inconsistent atoms!");
-                if (atom1.is_berlo || atom2.is_berlo) {return;}
-                if (atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire) {return;}
+                let [atom1, atom2] = atoms
+                    .atom_map
+                    .get_disjoint_mut([key1, key2])
+                    .expect("Inconsistent atoms!");
+                if (atom1.is_berlo || atom2.is_berlo) {
+                    return;
+                }
+                if (atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire) {
+                    return;
+                }
                 let bond1 = atom1.connections[rot];
-                assert_eq!(atom2.connections[(rot + 3) % 6], bond1, "Inconsistent bonds");
+                assert_eq!(
+                    atom2.connections[(rot + 3) % 6],
+                    bond1,
+                    "Inconsistent bonds"
+                );
                 if (bond1 & !Bonds::TRIPLEX).is_empty() {
                     atom1.connections[rot] |= bond_type;
                     atom2.connections[(rot + 3) % 6] |= bond_type;
@@ -1080,38 +1194,42 @@ impl World {
             let pos_unif3 = glyph.reposition(Pos::new(0, -1));
             let pos_unif4 = glyph.reposition(Pos::new(1, -1));
 
-            fn pop_check_make(atoms:&mut WorldAtoms, motion:&mut WorldStepInfo, atom: Atom) -> SimResult<()>{
+            fn pop_check_make(
+                atoms: &mut WorldAtoms,
+                motion: &mut WorldStepInfo,
+                atom: Atom,
+            ) -> SimResult<()> {
                 let a = motion.spawning_atoms.pop_front().unwrap();
                 assert!(a == atom);
                 atoms.create_atom(a)?;
                 Ok(())
             }
-            fn pop_make(atoms:&mut WorldAtoms, motion:&mut WorldStepInfo) -> SimResult<()>{
+            fn pop_make(atoms: &mut WorldAtoms, motion: &mut WorldStepInfo) -> SimResult<()> {
                 atoms.create_atom(motion.spawning_atoms.pop_front().unwrap())?;
                 Ok(())
             }
-            match &mut glyph.glyph_type{
+            match &mut glyph.glyph_type {
                 Calcification => {
                     if let Some(atom) = atoms.get_atom_mut(pos) {
-                        if atom.atom_type.is_element() && !atom.is_berlo{
+                        if atom.atom_type.is_element() && !atom.is_berlo {
                             atom.atom_type = AtomType::Salt;
                         }
                     }
                 }
                 Animismus => {
-                    if first_half{
+                    if first_half {
                         let a1 = atoms.get_consumable_type(motion, pos);
                         let a2 = atoms.get_consumable_type(motion, pos_bi);
                         let o1 = atoms.check_empty(motion, pos_tri);
                         let o2 = atoms.check_empty(motion, pos_ani);
-                        if (Some(Salt),Some(Salt),true,true) == (a1,a2,o1,o2) {
+                        if (Some(Salt), Some(Salt), true, true) == (a1, a2, o1, o2) {
                             atoms.destroy_atom_at(pos);
                             atoms.destroy_atom_at(pos_bi);
                             motion.spawning_atoms.push_back(Atom::new(pos_tri, Vitae));
                             motion.spawning_atoms.push_back(Atom::new(pos_ani, Mors));
                             motion.active_glyphs.push_back(id);
                         }
-                    } else if motion.active_glyphs.front() == Some(&id){
+                    } else if motion.active_glyphs.front() == Some(&id) {
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos_tri, Vitae))?;
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos_ani, Mors))?;
                         motion.active_glyphs.pop_front();
@@ -1120,21 +1238,21 @@ impl World {
                 Projection => {
                     let qs = atoms.get_consumable_type(motion, pos);
                     let metal = atoms.get_type(pos_bi);
-                    if let (Some(Quicksilver), Some(metal)) = (qs, metal){
-                        if let Some(newtype) = metal.promotable_metal(){
+                    if let (Some(Quicksilver), Some(metal)) = (qs, metal) {
+                        if let Some(newtype) = metal.promotable_metal() {
                             atoms.destroy_atom_at(pos);
                             atoms.get_atom_mut(pos_bi).unwrap().atom_type = newtype;
                         }
                     }
                 }
                 Dispersion => {
-                    if first_half{
+                    if first_half {
                         let q = atoms.get_consumable_type(motion, pos);
                         let o1 = atoms.check_empty(motion, pos_bi);
                         let o2 = atoms.check_empty(motion, pos_disp2);
                         let o3 = atoms.check_empty(motion, pos_disp3);
                         let o4 = atoms.check_empty(motion, pos_disp4);
-                        if (Some(Quintessence),true,true,true,true) == (q,o1,o2,o3,o4){
+                        if (Some(Quintessence), true, true, true, true) == (q, o1, o2, o3, o4) {
                             atoms.destroy_atom_at(pos);
                             motion.spawning_atoms.push_back(Atom::new(pos_bi, Earth));
                             motion.spawning_atoms.push_back(Atom::new(pos_disp2, Water));
@@ -1142,7 +1260,7 @@ impl World {
                             motion.spawning_atoms.push_back(Atom::new(pos_disp4, Air));
                             motion.active_glyphs.push_back(id);
                         }
-                    } else if motion.active_glyphs.front() == Some(&id){
+                    } else if motion.active_glyphs.front() == Some(&id) {
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos_bi, Earth))?;
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos_disp2, Water))?;
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos_disp3, Fire))?;
@@ -1151,35 +1269,42 @@ impl World {
                     }
                 }
                 Unification => {
-                    if first_half{
+                    if first_half {
                         let output = atoms.check_empty(motion, pos);
                         let a1 = atoms.get_consumable_type(motion, pos_tri);
                         let a2 = atoms.get_consumable_type(motion, pos_unif2);
                         let a3 = atoms.get_consumable_type(motion, pos_unif3);
                         let a4 = atoms.get_consumable_type(motion, pos_unif4);
-                        if let (true,Some(a),Some(b),Some(c),Some(d)) = (output, a1, a2, a3, a4){
-                            let set = [a,b,c,d];
-                            if set.contains(&Earth) && set.contains(&Water) && set.contains(&Fire) && set.contains(&Air){
+                        if let (true, Some(a), Some(b), Some(c), Some(d)) = (output, a1, a2, a3, a4)
+                        {
+                            let set = [a, b, c, d];
+                            if set.contains(&Earth)
+                                && set.contains(&Water)
+                                && set.contains(&Fire)
+                                && set.contains(&Air)
+                            {
                                 atoms.destroy_atom_at(pos_tri);
                                 atoms.destroy_atom_at(pos_unif2);
                                 atoms.destroy_atom_at(pos_unif3);
                                 atoms.destroy_atom_at(pos_unif4);
-                                motion.spawning_atoms.push_back(Atom::new(pos, Quintessence));
+                                motion
+                                    .spawning_atoms
+                                    .push_back(Atom::new(pos, Quintessence));
                                 motion.active_glyphs.push_back(id);
                             }
                         }
-                    } else if motion.active_glyphs.front() == Some(&id){
+                    } else if motion.active_glyphs.front() == Some(&id) {
                         pop_check_make(&mut self.atoms, motion, Atom::new(pos, Quintessence))?;
                         motion.active_glyphs.pop_front();
                     }
                 }
                 Purification => {
-                    if first_half{
+                    if first_half {
                         let a1 = atoms.get_consumable_type(motion, pos);
                         let a2 = atoms.get_consumable_type(motion, pos_bi);
                         let o = atoms.check_empty(motion, pos_tri);
-                        match (a1,a2,o){
-                            (Some(a1),Some(a2),true) if a1 == a2 => {
+                        match (a1, a2, o) {
+                            (Some(a1), Some(a2), true) if a1 == a2 => {
                                 let next = a1.promotable_metal();
                                 if let Some(newtype) = next {
                                     atoms.destroy_atom_at(pos);
@@ -1188,9 +1313,9 @@ impl World {
                                     motion.active_glyphs.push_back(id);
                                 }
                             }
-                            _ => ()
+                            _ => (),
                         }
-                    } else if motion.active_glyphs.front() == Some(&id){
+                    } else if motion.active_glyphs.front() == Some(&id) {
                         pop_make(&mut self.atoms, motion)?;
                         motion.active_glyphs.pop_front();
                     }
@@ -1198,7 +1323,7 @@ impl World {
                 Duplication => {
                     let source = atoms.get_type(pos);
                     let salt = atoms.get_nonberlo_type(pos_bi);
-                    if let (Some(elem), Some(Salt)) = (source, salt){
+                    if let (Some(elem), Some(Salt)) = (source, salt) {
                         if elem.is_element() {
                             atoms.get_atom_mut(pos_bi).unwrap().atom_type = elem;
                         }
@@ -1218,70 +1343,105 @@ impl World {
                     try_triplex_bond(atoms, &pos_bi, &pos_tri, Bonds::TRIPLEX_R);
                 }
                 Unbonding => {
-                    if let (Some(&key1), Some(&key2)) = (atoms.locs.get(&pos), atoms.locs.get(&pos_bi)){
+                    if let (Some(&key1), Some(&key2)) =
+                        (atoms.locs.get(&pos), atoms.locs.get(&pos_bi))
+                    {
                         let bond1 = atoms.atom_map[key1].connections[rot];
-                        assert_eq!(atoms.atom_map[key2].connections[(rot+3)%6], bond1, "Inconsistent bonds");
+                        assert_eq!(
+                            atoms.atom_map[key2].connections[(rot + 3) % 6],
+                            bond1,
+                            "Inconsistent bonds"
+                        );
                         if bond1.intersects(Bonds::DYNAMIC_BOND) {
                             atoms.atom_map[key1].connections[rot] = Bonds::NO_BOND;
-                            atoms.atom_map[key2].connections[(rot+3)%6] = Bonds::NO_BOND;
+                            atoms.atom_map[key2].connections[(rot + 3) % 6] = Bonds::NO_BOND;
                             motion.recent_bonds.insert(key1);
                             motion.recent_bonds.insert(key2);
                         }
                     }
                 }
                 Disposal => {
-                    if let Some(_) = atoms.get_consumable_type_immediate(motion, pos){
+                    if let Some(_) = atoms.get_consumable_type_immediate(motion, pos) {
                         atoms.destroy_atom_at(pos);
                     }
-                },
-                Conduit(atom_teleport,conduit_id) => {
+                }
+                Conduit(atom_teleport, conduit_id) => {
                     if first_half {
-                        let conduit_info = self.conduit_pairs.get_mut(conduit_id).expect("conduit info not found!");
-                        World::conduit_process(atoms, id, atom_teleport, glyph.pos, conduit_info, motion);
-                    } else if motion.active_glyphs.front() == Some(&id){
-                        while motion.active_glyphs.front() == Some(&id){
+                        let conduit_info = self
+                            .conduit_pairs
+                            .get_mut(conduit_id)
+                            .expect("conduit info not found!");
+                        World::conduit_process(
+                            atoms,
+                            id,
+                            atom_teleport,
+                            glyph.pos,
+                            conduit_info,
+                            motion,
+                        );
+                    } else if motion.active_glyphs.front() == Some(&id) {
+                        while motion.active_glyphs.front() == Some(&id) {
                             motion.active_glyphs.pop_front();
                             pop_make(&mut self.atoms, motion)?;
                         }
                     }
-                },
-                Equilibrium | Track(_) | Input(..) | Output(..) | OutputRepeating(..) => {},
+                }
+                Equilibrium | Track(_) | Input(..) | Output(..) | OutputRepeating(..) => {}
             }
         }
-        if !first_half{
-            assert_eq!((motion.active_glyphs.len(), motion.spawning_atoms.len()), (0,0));
+        if !first_half {
+            assert_eq!(
+                (motion.active_glyphs.len(), motion.spawning_atoms.len()),
+                (0, 0)
+            );
         }
         Ok(())
     }
-    fn conduit_process(atoms: &mut WorldAtoms, glyph_id: usize, positions: &Vec<Pos>, origin: Pos, conduit_info: &mut ConduitInfo, motion: &mut WorldStepInfo){
+    fn conduit_process(
+        atoms: &mut WorldAtoms,
+        glyph_id: usize,
+        positions: &Vec<Pos>,
+        origin: Pos,
+        conduit_info: &mut ConduitInfo,
+        motion: &mut WorldStepInfo,
+    ) {
         let mut viewed_atoms = FxHashSet::<AtomKey>::default();
         let mut check_atoms = VecDeque::<AtomKey>::new();
 
         let mut offset_pos = conduit_info.offset_pos;
         let mut offset_rot = conduit_info.offset_rot;
-        if conduit_info.vecids.0 == glyph_id{
+        if conduit_info.vecids.0 == glyph_id {
             offset_pos *= -1;
-            offset_rot = normalize_dir(offset_rot*-1);
+            offset_rot = normalize_dir(offset_rot * -1);
         } else {
             assert!(conduit_info.vecids.1 == glyph_id, "Conduit invalid vec id");
         }
-        for pos in positions{
+        for pos in positions {
             //For each position on the conduit, if it has an atom on it:
-            if let Some(key) = atoms.locs.get(pos){
+            if let Some(key) = atoms.locs.get(pos) {
                 //Closure to check if all atoms in the molecule are on the conduit
                 let mut atoms_send_check = |first_key: AtomKey| -> bool {
                     check_atoms.push_back(first_key);
-                    while let Some(this_key) = check_atoms.pop_front(){
-                        if viewed_atoms.contains(&this_key) {continue;}
-                        if motion.atoms.contains_key(this_key) {return false;}
+                    while let Some(this_key) = check_atoms.pop_front() {
+                        if viewed_atoms.contains(&this_key) {
+                            continue;
+                        }
+                        if motion.atoms.contains_key(this_key) {
+                            return false;
+                        }
                         viewed_atoms.insert(this_key);
-                        
+
                         let atom = &atoms.atom_map[this_key];
                         for dir in 0..6 {
                             if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
                                 let newpos = atom.pos + rot_to_pos(dir);
-                                if !positions.contains(&newpos) {return false;}
-                                let newkey = *atoms.locs.get(&newpos).expect("Inconsistent atoms (conduits)");
+                                if !positions.contains(&newpos) {
+                                    return false;
+                                }
+                                let newkey = *atoms
+                                    .locs
+                                    .get(&newpos)
+                                    .expect("Inconsistent atoms (conduits)");
                                 check_atoms.push_back(newkey);
                             }
                         }
@@ -1289,10 +1449,10 @@ impl World {
                     return true;
                 };
                 //If the atom was just dropped and all connected are on the conduit, move the atoms to the new position via spawning
-                if motion.drop_conduit_check.contains(key) && atoms_send_check(*key){
-                    for a in &viewed_atoms{
+                if motion.drop_conduit_check.contains(key) && atoms_send_check(*key) {
+                    for a in &viewed_atoms {
                         let mut atom = atoms.take_atom(*a);
-                        atom.pos = rotate_around(atom.pos,offset_rot,origin)+offset_pos;
+                        atom.pos = rotate_around(atom.pos, offset_rot, origin) + offset_pos;
                         atom.rotate_connections(offset_rot);
                         motion.spawning_atoms.push_back(atom);
                         motion.active_glyphs.push_back(glyph_id);
@@ -1304,90 +1464,128 @@ impl World {
         }
     }
 
-    pub fn mark_area_and_collide<'a>(&mut self, float_world: &FloatWorld, spawning_atoms: impl Iterator<Item = &'a Atom>) -> SimResult<()>{
+    pub fn mark_area_and_collide<'a>(
+        &mut self,
+        float_world: &FloatWorld,
+        spawning_atoms: impl Iterator<Item = &'a Atom>,
+    ) -> SimResult<()> {
         //atom radius = 29/41 or 1/sqrt(2)
         //spawning atom = 15/41
         //arm base = 20/41
         //grabber, cabinet = 24/41, 20/41
-        const ATOM_RADIUS: f32 = 29./41.;
-        const ARM_RADIUS: f32 = 20./41.;
-        const SPAWNING_ATOM_RADIUS: f32 = 15./41.;
-        const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS*2.)*(ATOM_RADIUS*2.);
-        const ATOM_ARM_RADIUS_SQUARED: f32 = (ATOM_RADIUS+ARM_RADIUS)*(ATOM_RADIUS+ARM_RADIUS);
-        const ATOM_SPAWN_RADIUS_SQUARED: f32 = (ATOM_RADIUS+SPAWNING_ATOM_RADIUS)*(ATOM_RADIUS+SPAWNING_ATOM_RADIUS);
-        fn make_candidates(primary: Pos) -> [Pos;7]{
+        const ATOM_RADIUS: f32 = 29. / 41.;
+        const ARM_RADIUS: f32 = 20. / 41.;
+        const SPAWNING_ATOM_RADIUS: f32 = 15. / 41.;
+        const ATOM_ATOM_RADIUS_SQUARED: f32 = (ATOM_RADIUS * 2.) * (ATOM_RADIUS * 2.);
+        const ATOM_ARM_RADIUS_SQUARED: f32 =
+            (ATOM_RADIUS + ARM_RADIUS) * (ATOM_RADIUS + ARM_RADIUS);
+        const ATOM_SPAWN_RADIUS_SQUARED: f32 =
+            (ATOM_RADIUS + SPAWNING_ATOM_RADIUS) * (ATOM_RADIUS + SPAWNING_ATOM_RADIUS);
+        fn make_candidates(primary: Pos) -> [Pos; 7] {
             [
                 Pos::new(primary.x, primary.y),
-                Pos::new(primary.x+1, primary.y),
-                Pos::new(primary.x-1, primary.y),
-                Pos::new(primary.x, primary.y+1),
-                Pos::new(primary.x, primary.y-1),
-                Pos::new(primary.x-1, primary.y+1),
-                Pos::new(primary.x+1, primary.y-1),
+                Pos::new(primary.x + 1, primary.y),
+                Pos::new(primary.x - 1, primary.y),
+                Pos::new(primary.x, primary.y + 1),
+                Pos::new(primary.x, primary.y - 1),
+                Pos::new(primary.x - 1, primary.y + 1),
+                Pos::new(primary.x + 1, primary.y - 1),
             ]
         }
-        fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos){
+        fn mark_point(area_set: &mut FxHashSet<Pos>, point: XYPos) {
             let primary = xy_to_simple_pos(point);
             let candidates = make_candidates(primary);
-            for hex in candidates{
-                let distance = nalgebra::distance_squared(&pos_to_xy(hex),&point);
-                if distance < ATOM_ATOM_RADIUS_SQUARED{
+            for hex in candidates {
+                let distance = nalgebra::distance_squared(&pos_to_xy(hex), &point);
+                if distance < ATOM_ATOM_RADIUS_SQUARED {
                     area_set.insert(hex);
                 }
             }
         }
-        fn collide(atom_collisions: &mut FxHashMap<Pos, SmallVec<[XYPos;2]>>, point: XYPos, check_dist:f32, error_str: &'static str) -> SimResult<()>{
+        fn collide(
+            atom_collisions: &mut FxHashMap<Pos, SmallVec<[XYPos; 2]>>,
+            point: XYPos,
+            check_dist: f32,
+            error_str: &'static str,
+        ) -> SimResult<()> {
             let primary = xy_to_simple_pos(point);
             let candidates = make_candidates(primary);
-            for check in candidates{
+            for check in candidates {
                 let possible_vec = atom_collisions.get(&check);
-                if let Some(atoms) = possible_vec{
-                    for atom_point in atoms{
-                        if nalgebra::distance_squared(atom_point,&point) < check_dist {
+                if let Some(atoms) = possible_vec {
+                    for atom_point in atoms {
+                        if nalgebra::distance_squared(atom_point, &point) < check_dist {
                             let error_point = nalgebra::center(atom_point, &point);
-                            return Err(SimError{error_str, location:error_point});
+                            return Err(SimError {
+                                error_str,
+                                location: error_point,
+                            });
                         }
                     }
                 }
             }
             Ok(())
         }
-        let mut atom_collisions = FxHashMap::with_capacity_and_hasher(float_world.atoms_xy.len(),Default::default());
-        for atom in &float_world.atoms_xy{
+        let mut atom_collisions =
+            FxHashMap::with_capacity_and_hasher(float_world.atoms_xy.len(), Default::default());
+        for atom in &float_world.atoms_xy {
             let primary = xy_to_simple_pos(atom.pos);
             mark_point(&mut self.area_touched, atom.pos);
-            collide(&mut atom_collisions, atom.pos, ATOM_ATOM_RADIUS_SQUARED, "atom/atom collision!")?;
-            atom_collisions.entry(primary).or_insert_with(SmallVec::new).push(atom.pos);
+            collide(
+                &mut atom_collisions,
+                atom.pos,
+                ATOM_ATOM_RADIUS_SQUARED,
+                "atom/atom collision!",
+            )?;
+            atom_collisions
+                .entry(primary)
+                .or_insert_with(SmallVec::new)
+                .push(atom.pos);
         }
-        for arm in &float_world.arms_xy{
+        for arm in &float_world.arms_xy {
             mark_point(&mut self.area_touched, arm.pos);
-            collide(&mut atom_collisions, arm.pos, ATOM_ARM_RADIUS_SQUARED,"atom/arm collision!")?;
+            collide(
+                &mut atom_collisions,
+                arm.pos,
+                ATOM_ARM_RADIUS_SQUARED,
+                "atom/arm collision!",
+            )?;
             for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
-                let angle = arm.rot+rot_to_angle(r);
-                let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(arm.len, 0.);
-                mark_point(&mut self.area_touched, arm.pos+offset);
+                let angle = arm.rot + rot_to_angle(r);
+                let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(arm.len, 0.);
+                mark_point(&mut self.area_touched, arm.pos + offset);
                 //arm lengths are doubled in floatworld
-                if arm.len > 3.0{
-                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(2., 0.);
-                    mark_point(&mut self.area_touched, arm.pos+offset);
+                if arm.len > 3.0 {
+                    let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(2., 0.);
+                    mark_point(&mut self.area_touched, arm.pos + offset);
                 }
-                if arm.len > 5.0{
-                    let offset = nalgebra::Rotation2::new(-angle)*XYVec::new(4., 0.);
-                    mark_point(&mut self.area_touched, arm.pos+offset);
+                if arm.len > 5.0 {
+                    let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(4., 0.);
+                    mark_point(&mut self.area_touched, arm.pos + offset);
                 }
             }
         }
-        for spawning_atom in spawning_atoms{
-            collide(&mut atom_collisions, pos_to_xy(spawning_atom.pos), ATOM_SPAWN_RADIUS_SQUARED, "atom/spawning atom collision!")?;
+        for spawning_atom in spawning_atoms {
+            collide(
+                &mut atom_collisions,
+                pos_to_xy(spawning_atom.pos),
+                ATOM_SPAWN_RADIUS_SQUARED,
+                "atom/spawning atom collision!",
+            )?;
         }
         Ok(())
     }
 
-    pub fn run_step(&mut self, mark_area: bool, motion: &mut WorldStepInfo, float_world: &mut FloatWorld) -> SimResult<()> {
+    pub fn run_step(
+        &mut self,
+        mark_area: bool,
+        motion: &mut WorldStepInfo,
+        float_world: &mut FloatWorld,
+    ) -> SimResult<()> {
         self.prepare_step(motion)?;
-        if mark_area{
+        if mark_area {
             let substep_count = self.substep_count(motion);
-            for substep in 0..substep_count{
+            for substep in 0..substep_count {
                 let portion = substep as f32 / substep_count as f32;
                 float_world.regenerate(self, motion, portion);
                 self.mark_area_and_collide(float_world, motion.spawning_atoms.iter())?;
@@ -1405,37 +1603,40 @@ impl World {
         self.process_inputs(motion)?;
         self.process_glyphs(motion, true)?;
         self.process_outputs(motion);
-        
+
         for i in 0..self.arms.len() {
             let position = self.arms[i].pos;
-            for j in i+1..self.arms.len() {
+            for j in i + 1..self.arms.len() {
                 if position == self.arms[j].pos {
                     let location = pos_to_xy(position);
-                    return Err(SimError{location, error_str: &"Arm-Arm collision!"});
+                    return Err(SimError {
+                        location,
+                        error_str: &"Arm-Arm collision!",
+                    });
                 }
             }
         }
         let tmp = motion.atoms.clone();
         motion.atoms.clear();
-        for (atom, movement) in tmp{
+        for (atom, movement) in tmp {
             self.premove_atoms(motion, atom, movement)?;
         }
         motion.recent_bonds.clear();
         Ok(())
     }
-    pub fn substep_count(&self, motion: &WorldStepInfo) -> usize{
-        let mut max_radius:f64 = 1.;
-        for (atom_key, movement) in &motion.atoms{
-            if let Movement::Rotation(_rot, center) = movement{
+    pub fn substep_count(&self, motion: &WorldStepInfo) -> usize {
+        let mut max_radius: f64 = 1.;
+        for (atom_key, movement) in &motion.atoms {
+            if let Movement::Rotation(_rot, center) = movement {
                 let atom_pos = self.atoms.atom_map[atom_key].pos;
-                let distance = nalgebra::distance(&pos_to_xy(atom_pos),&pos_to_xy(*center)) as f64;
+                let distance = nalgebra::distance(&pos_to_xy(atom_pos), &pos_to_xy(*center)) as f64;
                 if max_radius < distance {
                     max_radius = distance;
                 }
             }
         }
         max_radius *= 2.;
-        usize::pow(2,max_radius.log2().round() as u32).max(8)
+        usize::pow(2, max_radius.log2().round() as u32).max(8)
         //usize::max(10, (max_radius*2.0) as usize)
     }
     pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
@@ -1444,7 +1645,7 @@ impl World {
         self.process_glyphs(motion, false)?;
         motion.clear();
         for arm in &self.arms {
-            for atomkey in arm.atoms_grabbed{
+            for atomkey in arm.atoms_grabbed {
                 motion.atoms.insert(atomkey, Movement::HeldStill);
                 //does nothing if atomkey is null
             }
@@ -1455,12 +1656,12 @@ impl World {
         Ok(())
     }
 
-    pub fn is_complete(&self) -> bool{
+    pub fn is_complete(&self) -> bool {
         let mut all_outputs_full = true;
         for g in &self.glyphs {
-            if let GlyphType::Output(_, i,_) = g.glyph_type {
+            if let GlyphType::Output(_, i, _) = g.glyph_type {
                 all_outputs_full &= (i == 0);
-            } else if let GlyphType::OutputRepeating(_, i,_) = g.glyph_type {
+            } else if let GlyphType::OutputRepeating(_, i, _) = g.glyph_type {
                 all_outputs_full &= (i == 0);
             }
         }
@@ -1470,11 +1671,11 @@ impl World {
 
 //Setup stuff
 impl World {
-    fn add_track(track_maps: &mut TrackMaps, track_pos:&Vec<Pos>) -> Result<()> {
+    fn add_track(track_maps: &mut TrackMaps, track_pos: &Vec<Pos>) -> Result<()> {
         ensure!(track_pos.len() > 0, "Track of length 0!");
-        fn try_insert(map: &mut TrackMap, key: Pos, value: Pos){
-            if !map.contains_key(&key){
-                map.insert(key,value);
+        fn try_insert(map: &mut TrackMap, key: Pos, value: Pos) {
+            if !map.contains_key(&key) {
+                map.insert(key, value);
             }
         }
         //first do all except the possible loopback
@@ -1493,26 +1694,21 @@ impl World {
             try_insert(&mut track_maps.plus, last, offset);
         } else {
             //If not looping, block future track overlaps here
-            try_insert(&mut track_maps.minus, first, Pos::new(0,0));
-            try_insert(&mut track_maps.plus, last, Pos::new(0,0));
+            try_insert(&mut track_maps.minus, first, Pos::new(0, 0));
+            try_insert(&mut track_maps.plus, last, Pos::new(0, 0));
         }
         Ok(())
     }
-    fn clean_track(track_maps: &mut TrackMaps){
+    fn clean_track(track_maps: &mut TrackMaps) {
         //Remove {0,0} track offsets that were used to block track overlaps
-        let pos_nil = Pos::new(0,0);
-        track_maps.plus.retain(|_, v|->bool {
-            v != &pos_nil});
-        track_maps.minus.retain(|_, v|->bool {
-            v != &pos_nil});
+        let pos_nil = Pos::new(0, 0);
+        track_maps.plus.retain(|_, v| -> bool { v != &pos_nil });
+        track_maps.minus.retain(|_, v| -> bool { v != &pos_nil });
     }
 
     //modifies the original arm to have the new instructions
     //returns the length of the tape (repetition size)
-    fn normalize_instructions(
-        original: &mut Arm,
-        track_maps: &TrackMaps,
-    ) -> Result<usize> {
+    fn normalize_instructions(original: &mut Arm, track_maps: &TrackMaps) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
         let arm_type = original.arm_type;
@@ -1527,21 +1723,25 @@ impl World {
         let mut len = original.len;
         let mut known_grab = false;
         let mut position_check = original.pos;
-        fn get_track_loop_length(track_map: &TrackMap, pos: Pos) -> Option<i32>{
+        fn get_track_loop_length(track_map: &TrackMap, pos: Pos) -> Option<i32> {
             let mut my_pos = pos;
             let mut loop_length = 0;
-            loop{
+            loop {
                 let offset = track_map.get(&my_pos)?;
                 my_pos += offset;
                 loop_length += 1;
-                if my_pos == pos {return Some(loop_length);}
-                if loop_length as usize > track_map.len() {return None;}
+                if my_pos == pos {
+                    return Some(loop_length);
+                }
+                if loop_length as usize > track_map.len() {
+                    return None;
+                }
             }
         }
         let track_loop = get_track_loop_length(&track_maps.plus, original.pos);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
-            if !any_nonrepeat && !matches!(instr, Repeat | Empty ){
+            if !any_nonrepeat && !matches!(instr, Repeat | Empty) {
                 any_nonrepeat = true;
                 repeat_source = curr;
             }
@@ -1549,8 +1749,8 @@ impl World {
                 instructions.push(instr);
                 curr += 1;
             }
-            let mut basic_move = |instr: Instr|->Result<()>{
-                match instr{
+            let mut basic_move = |instr: Instr| -> Result<()> {
+                match instr {
                     Extend => {
                         if arm_type == Piston && len < 3 {
                             len += 1;
@@ -1570,28 +1770,35 @@ impl World {
                     Grab => known_grab = true,
                     Drop => known_grab = false,
                     Forward => {
-                        if let Some(offset) = track_maps.plus.get(&position_check){
+                        if let Some(offset) = track_maps.plus.get(&position_check) {
                             track_steps += 1;
                             position_check += offset;
                         }
                     }
                     Back => {
-                        if let Some(offset) = track_maps.minus.get(&position_check){
+                        if let Some(offset) = track_maps.minus.get(&position_check) {
                             track_steps -= 1;
                             position_check += offset;
                         }
                     }
                     PivotCounterClockwise | PivotClockwise | Empty => {}
-                    Reset | Repeat | Noop => {bail!("Instruction {:?} not basic move!",instr);}
+                    Reset | Repeat | Noop => {
+                        bail!("Instruction {:?} not basic move!", instr);
+                    }
                 }
                 Ok(())
             };
             match instr {
-                Extend|Retract|
-                RotateCounterClockwise|RotateClockwise|
-                Grab|Drop|
-                Forward|Back|
-                PivotCounterClockwise|PivotClockwise => {
+                Extend
+                | Retract
+                | RotateCounterClockwise
+                | RotateClockwise
+                | Grab
+                | Drop
+                | Forward
+                | Back
+                | PivotCounterClockwise
+                | PivotClockwise => {
                     basic_move(instr)?;
                     repeat_ending = curr;
                 }
@@ -1605,10 +1812,16 @@ impl World {
                     } else {
                         for i in 0..rep_len {
                             let copied_instr = instructions[repeat_source + i];
-                            ensure!( i == 0|| old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
+                            ensure!(
+                                i == 0
+                                    || old_instructions.get(curr + i).unwrap_or(&Empty) == &Empty,
                                 "Repeat instruction {:?} overlaps with {:?} on {}/{}. Repeat {}-{}",
-                                copied_instr,old_instructions.get(curr + i),
-                                curr,i,repeat_source,repeat_ending
+                                copied_instr,
+                                old_instructions.get(curr + i),
+                                curr,
+                                i,
+                                repeat_source,
+                                repeat_ending
                             );
                             instructions.push(copied_instr);
                             basic_move(copied_instr)?;
@@ -1633,8 +1846,12 @@ impl World {
                         reset_vec.push(Retract);
                         len -= 1;
                     }
-                    while rot_diff > 3 {rot_diff -= 6;}
-                    while rot_diff < -3 {rot_diff += 6;}
+                    while rot_diff > 3 {
+                        rot_diff -= 6;
+                    }
+                    while rot_diff < -3 {
+                        rot_diff += 6;
+                    }
                     while rot_diff > 0 {
                         reset_vec.push(RotateClockwise);
                         rot_diff -= 1;
@@ -1645,11 +1862,11 @@ impl World {
                     }
                     // look for a path forward on the track that's shorter than
                     // the path backward.
-                    if let Some(loop_len) = track_loop{
-                        while track_steps > loop_len/2 {
+                    if let Some(loop_len) = track_loop {
+                        while track_steps > loop_len / 2 {
                             track_steps -= loop_len;
                         }
-                        while track_steps < -loop_len/2 {
+                        while track_steps < -loop_len / 2 {
                             track_steps += loop_len
                         }
                     }
@@ -1676,7 +1893,8 @@ impl World {
                             "Reset instruction {:?} overlaps with {:?} on {}/{} (curr {})",
                             reset_vec[i],
                             old_instructions.get(curr + i),
-                            i, reset_vec.len(),
+                            i,
+                            reset_vec.len(),
                             curr,
                         );
                         instructions.push(reset_vec[i]);
@@ -1719,7 +1937,12 @@ impl World {
                 Animismus | Projection | Dispersion | Purification => 20,
                 Duplication | Unification | TriplexBond => 20,
                 MultiBond => 30,
-                Disposal | Equilibrium | Output(_, _,_)| OutputRepeating(_, _,_) | Input(_,_) | Conduit(_,_) => 0,
+                Disposal
+                | Equilibrium
+                | Output(_, _, _)
+                | OutputRepeating(_, _, _)
+                | Input(_, _)
+                | Conduit(_, _) => 0,
                 Track(v) => (v.len() as i32) * 5,
             };
             g.reposition_pattern(); //reposition input/output/conduits
@@ -1736,8 +1959,12 @@ impl World {
                 Piston => 40,
             };
             let instr_len = World::normalize_instructions(a, &world.track_maps)?;
-            world.instruction_count += a.instruction_tape.instructions.iter()
-                .filter(|&&a| a != Instr::Empty).count() as i32;
+            world.instruction_count += a
+                .instruction_tape
+                .instructions
+                .iter()
+                .filter(|&&a| a != Instr::Empty)
+                .count() as i32;
             if world.repeat_length < instr_len {
                 world.repeat_length = instr_len;
             }
@@ -1749,59 +1976,84 @@ impl World {
                     let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
                     let atom_type = ATOM_SETUP[i];
                     let key = world.atoms.create_atom(Atom {
-                        pos, atom_type, connections: [Bonds::NO_BOND; 6], is_berlo: true
+                        pos,
+                        atom_type,
+                        connections: [Bonds::NO_BOND; 6],
+                        is_berlo: true,
                     })?;
                     a.atoms_grabbed[i] = key;
                 }
             }
         }
-        
+
         let mut unfinished_conduit_count = 0;
         for (id, glyph) in world.glyphs.iter_mut().enumerate() {
-            if let GlyphType::Input(meta_pattern,_) = &mut glyph.glyph_type {
+            if let GlyphType::Input(meta_pattern, _) = &mut glyph.glyph_type {
                 let atom_spawn_points = &meta_pattern[0];
-                if atom_spawn_points.iter().all(|a| world.atoms.locs.get(&a.pos) == None){
-                    for a in atom_spawn_points{
+                if atom_spawn_points
+                    .iter()
+                    .all(|a| world.atoms.locs.get(&a.pos) == None)
+                {
+                    for a in atom_spawn_points {
                         world.atoms.create_atom(a.clone())?;
                     }
                     let tmp = meta_pattern.remove(0);
                     meta_pattern.push(tmp);
                 }
             }
-            if let GlyphType::Conduit(_pos,conduit_id) = &glyph.glyph_type {
-                if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id){
-                    ensure!(pair_data.vecids.0 == pair_data.vecids.1,"Conduit {conduit_id} already modified!");
+            if let GlyphType::Conduit(_pos, conduit_id) = &glyph.glyph_type {
+                if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id) {
+                    ensure!(
+                        pair_data.vecids.0 == pair_data.vecids.1,
+                        "Conduit {conduit_id} already modified!"
+                    );
                     pair_data.vecids.1 = id;
                     unfinished_conduit_count -= 1;
                     pair_data.offset_pos -= glyph.pos;
-                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot-glyph.rot);
+                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot - glyph.rot);
                 } else {
-                    let conduit_info = ConduitInfo{
-                        vecids: (id,id), offset_pos: glyph.pos, offset_rot: glyph.rot};
+                    let conduit_info = ConduitInfo {
+                        vecids: (id, id),
+                        offset_pos: glyph.pos,
+                        offset_rot: glyph.rot,
+                    };
                     world.conduit_pairs.insert(*conduit_id, conduit_info);
                     unfinished_conduit_count += 1;
                 }
             }
         }
-        ensure!(unfinished_conduit_count == 0,"Conduits not properly matched!");
+        ensure!(
+            unfinished_conduit_count == 0,
+            "Conduits not properly matched!"
+        );
         world.initial_area()?;
         world.timestep = world.get_first_timestep();
         Ok(world)
     }
-    fn get_first_timestep(&self) -> u64{
-        if self.arms.len() == 0 { return 0 }
-        self.arms.iter().map(|a|a.instruction_tape.first as u64).fold(u64::MAX, std::cmp::min)
+    fn get_first_timestep(&self) -> u64 {
+        if self.arms.len() == 0 {
+            return 0;
+        }
+        self.arms
+            .iter()
+            .map(|a| a.instruction_tape.first as u64)
+            .fold(u64::MAX, std::cmp::min)
     }
     pub fn get_stats(&self) -> SolutionStats {
-        let cycles = (self.timestep-self.get_first_timestep()) as i32;
+        let cycles = (self.timestep - self.get_first_timestep()) as i32;
         let cost = self.cost;
         let area = self.area_touched.len() as i32;
         let instructions = self.instruction_count;
-        SolutionStats {cycles,cost,area,instructions}
+        SolutionStats {
+            cycles,
+            cost,
+            area,
+            instructions,
+        }
     }
 }
 
-pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str){
+pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str) {
     const DEFAULT_PATHS: &str = include_str!("default_paths.txt");
     let mut path_data = DEFAULT_PATHS.lines();
     let base = path_data.next().unwrap();

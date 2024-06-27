@@ -2,10 +2,9 @@ mod parser;
 mod sim;
 
 #[cfg(feature = "color_eyre")]
-use color_eyre::{install, eyre::Result};
+use color_eyre::{eyre::Result, install};
 #[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{install, eyre::Result};
-
+use simple_eyre::{eyre::Result, install};
 
 #[cfg(feature = "benchmark")]
 fn main() -> Result<()> {
@@ -32,7 +31,7 @@ fn main() -> Result<()> {
     println!("Complete! {:?}", stats);*/
     let mut float_world = sim::FloatWorld::new();
     let mut motions = sim::WorldStepInfo::new();
-	loop {
+    loop {
         world.run_step(true, &mut motions, &mut float_world)?;
     }
 }

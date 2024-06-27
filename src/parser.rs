@@ -12,9 +12,9 @@ use simple_eyre::{
 };
 
 use num_traits::FromPrimitive;
+use smallvec::smallvec;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use smallvec::smallvec;
 
 type AllowedParts = u64;
 /*use bitflags::bitflags;
@@ -91,12 +91,12 @@ fn parse_bytepos(f: &mut impl Read) -> Result<Pos> {
 
 fn parse_var_int(f: &mut impl Read) -> Result<usize> {
     let mut acc = 0;
-    loop{
+    loop {
         let dat = parse_byte(f)?;
         acc *= 0x80;
-        acc += (dat&0x7F) as usize;
-        if dat&0x80 == 0{
-            return Ok(acc)
+        acc += (dat & 0x7F) as usize;
+        if dat & 0x80 == 0 {
+            return Ok(acc);
         }
     }
 }
@@ -108,21 +108,26 @@ fn parse_str(f: &mut impl Read) -> Result<String> {
     Ok(String::from_utf8(dat)?)
 }
 
-fn write_byte(f: &mut impl Write, n: u8) -> Result<()>{
+fn write_byte(f: &mut impl Write, n: u8) -> Result<()> {
     f.write_all(&n.to_le_bytes())?;
     Ok(())
 }
-fn write_int(f: &mut impl Write, n: i32) -> Result<()>{
+fn write_int(f: &mut impl Write, n: i32) -> Result<()> {
     f.write_all(&n.to_le_bytes())?;
     Ok(())
 }
-fn write_pos(f: &mut impl Write, p: Pos) -> Result<()>{
+fn write_pos(f: &mut impl Write, p: Pos) -> Result<()> {
     write_int(f, p.x)?;
     write_int(f, p.y)
 }
 fn write_str(f: &mut impl Write, s: &str) -> Result<()> {
     //Instead of writing a byte, should write a var_int
-    ensure!(s.len() < 128, "Write string {:?} too long {:?} > 127", s, s.len());
+    ensure!(
+        s.len() < 128,
+        "Write string {:?} too long {:?} > 127",
+        s,
+        s.len()
+    );
     write_byte(f, s.len() as u8)?;
     f.write_all(s.as_bytes())?;
     Ok(())
@@ -148,12 +153,17 @@ fn parse_stats(f: &mut impl Read) -> Result<Option<SolutionStats>> {
         let area = parse_int(f)?;
         expect_int(f, 3)?;
         let instructions = parse_int(f)?;
-        Ok(Some(SolutionStats { cycles, cost, area, instructions }))
+        Ok(Some(SolutionStats {
+            cycles,
+            cost,
+            area,
+            instructions,
+        }))
     }
 }
 
 fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> {
-    match stats{
+    match stats {
         None => write_int(f, 0)?,
         Some(stats) => {
             write_int(f, 4)?;
@@ -196,31 +206,31 @@ fn name_to_part_type(name: String) -> Result<PartType> {
     use ArmType::*;
     use GlyphType::*;
     Ok(match name.as_str() {
-        "glyph-calcification"  => TGlyph(Calcification),
+        "glyph-calcification" => TGlyph(Calcification),
         "glyph-life-and-death" => TGlyph(Animismus),
-        "glyph-projection"     => TGlyph(Projection),
-        "glyph-dispersion"     => TGlyph(Dispersion),
-        "glyph-purification"   => TGlyph(Purification),
-        "glyph-duplication"    => TGlyph(Duplication),
-        "glyph-unification"    => TGlyph(Unification),
-        "bonder"               => TGlyph(Bonding),
-        "unbonder"             => TGlyph(Unbonding),
-        "bonder-prisma"        => TGlyph(TriplexBond),
-        "bonder-speed"         => TGlyph(MultiBond),
-        "glyph-disposal"       => TGlyph(Disposal),
-        "glyph-marker"         => TGlyph(Equilibrium),
-        "arm1"                 => TArm(PlainArm),
-        "arm2"                 => TArm(DoubleArm),
-        "arm3"                 => TArm(TripleArm),
-        "arm6"                 => TArm(HexArm),
-        "piston"               => TArm(Piston),
-        "baron"                => TArm(VanBerlo),
-        "track"                => TTrack,
-        "input"                => TInput,
-        "out-std"              => TOutput,
-        "out-rep"              => TOutputRep,
-        "pipe"                 => TConduit,
-        _                      => bail!("Arm/Glyph {:?} not recognized", name),
+        "glyph-projection" => TGlyph(Projection),
+        "glyph-dispersion" => TGlyph(Dispersion),
+        "glyph-purification" => TGlyph(Purification),
+        "glyph-duplication" => TGlyph(Duplication),
+        "glyph-unification" => TGlyph(Unification),
+        "bonder" => TGlyph(Bonding),
+        "unbonder" => TGlyph(Unbonding),
+        "bonder-prisma" => TGlyph(TriplexBond),
+        "bonder-speed" => TGlyph(MultiBond),
+        "glyph-disposal" => TGlyph(Disposal),
+        "glyph-marker" => TGlyph(Equilibrium),
+        "arm1" => TArm(PlainArm),
+        "arm2" => TArm(DoubleArm),
+        "arm3" => TArm(TripleArm),
+        "arm6" => TArm(HexArm),
+        "piston" => TArm(Piston),
+        "baron" => TArm(VanBerlo),
+        "track" => TTrack,
+        "input" => TInput,
+        "out-std" => TOutput,
+        "out-rep" => TOutputRep,
+        "pipe" => TConduit,
+        _ => bail!("Arm/Glyph {:?} not recognized", name),
     })
 }
 fn part_type_to_name(part: &PartType) -> Result<&'static str> {
@@ -228,30 +238,30 @@ fn part_type_to_name(part: &PartType) -> Result<&'static str> {
     use GlyphType::*;
     Ok(match part {
         TGlyph(Calcification) => "glyph-calcification",
-        TGlyph(Animismus)     => "glyph-life-and-death",
-        TGlyph(Projection)    => "glyph-projection",
-        TGlyph(Dispersion)    => "glyph-dispersion",
-        TGlyph(Purification)  => "glyph-purification",
-        TGlyph(Duplication)   => "glyph-duplication",
-        TGlyph(Unification)   => "glyph-unification",
-        TGlyph(Bonding)       => "bonder",
-        TGlyph(Unbonding)     => "unbonder",
-        TGlyph(TriplexBond)   => "bonder-prisma",
-        TGlyph(MultiBond)     => "bonder-speed",
-        TGlyph(Disposal)      => "glyph-disposal",
-        TGlyph(Equilibrium)   => "glyph-marker",
-        TArm(PlainArm)        => "arm1",
-        TArm(DoubleArm)       => "arm2",
-        TArm(TripleArm)       => "arm3",
-        TArm(HexArm)          => "arm6",
-        TArm(Piston)          => "piston",
-        TArm(VanBerlo)        => "baron",
-        TTrack                => "track",
-        TInput                => "input",
-        TOutput               => "out-std",
-        TOutputRep            => "out-rep",
-        TConduit              => "pipe",
-        _                     => bail!("Illegal part type {:?} in write attempt!", part),
+        TGlyph(Animismus) => "glyph-life-and-death",
+        TGlyph(Projection) => "glyph-projection",
+        TGlyph(Dispersion) => "glyph-dispersion",
+        TGlyph(Purification) => "glyph-purification",
+        TGlyph(Duplication) => "glyph-duplication",
+        TGlyph(Unification) => "glyph-unification",
+        TGlyph(Bonding) => "bonder",
+        TGlyph(Unbonding) => "unbonder",
+        TGlyph(TriplexBond) => "bonder-prisma",
+        TGlyph(MultiBond) => "bonder-speed",
+        TGlyph(Disposal) => "glyph-disposal",
+        TGlyph(Equilibrium) => "glyph-marker",
+        TArm(PlainArm) => "arm1",
+        TArm(DoubleArm) => "arm2",
+        TArm(TripleArm) => "arm3",
+        TArm(HexArm) => "arm6",
+        TArm(Piston) => "piston",
+        TArm(VanBerlo) => "baron",
+        TTrack => "track",
+        TInput => "input",
+        TOutput => "out-std",
+        TOutputRep => "out-rep",
+        TConduit => "pipe",
+        _ => bail!("Illegal part type {:?} in write attempt!", part),
     })
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
@@ -277,7 +287,10 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         for _ in 0..instruction_count {
             let instr_pos = parse_int(f)? as i32;
             let action = parse_byte(f)?;
-            instructions.push((instr_pos, Instr::from_byte(action).ok_or(eyre!("invalid instruction"))?));
+            instructions.push((
+                instr_pos,
+                Instr::from_byte(action).ok_or(eyre!("invalid instruction"))?,
+            ));
         }
         let tracks = if part_type == PartType::TTrack {
             let track_count = parse_int(f)?;
@@ -290,25 +303,32 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
             None
         };
         let arm_index = parse_int(f)?;
-        let conduit = if part_type == PartType::TConduit{
+        let conduit = if part_type == PartType::TConduit {
             let conduit_id = parse_int(f)?;
             let conduit_count = parse_int(f)?;
             let mut inner_conduits = Vec::new();
             for _ in 0..conduit_count {
                 inner_conduits.push(parse_pos(f)?);
             }
-            Some((conduit_id,inner_conduits))
+            Some((conduit_id, inner_conduits))
         } else {
             None
         };
         solution_output.part_list.push(Part {
-            part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index, conduit
+            part_type,
+            pos,
+            arm_size,
+            rot,
+            input_output_index,
+            instructions,
+            tracks,
+            arm_index,
+            conduit,
         });
     }
     Ok(solution_output)
 }
-pub fn create_solution(world: &World, puzzle_name: String, solution_name: String) -> FullSolution{
+pub fn create_solution(world: &World, puzzle_name: String, solution_name: String) -> FullSolution {
     let stats = None;
     let mut solution_output = FullSolution {
         puzzle_name,
@@ -317,41 +337,46 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         part_list: Vec::new(),
     };
     let part_list = &mut solution_output.part_list;
-    for glyph in &world.glyphs{
+    for glyph in &world.glyphs {
         let rot = glyph.rot;
         let pos = glyph.pos;
         let arm_size = 0;
         let arm_index = 0;
         let instructions = Vec::new();
         //Clone and return points to relative position (absolute position done in setup_sim/reposition_glyph)
-        let (part_type,input_output_index,tracks,conduit ) = match &glyph.glyph_type{
-            GlyphType::Track(track) => {
-                (TTrack, 0, Some(track.iter().map(|x|rotate(x - pos, -rot)).collect()), None)
-            }
-            GlyphType::Input(_,id) => {
-                (TInput, *id, None, None)
-            }
-            GlyphType::Output(_, _,id) => {
-                (TOutput, *id, None, None)
-            }
-            GlyphType::OutputRepeating(_, _,id) => {
-                (TOutputRep, *id, None, None)
-            }
-            GlyphType::Conduit(conduit,id) => {
-                (TConduit, *id, None, Some((*id, conduit.iter().map(|x|rotate(x - pos, -rot)).collect())))
-            }
-            normal_glyph_type => {
-                (TGlyph(normal_glyph_type.clone()), 0, None, None)
-            }
+        let (part_type, input_output_index, tracks, conduit) = match &glyph.glyph_type {
+            GlyphType::Track(track) => (
+                TTrack,
+                0,
+                Some(track.iter().map(|x| rotate(x - pos, -rot)).collect()),
+                None,
+            ),
+            GlyphType::Input(_, id) => (TInput, *id, None, None),
+            GlyphType::Output(_, _, id) => (TOutput, *id, None, None),
+            GlyphType::OutputRepeating(_, _, id) => (TOutputRep, *id, None, None),
+            GlyphType::Conduit(conduit, id) => (
+                TConduit,
+                *id,
+                None,
+                Some((*id, conduit.iter().map(|x| rotate(x - pos, -rot)).collect())),
+            ),
+            normal_glyph_type => (TGlyph(normal_glyph_type.clone()), 0, None, None),
         };
         part_list.push(Part {
-            part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index, conduit
+            part_type,
+            pos,
+            arm_size,
+            rot,
+            input_output_index,
+            instructions,
+            tracks,
+            arm_index,
+            conduit,
         });
     }
     let mut found_first = false;
     let loop_len = world.repeat_length;
-    for (id, arm) in world.arms.iter().enumerate(){
+    for (id, arm) in world.arms.iter().enumerate() {
         let part_type = TArm(arm.arm_type);
         let pos = arm.pos;
         let arm_size = arm.len;
@@ -361,28 +386,35 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         let mut instructions = Vec::new();
         let tape = &arm.instruction_tape;
         let mut step = tape.first as i32;
-        for &instr in &tape.instructions{
-            if instr != Instr::Empty{
-                instructions.push((step,instr));
+        for &instr in &tape.instructions {
+            if instr != Instr::Empty {
+                instructions.push((step, instr));
             }
             step += 1;
         }
-        let target_loop = (loop_len+tape.first) as i32;
-        if !found_first && step < target_loop{
-            instructions.push((target_loop-1,Instr::Noop));
+        let target_loop = (loop_len + tape.first) as i32;
+        if !found_first && step < target_loop {
+            instructions.push((target_loop - 1, Instr::Noop));
             found_first = true;
         }
         let tracks = None;
         let arm_index = id as _;
         let conduit = None;
         part_list.push(Part {
-            part_type, pos, arm_size, rot, input_output_index,
-            instructions, tracks, arm_index, conduit,
+            part_type,
+            pos,
+            arm_size,
+            rot,
+            input_output_index,
+            instructions,
+            tracks,
+            arm_index,
+            conduit,
         });
     }
     solution_output
 }
-pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
+pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
     write_int(f, 7)?;
     write_str(f, &sol.puzzle_name)?;
     write_str(f, &sol.solution_name)?;
@@ -401,15 +433,21 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()>{
             write_byte(f, instr.to_byte())?;
         }
         if let Some(tracks) = &part.tracks {
-            ensure!(part.part_type == PartType::TTrack, "Tracks on non-track piece");
+            ensure!(
+                part.part_type == PartType::TTrack,
+                "Tracks on non-track piece"
+            );
             write_int(f, tracks.len() as i32)?;
             for t in tracks {
                 write_pos(f, *t)?;
             }
         }
         write_int(f, part.arm_index)?;
-        if let Some((id, conduits)) = &part.conduit{
-            ensure!(part.part_type == PartType::TConduit, "Conduits on non-conduit piece");
+        if let Some((id, conduits)) = &part.conduit {
+            ensure!(
+                part.part_type == PartType::TConduit,
+                "Conduits on non-conduit piece"
+            );
             write_int(f, *id)?;
             write_int(f, conduits.len() as i32)?;
             for c in conduits {
@@ -452,7 +490,8 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
         let atom2 = *atom_locs
             .get(&to_pos)
             .ok_or(eyre!("bond2 to nonatom position"))?;
-        let rot = pos_to_rot(atoms[atom2].pos - atoms[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
+        let rot =
+            pos_to_rot(atoms[atom2].pos - atoms[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
         atoms[atom1].connections[rot as usize] = bond_type;
         atoms[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
     }
@@ -472,7 +511,7 @@ fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     for atom in input {
         if atom.atom_type == AtomType::RepeatingOutputMarker {
             output.push(Atom {
-                pos: atom.pos + ((reps-1) * rep_offset),
+                pos: atom.pos + ((reps - 1) * rep_offset),
                 ..*atom
             });
         } else {
@@ -534,7 +573,7 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
         }
         instructions[pos - first] = instr;
     }
-    if first == usize::MAX{
+    if first == usize::MAX {
         first = 0;
     }
     Ok(Tape {
@@ -557,7 +596,10 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TArm(atype) => {
                 let instr = process_instructions(&p.instructions)?;
-                arms.push((Arm::new(p.pos, p.rot, p.arm_size, *atype, instr),p.arm_index));
+                arms.push((
+                    Arm::new(p.pos, p.rot, p.arm_size, *atype, instr),
+                    p.arm_index,
+                ));
             }
             TInput => {
                 let id = p.input_output_index;
@@ -575,29 +617,62 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TOutput => {
                 let id = p.input_output_index;
-                let molecule = puzzle.outputs.get(id as usize)
-                    .ok_or(eyre!("Output  ID {} not found (max {})", id, puzzle.outputs.len()))?;
-                let output_glyph = GlyphType::Output(molecule.clone(), 6 * puzzle.output_multiplier, p.input_output_index);
-                glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
+                let molecule = puzzle.outputs.get(id as usize).ok_or(eyre!(
+                    "Output  ID {} not found (max {})",
+                    id,
+                    puzzle.outputs.len()
+                ))?;
+                let output_glyph = GlyphType::Output(
+                    molecule.clone(),
+                    6 * puzzle.output_multiplier,
+                    p.input_output_index,
+                );
+                glyphs.push(Glyph {
+                    glyph_type: output_glyph,
+                    pos: p.pos,
+                    rot: p.rot,
+                });
             }
             TOutputRep => {
                 let id = p.input_output_index;
-                let molecule = puzzle.outputs.get(id as usize)
-                    .ok_or(eyre!("Output(rep) ID {} not found (max {})",id,puzzle.outputs.len()))?;
+                let molecule = puzzle.outputs.get(id as usize).ok_or(eyre!(
+                    "Output(rep) ID {} not found (max {})",
+                    id,
+                    puzzle.outputs.len()
+                ))?;
                 let repeated_molecule = process_repeats(&molecule[0], 6)?;
-                let output_glyph =
-                    GlyphType::OutputRepeating(repeated_molecule, 6 * puzzle.output_multiplier, p.input_output_index);
-                glyphs.push(Glyph {glyph_type: output_glyph, pos: p.pos, rot: p.rot });
+                let output_glyph = GlyphType::OutputRepeating(
+                    repeated_molecule,
+                    6 * puzzle.output_multiplier,
+                    p.input_output_index,
+                );
+                glyphs.push(Glyph {
+                    glyph_type: output_glyph,
+                    pos: p.pos,
+                    rot: p.rot,
+                });
             }
             TTrack => {
-                let tracks = p.tracks.clone()
+                let tracks = p
+                    .tracks
+                    .clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
-                glyphs.push(Glyph {glyph_type: GlyphType::Track(tracks), pos: p.pos, rot: p.rot });
+                glyphs.push(Glyph {
+                    glyph_type: GlyphType::Track(tracks),
+                    pos: p.pos,
+                    rot: p.rot,
+                });
             }
             TConduit => {
-                let conduits = p.conduit.clone()
+                let conduits = p
+                    .conduit
+                    .clone()
                     .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
-                glyphs.push(Glyph {glyph_type: GlyphType::Conduit(conduits.1, conduits.0), pos: p.pos, rot: p.rot });
+                glyphs.push(Glyph {
+                    glyph_type: GlyphType::Conduit(conduits.1, conduits.0),
+                    pos: p.pos,
+                    rot: p.rot,
+                });
             }
         }
     }
