@@ -228,6 +228,7 @@ pub fn rotate_around(pos: Pos, angle: Rot, pivot: Pos) -> Pos {
 }
 
 bitflags! {
+    #[derive(PartialEq, Eq, Debug, Clone, Copy)]
     pub struct Bonds: u8 {
         const NO_BOND     =0b0000_0000;
         const NORMAL      =0b0000_0001;
