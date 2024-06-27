@@ -22,15 +22,18 @@ fn main() -> Result<()> {
     let init = parser::puzzle_prep(&puzzle, &sol)?;
 
     let mut world = sim::World::setup_sim(&init)?;
-    /*while !world.is_complete() {
-        world.run_step()?
+    let mut float_world = sim::FloatWorld::new();
+    let mut motions = sim::WorldStepInfo::new();
+    /*
+    while !world.is_complete() {
+        world.run_step(false, &mut motions, &mut float_world)?;
         let stats = world.get_stats();
         println!("Step {:03}", stats.cycles);
     }
     let stats = world.get_stats();
-    println!("Complete! {:?}", stats);*/
-    let mut float_world = sim::FloatWorld::new();
-    let mut motions = sim::WorldStepInfo::new();
+    println!("Complete! {:?}", stats);
+    Ok(())
+    */
     loop {
         world.run_step(true, &mut motions, &mut float_world)?;
     }
