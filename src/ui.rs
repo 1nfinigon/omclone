@@ -547,7 +547,7 @@ impl EventHandler for MyMiniquadApp {
                         });
                     }
                     {
-                        let mut arm_window = egui::Window::new("Arms");
+                        let arm_window = egui::Window::new("Arms");
                         #[cfg(not(feature = "editor_ui"))]{
                             arm_window = arm_window.default_open(false);
                         }
@@ -617,7 +617,7 @@ impl EventHandler for MyMiniquadApp {
                                         };
                                         ui.horizontal(|ui| {
                                             ui.label(format!("{:02}",a_num+1));
-                                            let mut line_edit = egui::TextEdit::singleline(&mut text_buf)
+                                            let line_edit = egui::TextEdit::singleline(&mut text_buf)
                                             .code_editor().desired_width(f32::INFINITY);
                                             #[cfg(not(feature = "editor_ui"))]{
                                                 line_edit = line_edit.interactive(false);
