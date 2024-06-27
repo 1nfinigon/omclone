@@ -54,7 +54,7 @@ smallvec = "1.10"
 
 egui = {version = "0.27", optional = true}
 miniquad = { version = "0.4", optional = true}
-fontdue = { version = "0.7", optional = true}
+fontdue = { version = "0.9", optional = true}
 #egui-miniquad = {version = "0.14", optional = true}
 egui-miniquad = { git = "https://github.com/sornas/egui-miniquad", rev="cf599784e20322d335f53f6b678948b4d43c6776", optional = true }
 image = {version = "0.24.6", optional = true, default-features = false, features = ["png"]}
