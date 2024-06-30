@@ -661,6 +661,7 @@ dependencies = [
  "miniquad",
  "nalgebra",
  "num-traits",
+ "omnn_feature",
  "rustc-hash",
  "sapp-jsutils",
  "simple-eyre",
@@ -668,6 +669,22 @@ dependencies = [
  "smallvec",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "omnn_feature"
+version = "0.1.0"
+dependencies = [
+ "omnn_feature_derive",
+]
+
+[[package]]
+name = "omnn_feature_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

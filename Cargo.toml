@@ -6,22 +6,30 @@ default-run = "omclone"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["editor_ui"]
-#choose one of the following
+default = []
 benchmark = []
 editor_ui = ["display_ui"]
 display_ui = ["egui", "miniquad", "egui-miniquad", "image", "fontdue"]
 bindgen = ["wasm-bindgen","web-sys","console_error_panic_hook"]
+color_eyre = ["color-eyre"]
 
 [[bin]]
 name="omclone"
-required-features = ["display_ui"]
+required-features = ["display_ui", "editor_ui"]
 path = "src/main.rs"
 
 [[bin]]
 name="omclone_benchmark"
 required-features = ["benchmark"]
 path = "src/benchmark.rs"
+
+[[bin]]
+name="nn"
+path = "src/nn.rs"
+
+[[bin]]
+name="synth"
+path = "src/synth.rs"
 
 #[lib]
 #crate-type = ["cdylib"]
@@ -65,3 +73,5 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 
 color-eyre = {version = "0.6", optional = true}
 simple-eyre = "0.3"
+
+omnn_feature = { path = "./omnn_feature" }

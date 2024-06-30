@@ -475,9 +475,9 @@ pub struct World {
     pub track_maps: TrackMaps,
     pub cost: i32,
     pub instruction_count: i32,
-    pub conduit_pairs: ContuitPairMap,
+    pub conduit_pairs: ConduitPairMap,
 }
-type ContuitPairMap = FxHashMap<i32, ConduitInfo>;
+type ConduitPairMap = FxHashMap<i32, ConduitInfo>;
 new_key_type! { pub struct AtomKey; }
 #[derive(Debug, Clone)]
 pub struct WorldAtoms {

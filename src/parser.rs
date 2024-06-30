@@ -56,43 +56,47 @@ fn expect_arr<const N: usize>(f: &mut impl Read, expected: [u8; N]) -> Result<()
     );
     Ok(())
 }
-fn expect_byte(f: &mut impl Read, expected: u8) -> Result<()> {
+fn expect_u8(f: &mut impl Read, expected: u8) -> Result<()> {
     expect_arr(f, expected.to_le_bytes())
 }
-fn expect_int(f: &mut impl Read, expected: i32) -> Result<()> {
+fn expect_i32(f: &mut impl Read, expected: i32) -> Result<()> {
     expect_arr(f, expected.to_le_bytes())
 }
 
-fn parse_byte(f: &mut impl Read) -> Result<u8> {
+fn parse_u8(f: &mut impl Read) -> Result<u8> {
     let mut dat = [0u8; 1];
     f.read_exact(&mut dat)?;
-    Ok(dat[0])
+    Ok(u8::from_le_bytes(dat))
 }
-fn parse_int(f: &mut impl Read) -> Result<i32> {
+fn parse_i8(f: &mut impl Read) -> Result<i8> {
+    let mut dat = [0u8; 1];
+    f.read_exact(&mut dat)?;
+    Ok(i8::from_le_bytes(dat))
+}
+fn parse_i32(f: &mut impl Read) -> Result<i32> {
     let mut dat = [0u8; 4];
     f.read_exact(&mut dat)?;
     Ok(i32::from_le_bytes(dat))
 }
-fn parse_long(f: &mut impl Read) -> Result<u64> {
+fn parse_u64(f: &mut impl Read) -> Result<u64> {
     let mut dat = [0u8; 8];
     f.read_exact(&mut dat)?;
     Ok(u64::from_le_bytes(dat))
 }
 fn parse_pos(f: &mut impl Read) -> Result<Pos> {
-    let x = parse_int(f)?;
-    let y = parse_int(f)?;
+    let x = parse_i32(f)?;
+    let y = parse_i32(f)?;
     Ok(Pos::new(x, y))
 }
 fn parse_bytepos(f: &mut impl Read) -> Result<Pos> {
-    let x = (parse_byte(f)? as i8) as i32;
-    let y = (parse_byte(f)? as i8) as i32;
+    let x = parse_i8(f)? as i32;
+    let y = parse_i8(f)? as i32;
     Ok(Pos::new(x, y))
 }
-
-fn parse_var_int(f: &mut impl Read) -> Result<usize> {
+fn parse_leb128(f: &mut impl Read) -> Result<usize> {
     let mut acc = 0;
     loop {
-        let dat = parse_byte(f)?;
+        let dat = parse_u8(f)?;
         acc *= 0x80;
         acc += (dat & 0x7F) as usize;
         if dat & 0x80 == 0 {
@@ -101,34 +105,54 @@ fn parse_var_int(f: &mut impl Read) -> Result<usize> {
     }
 }
 fn parse_str(f: &mut impl Read) -> Result<String> {
-    let length = parse_var_int(f)?;
+    let length = parse_leb128(f)?;
     let mut dat = vec![0; length as usize];
     f.read_exact(&mut dat)?;
     //Have to re-wrap to convert to anyhow error
     Ok(String::from_utf8(dat)?)
 }
 
-fn write_byte(f: &mut impl Write, n: u8) -> Result<()> {
+fn write_u8(f: &mut impl Write, n: u8) -> Result<()> {
     f.write_all(&n.to_le_bytes())?;
     Ok(())
 }
-fn write_int(f: &mut impl Write, n: i32) -> Result<()> {
+fn write_i8(f: &mut impl Write, n: i8) -> Result<()> {
+    f.write_all(&n.to_le_bytes())?;
+    Ok(())
+}
+fn write_i32(f: &mut impl Write, n: i32) -> Result<()> {
+    f.write_all(&n.to_le_bytes())?;
+    Ok(())
+}
+fn write_u64(f: &mut impl Write, n: u64) -> Result<()> {
     f.write_all(&n.to_le_bytes())?;
     Ok(())
 }
 fn write_pos(f: &mut impl Write, p: Pos) -> Result<()> {
-    write_int(f, p.x)?;
-    write_int(f, p.y)
+    write_i32(f, p.x)?;
+    write_i32(f, p.y)?;
+    Ok(())
+}
+fn write_bytepos(f: &mut impl Write, p: Pos) -> Result<()> {
+    write_i8(f, p.x.try_into()?)?;
+    write_i8(f, p.y.try_into()?)?;
+    Ok(())
+}
+fn write_leb128(f: &mut impl Write, mut n: usize) -> Result<()> {
+    loop {
+        let mut this = n % 0x80;
+        n /= 0x80;
+        if n != 0 {
+            this |= 0x80;
+        }
+        write_u8(f, this.try_into()?)?;
+        if n == 0 {
+            return Ok(());
+        }
+    }
 }
 fn write_str(f: &mut impl Write, s: &str) -> Result<()> {
-    //Instead of writing a byte, should write a var_int
-    ensure!(
-        s.len() < 128,
-        "Write string {:?} too long {:?} > 127",
-        s,
-        s.len()
-    );
-    write_byte(f, s.len() as u8)?;
+    write_leb128(f, s.len())?;
     f.write_all(s.as_bytes())?;
     Ok(())
 }
@@ -141,18 +165,18 @@ pub struct FullSolution {
 }
 
 fn parse_stats(f: &mut impl Read) -> Result<Option<SolutionStats>> {
-    let finished = parse_int(f)?;
+    let finished = parse_i32(f)?;
     if finished == 0 {
         Ok(None)
     } else {
-        expect_int(f, 0)?;
-        let cycles = parse_int(f)?;
-        expect_int(f, 1)?;
-        let cost = parse_int(f)?;
-        expect_int(f, 2)?;
-        let area = parse_int(f)?;
-        expect_int(f, 3)?;
-        let instructions = parse_int(f)?;
+        expect_i32(f, 0)?;
+        let cycles = parse_i32(f)?;
+        expect_i32(f, 1)?;
+        let cost = parse_i32(f)?;
+        expect_i32(f, 2)?;
+        let area = parse_i32(f)?;
+        expect_i32(f, 3)?;
+        let instructions = parse_i32(f)?;
         Ok(Some(SolutionStats {
             cycles,
             cost,
@@ -164,17 +188,17 @@ fn parse_stats(f: &mut impl Read) -> Result<Option<SolutionStats>> {
 
 fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> {
     match stats {
-        None => write_int(f, 0)?,
+        None => write_i32(f, 0)?,
         Some(stats) => {
-            write_int(f, 4)?;
-            write_int(f, 0)?;
-            write_int(f, stats.cycles)?;
-            write_int(f, 1)?;
-            write_int(f, stats.cost)?;
-            write_int(f, 2)?;
-            write_int(f, stats.area)?;
-            write_int(f, 3)?;
-            write_int(f, stats.instructions)?;
+            write_i32(f, 4)?;
+            write_i32(f, 0)?;
+            write_i32(f, stats.cycles)?;
+            write_i32(f, 1)?;
+            write_i32(f, stats.cost)?;
+            write_i32(f, 2)?;
+            write_i32(f, stats.area)?;
+            write_i32(f, 3)?;
+            write_i32(f, stats.instructions)?;
         }
     }
     Ok(())
@@ -265,7 +289,7 @@ fn part_type_to_name(part: &PartType) -> Result<&'static str> {
     })
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
-    expect_int(f, 7)?;
+    expect_i32(f, 7)?;
     let puzzle_name = parse_str(f)?;
     let solution_name = parse_str(f)?;
     let stats = parse_stats(f)?;
@@ -275,25 +299,25 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         stats,
         part_list: Vec::new(),
     };
-    for _ in 0..parse_int(f)? {
+    for _ in 0..parse_i32(f)? {
         let part_type = name_to_part_type(parse_str(f)?)?;
-        expect_byte(f, 1)?;
+        expect_u8(f, 1)?;
         let pos = parse_pos(f)?;
-        let arm_size = parse_int(f)?;
-        let rot = parse_int(f)?;
-        let input_output_index = parse_int(f)?;
-        let instruction_count = parse_int(f)?;
+        let arm_size = parse_i32(f)?;
+        let rot = parse_i32(f)?;
+        let input_output_index = parse_i32(f)?;
+        let instruction_count = parse_i32(f)?;
         let mut instructions = Vec::new();
         for _ in 0..instruction_count {
-            let instr_pos = parse_int(f)? as i32;
-            let action = parse_byte(f)?;
+            let instr_pos = parse_i32(f)? as i32;
+            let action = parse_u8(f)?;
             instructions.push((
                 instr_pos,
                 Instr::from_byte(action).ok_or(eyre!("invalid instruction"))?,
             ));
         }
         let tracks = if part_type == PartType::TTrack {
-            let track_count = parse_int(f)?;
+            let track_count = parse_i32(f)?;
             let mut inner_tracks = Vec::new();
             for _ in 0..track_count {
                 inner_tracks.push(parse_pos(f)?);
@@ -302,10 +326,10 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         } else {
             None
         };
-        let arm_index = parse_int(f)?;
+        let arm_index = parse_i32(f)?;
         let conduit = if part_type == PartType::TConduit {
-            let conduit_id = parse_int(f)?;
-            let conduit_count = parse_int(f)?;
+            let conduit_id = parse_i32(f)?;
+            let conduit_count = parse_i32(f)?;
             let mut inner_conduits = Vec::new();
             for _ in 0..conduit_count {
                 inner_conduits.push(parse_pos(f)?);
@@ -415,41 +439,41 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
     solution_output
 }
 pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
-    write_int(f, 7)?;
+    write_i32(f, 7)?;
     write_str(f, &sol.puzzle_name)?;
     write_str(f, &sol.solution_name)?;
     write_stats(f, &sol.stats)?;
-    write_int(f, sol.part_list.len() as i32)?;
+    write_i32(f, sol.part_list.len() as i32)?;
     for part in &sol.part_list {
         write_str(f, part_type_to_name(&part.part_type)?)?;
-        write_byte(f, 1)?;
+        write_u8(f, 1)?;
         write_pos(f, part.pos)?;
-        write_int(f, part.arm_size)?;
-        write_int(f, part.rot)?;
-        write_int(f, part.input_output_index)?;
-        write_int(f, part.instructions.len() as i32)?;
+        write_i32(f, part.arm_size)?;
+        write_i32(f, part.rot)?;
+        write_i32(f, part.input_output_index)?;
+        write_i32(f, part.instructions.len() as i32)?;
         for (instr_pos, instr) in &part.instructions {
-            write_int(f, *instr_pos)?;
-            write_byte(f, instr.to_byte())?;
+            write_i32(f, *instr_pos)?;
+            write_u8(f, instr.to_byte())?;
         }
         if let Some(tracks) = &part.tracks {
             ensure!(
                 part.part_type == PartType::TTrack,
                 "Tracks on non-track piece"
             );
-            write_int(f, tracks.len() as i32)?;
+            write_i32(f, tracks.len() as i32)?;
             for t in tracks {
                 write_pos(f, *t)?;
             }
         }
-        write_int(f, part.arm_index)?;
+        write_i32(f, part.arm_index)?;
         if let Some((id, conduits)) = &part.conduit {
             ensure!(
                 part.part_type == PartType::TConduit,
                 "Conduits on non-conduit piece"
             );
-            write_int(f, *id)?;
-            write_int(f, conduits.len() as i32)?;
+            write_i32(f, *id)?;
+            write_i32(f, conduits.len() as i32)?;
             for c in conduits {
                 write_pos(f, *c)?;
             }
@@ -471,16 +495,16 @@ pub struct FullPuzzle {
 fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
     let mut atoms = Vec::new();
     let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
-    for i in 0..(parse_int(f)? as usize) {
-        let atom_type = AtomType::from_u8(parse_byte(f)?).ok_or(eyre!("Illegal atom type"))?;
+    for i in 0..(parse_i32(f)? as usize) {
+        let atom_type = AtomType::from_u8(parse_u8(f)?).ok_or(eyre!("Illegal atom type"))?;
         let pos = parse_bytepos(f)?;
         atoms.push(Atom::new(pos, atom_type));
         let check = atom_locs.insert(pos, i);
         ensure!(check == None, "Multiple atoms in same location!");
     }
     //bonds
-    for _ in 0..parse_int(f)? {
-        let bond_type = Bonds::from_bits(parse_byte(f)?).ok_or(eyre!("Illegal bond type"))?;
+    for _ in 0..parse_i32(f)? {
+        let bond_type = Bonds::from_bits(parse_u8(f)?).ok_or(eyre!("Illegal bond type"))?;
         let from_pos = parse_bytepos(f)?;
         let to_pos = parse_bytepos(f)?;
 
@@ -497,6 +521,44 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
     }
     let final_output = smallvec![atoms];
     Ok(final_output)
+}
+fn write_molecule(f: &mut impl Write, molecule: &AtomPattern) -> Result<()> {
+    ensure!(molecule.len() == 1, "Multiple input variants not supported when saving");
+    let atoms = &molecule[0];
+    let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
+    write_i32(f, atoms.len().try_into()?)?;
+    for (i, atom) in atoms.into_iter().enumerate() {
+        use num_traits::ToPrimitive;
+        write_u8(f, atom.atom_type.to_u8().ok_or(eyre!("invalid atom type"))?)?;
+        write_bytepos(f, atom.pos)?;
+        atom_locs.insert(atom.pos, i);
+    }
+    let mut bonds: HashMap<(Pos, Pos), Bonds> = HashMap::new();
+    for atom1_idx in 0..atoms.len() {
+        for angle in 0..6 {
+            let bond_type = atoms[atom1_idx].connections[angle as usize];
+            if !bond_type.is_empty() {
+                let mut from_pos = atoms[atom1_idx].pos;
+                let mut to_pos = atoms[atom1_idx].pos + rot_to_pos(angle);
+                let atom2_idx = *atom_locs.get(&to_pos).ok_or(eyre!("bond to nonatom position"))?;
+                ensure!(atoms[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type);
+                if (from_pos.x, from_pos.y) > (to_pos.x, to_pos.y) {
+                    std::mem::swap(&mut from_pos, &mut to_pos);
+                }
+                ensure!(from_pos != to_pos, "bond to same location");
+                if let Some(old_value) = bonds.insert((from_pos, to_pos), bond_type) {
+                    ensure!(old_value == bond_type, "inconsistent bond types");
+                }
+            }
+        }
+    }
+    write_i32(f, bonds.len().try_into()?)?;
+    for ((from_pos, to_pos), bond_type) in bonds {
+        write_u8(f, bond_type.bits())?;
+        write_bytepos(f, from_pos)?;
+        write_bytepos(f, to_pos)?;
+    }
+    Ok(())
 }
 fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     let mut rep_offset = None;
@@ -527,22 +589,22 @@ fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
 }
 
 pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
-    expect_int(f, 3)?;
+    expect_i32(f, 3)?;
     let puzzle_name = parse_str(f)?;
-    let creator_id = parse_long(f)?;
-    let bitfield_base = parse_long(f)?;
+    let creator_id = parse_u64(f)?;
+    let bitfield_base = parse_u64(f)?;
     let allowed_bitfield = bitfield_base; /*AllowedParts::from_bits(bitfield_base)
                                           .ok_or(eyre!("allowed parts bitfield error: {:b}",bitfield_base))?;*/
     let mut inputs = Vec::new();
-    for _ in 0..parse_int(f)? {
+    for _ in 0..parse_i32(f)? {
         inputs.push(parse_molecule(f)?)
     }
     let mut outputs = Vec::new();
-    for _ in 0..parse_int(f)? {
+    for _ in 0..parse_i32(f)? {
         outputs.push(parse_molecule(f)?)
     }
-    let output_multiplier = parse_int(f)?;
-    let production = parse_byte(f)? != 0;
+    let output_multiplier = parse_i32(f)?;
+    let production = parse_u8(f)? != 0;
     //TODO: if production is true, read their stuff
     let puzzle_output = FullPuzzle {
         puzzle_name,
@@ -555,6 +617,39 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     };
     Ok(puzzle_output)
 }
+
+pub fn write_puzzle(f: &mut impl Write, puzzle: &FullPuzzle) -> Result<()> {
+    let FullPuzzle {
+        puzzle_name,
+        creator_id,
+        allowed_bitfield,
+        inputs,
+        outputs,
+        output_multiplier,
+        production,
+    } = puzzle;
+
+    write_i32(f, 3)?;
+    write_str(f, puzzle_name)?;
+    write_u64(f, *creator_id)?;
+    write_u64(f, *allowed_bitfield)?;
+
+    write_i32(f, inputs.len().try_into()?)?;
+    for input in inputs {
+        write_molecule(f, input)?;
+    }
+
+    write_i32(f, outputs.len().try_into()?)?;
+    for output in outputs {
+        write_molecule(f, output)?;
+    }
+
+    write_i32(f, *output_multiplier)?;
+    write_u8(f, if *production { 1 } else { 0 })?;
+    //TODO: if production is true, write their stuff
+    Ok(())
+}
+
 fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
     let mut first = usize::MAX; //A giant value
     let mut instructions = Vec::new();
