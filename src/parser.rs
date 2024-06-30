@@ -16,34 +16,33 @@ use smallvec::smallvec;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-type AllowedParts = u64;
-/*use bitflags::bitflags;
+use bitflags::bitflags;
 bitflags! {
     #[repr(transparent)]
     struct AllowedParts: u64 {
-        const ALLOW_ARM                 = 1<<0 ;
-        const ALLOW_MULTIARM            = 1<<1 ;
-        const ALLOW_PISTON              = 1<<2 ;
-        const ALLOW_TRACK               = 1<<3 ;
-        const ALLOW_BONDER              = 1<<7 ;
-        const ALLOW_UNBONDER            = 1<<8 ;
-        const ALLOW_MULTIBONDER         = 1<<9 ;
-        const ALLOW_TRIPLEX_BONDER      = 1<<10;
-        const ALLOW_CALCIFICATION       = 1<<11;
-        const ALLOW_DUPLICATION         = 1<<12;
-        const ALLOW_PROJECTION          = 1<<13;
-        const ALLOW_PURIFICATION        = 1<<14;
-        const ALLOW_ANIMISMUS           = 1<<15;
-        const ALLOW_DISPOSAL            = 1<<16;
-        const ALLOW_QUINTESSENCE_GLYPHS = 1<<17;
-        const ALLOW_GRAB_AND_ROTATION   = 1<<22;
-        const ALLOW_DROP                = 1<<23;
-        const ALLOW_RESET               = 1<<24;
-        const ALLOW_REPEAT              = 1<<25;
-        const ALLOW_PIVOT               = 1<<26;
-        const ALLOW_BERLOS_WHEEL        = 1<<28;
+        const ALLOW_ARM                  = 1<<0 ;
+        const ALLOW_MULTIARM_EQUILIBRIUM = 1<<1 ;
+        const ALLOW_PISTON               = 1<<2 ;
+        const ALLOW_TRACK                = 1<<3 ;
+        const ALLOW_BONDER               = 1<<8 ;
+        const ALLOW_UNBONDER             = 1<<9 ;
+        const ALLOW_MULTIBONDER          = 1<<10;
+        const ALLOW_TRIPLEX_BONDER       = 1<<11;
+        const ALLOW_CALCIFICATION        = 1<<12;
+        const ALLOW_DUPLICATION          = 1<<13;
+        const ALLOW_PROJECTION           = 1<<14;
+        const ALLOW_PURIFICATION         = 1<<15;
+        const ALLOW_ANIMISMUS            = 1<<16;
+        const ALLOW_DISPOSAL             = 1<<17;
+        const ALLOW_QUINTESSENCE_GLYPHS  = 1<<18;
+        const ALLOW_DROP_AND_ROTATION    = 1<<22;
+        const ALLOW_GRAB                 = 1<<23;
+        const ALLOW_RESET                = 1<<24;
+        const ALLOW_REPEAT_NOOP          = 1<<25;
+        const ALLOW_PIVOT                = 1<<26;
+        const ALLOW_BERLOS_WHEEL         = 1<<28;
     }
-}*/
+}
 
 fn expect_arr<const N: usize>(f: &mut impl Read, expected: [u8; N]) -> Result<()> {
     let mut dat = [0u8; N];
@@ -485,7 +484,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
 pub struct FullPuzzle {
     pub puzzle_name: String,
     pub creator_id: u64,
-    pub allowed_bitfield: AllowedParts,
+    pub allowed_parts: AllowedParts,
     pub inputs: Vec<AtomPattern>,
     pub outputs: Vec<AtomPattern>,
     pub output_multiplier: i32,
@@ -592,9 +591,10 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     expect_i32(f, 3)?;
     let puzzle_name = parse_str(f)?;
     let creator_id = parse_u64(f)?;
-    let bitfield_base = parse_u64(f)?;
-    let allowed_bitfield = bitfield_base; /*AllowedParts::from_bits(bitfield_base)
-                                          .ok_or(eyre!("allowed parts bitfield error: {:b}",bitfield_base))?;*/
+    let allowed_parts = parse_u64(f)?;
+    let allowed_parts =
+        AllowedParts::from_bits(allowed_parts)
+        .ok_or(eyre!("allowed parts bitfield error: {:b}", allowed_parts))?;
     let mut inputs = Vec::new();
     for _ in 0..parse_i32(f)? {
         inputs.push(parse_molecule(f)?)
@@ -609,7 +609,7 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     let puzzle_output = FullPuzzle {
         puzzle_name,
         creator_id,
-        allowed_bitfield,
+        allowed_parts,
         inputs,
         outputs,
         output_multiplier,
@@ -622,7 +622,7 @@ pub fn write_puzzle(f: &mut impl Write, puzzle: &FullPuzzle) -> Result<()> {
     let FullPuzzle {
         puzzle_name,
         creator_id,
-        allowed_bitfield,
+        allowed_parts,
         inputs,
         outputs,
         output_multiplier,
@@ -632,7 +632,7 @@ pub fn write_puzzle(f: &mut impl Write, puzzle: &FullPuzzle) -> Result<()> {
     write_i32(f, 3)?;
     write_str(f, puzzle_name)?;
     write_u64(f, *creator_id)?;
-    write_u64(f, *allowed_bitfield)?;
+    write_u64(f, allowed_parts.bits())?;
 
     write_i32(f, inputs.len().try_into()?)?;
     for input in inputs {
