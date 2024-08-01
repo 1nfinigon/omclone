@@ -589,14 +589,19 @@ impl WorldAtoms {
     }
 }
 
+/// Contains information about what changes during the current timestep,
+/// including motion information.
 pub struct WorldStepInfo {
     pub atoms: SecondaryMap<AtomKey, Movement>,
     pub arms: Vec<ArmMovement>,
     pub spawning_atoms: VecDeque<Atom>,
     pub recent_bonds: FxHashSet<AtomKey>,
-    pub drop_conduit_check: FxHashSet<AtomKey>, //contains one entry per arm
-    pub active_glyphs: VecDeque<usize>, //When glyph is a conduit, repeat for number of atoms sent
+    /// Contains one entry per arm
+    pub drop_conduit_check: FxHashSet<AtomKey>,
+    /// When glyph is a conduit, repeat for number of atoms sent
+    pub active_glyphs: VecDeque<usize>,
 }
+
 impl WorldStepInfo {
     pub fn new() -> Self {
         WorldStepInfo {
@@ -628,6 +633,7 @@ pub struct SolutionStats {
 
 pub type XYPos = Point2<f32>;
 pub type XYVec = Vector2<f32>;
+
 #[derive(Debug, Copy, Clone)]
 pub struct FloatAtom {
     pub pos: XYPos,
@@ -645,6 +651,8 @@ impl From<&Atom> for FloatAtom {
         };
     }
 }
+
+/// Float view of arm
 pub struct FloatArm {
     pub pos: XYPos,
     pub rot: f32,
@@ -652,12 +660,15 @@ pub struct FloatArm {
     pub arm_type: ArmType,
     pub grabbing: bool,
 }
+
+/// Float view of the world, required to simulate collisions
 pub struct FloatWorld {
     //Might add arms, maybe some other animation stuff too
     pub portion: f32,
     pub atoms_xy: Vec<FloatAtom>,
     pub arms_xy: Vec<FloatArm>,
 }
+
 fn pos_to_xy(input: Pos) -> XYPos {
     let a = input.x as f32;
     let b = input.y as f32;
@@ -713,6 +724,8 @@ impl FloatWorld {
             arms_xy: Vec::new(),
         }
     }
+
+    /// Sets `self` to the float view of `world`, with `motion` lerped by `portion`.
     pub fn regenerate(&mut self, world: &World, motion: &WorldStepInfo, portion: f32) {
         self.arms_xy.clear();
         self.atoms_xy.clear();
@@ -770,6 +783,8 @@ impl FloatWorld {
             self.arms_xy.push(new_arm);
         }
     }
+
+    /// Sets `self` to the float view of `world`, without motion information.
     pub fn generate_static(&mut self, world: &World) {
         self.arms_xy.clear();
         self.atoms_xy.clear();
@@ -798,9 +813,9 @@ impl FloatWorld {
     }
 }
 
-//Running the world
+/// Running the world
 impl World {
-    //sets up a move for the specified atom and all atoms connected to it
+    /// Sets up a move for the specified atom and all atoms connected to it
     fn premove_atoms(
         &self,
         motion: &mut WorldStepInfo,
@@ -837,7 +852,7 @@ impl World {
         Ok(())
     }
 
-    //Finalize atom movement
+    /// Finalize atom movement
     fn apply_motion(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
         for i in 0..self.arms.len() {
             self.arms[i].do_motion(motion.arms[i]);
@@ -870,7 +885,7 @@ impl World {
         Ok(())
     }
 
-    //Returns the movement the arm is going to do. Returns size of the largest molecule rotated
+    /// Performs an instruction for a single arm.
     fn do_instruction(
         &mut self,
         motion: &mut WorldStepInfo,
@@ -1052,6 +1067,7 @@ impl World {
         }
         Ok(())
     }
+
     fn process_inputs(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
@@ -1075,6 +1091,7 @@ impl World {
         }
         Ok(())
     }
+
     fn process_outputs(&mut self, motion: &mut WorldStepInfo) {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
@@ -1124,6 +1141,7 @@ impl World {
             }
         }
     }
+
     fn process_glyphs(&mut self, motion: &mut WorldStepInfo, first_half: bool) -> SimResult<()> {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
             let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
@@ -1398,6 +1416,7 @@ impl World {
         }
         Ok(())
     }
+
     fn conduit_process(
         atoms: &mut WorldAtoms,
         glyph_id: usize,
@@ -1577,6 +1596,7 @@ impl World {
         Ok(())
     }
 
+    /// Runs one full step of the simulation. `float_world` is only used if `mark_area` is true.
     pub fn run_step(
         &mut self,
         mark_area: bool,
@@ -1595,7 +1615,9 @@ impl World {
         self.finalize_step(motion)?;
         Ok(())
     }
-    //returns the step size to be used for this timestep
+
+    /// Start a simulation step. This overwrites `motion` with information about
+    /// the step.
     pub fn prepare_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         motion.clear();
         for i in 0..self.arms.len() {
@@ -1625,6 +1647,9 @@ impl World {
         motion.recent_bonds.clear();
         Ok(())
     }
+
+    /// Returns the substep count to be used for the current step, i.e. how many
+    /// intermediate timesteps should be checked.
     pub fn substep_count(&self, motion: &WorldStepInfo) -> usize {
         let mut max_radius: f64 = 1.;
         for (atom_key, movement) in &motion.atoms {
@@ -1640,6 +1665,8 @@ impl World {
         usize::pow(2, max_radius.log2().round() as u32).max(8)
         //usize::max(10, (max_radius*2.0) as usize)
     }
+
+    /// Finish a simulation step.
     pub fn finalize_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
         self.apply_motion(motion)?;
         self.process_inputs(motion)?;
@@ -1657,6 +1684,7 @@ impl World {
         Ok(())
     }
 
+    /// Returns `true` when all outputs been produced fully.
     pub fn is_complete(&self) -> bool {
         let mut all_outputs_full = true;
         for g in &self.glyphs {
@@ -1670,7 +1698,7 @@ impl World {
     }
 }
 
-//Setup stuff
+/// Setup stuff
 impl World {
     fn add_track(track_maps: &mut TrackMaps, track_pos: &Vec<Pos>) -> Result<()> {
         ensure!(track_pos.len() > 0, "Track of length 0!");
@@ -1700,15 +1728,16 @@ impl World {
         }
         Ok(())
     }
+
+    /// Remove {0,0} track offsets that were used to block track overlaps
     fn clean_track(track_maps: &mut TrackMaps) {
-        //Remove {0,0} track offsets that were used to block track overlaps
         let pos_nil = Pos::new(0, 0);
         track_maps.plus.retain(|_, v| -> bool { v != &pos_nil });
         track_maps.minus.retain(|_, v| -> bool { v != &pos_nil });
     }
 
-    //modifies the original arm to have the new instructions
-    //returns the length of the tape (repetition size)
+    /// Modifies the original arm to have the new instructions.
+    /// Returns the length of the tape (repetition size)
     fn normalize_instructions(original: &mut Arm, track_maps: &TrackMaps) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
@@ -1918,6 +1947,8 @@ impl World {
         Ok(len)
     }
 
+    /// The main initialization function. Creates the initial state of the world
+    /// given an `InitialWorld`.
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
         let mut world = World {
             timestep: 0,
@@ -2031,6 +2062,7 @@ impl World {
         world.timestep = world.get_first_timestep();
         Ok(world)
     }
+
     fn get_first_timestep(&self) -> u64 {
         if self.arms.len() == 0 {
             return 0;
@@ -2040,6 +2072,7 @@ impl World {
             .map(|a| a.instruction_tape.first as u64)
             .fold(u64::MAX, std::cmp::min)
     }
+
     pub fn get_stats(&self) -> SolutionStats {
         let cycles = (self.timestep - self.get_first_timestep()) as i32;
         let cost = self.cost;
