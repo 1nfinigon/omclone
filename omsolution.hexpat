@@ -47,12 +47,12 @@ struct Part {
     u32 numInstructions;
     PartInstruction instructions[numInstructions];
     
-    if (name == "track") {
+    if (name.data == "track") {
         u32 numTrackHexes;
         S32Pos trackHexes[numTrackHexes];
     }
     u32 armNumber;
-    if (name == "pipe") {
+    if (name.data == "pipe") {
         u32 conduitId;
         u32 numConduitHexes;
         S32Pos conduitHexes[numConduitHexes];
