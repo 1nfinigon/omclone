@@ -1,5 +1,6 @@
 #pragma endian little
 
+import std.sys;
 import type.LEB128;
 
 struct LengthDelimited {
@@ -89,6 +90,7 @@ struct Molecule {
 
 struct Puzzle {
     u32 format;
+    std::assert_warn(format == 3, "Unsupported format");
     LengthDelimited puzzleName;
     u64 creatorID;
     AllowedParts allowedParts;
