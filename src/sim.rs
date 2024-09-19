@@ -320,7 +320,7 @@ pub enum ArmMovement {
     LengthAdjust(i32),
 }
 
-pub type AtomPattern = SmallVec<[Vec<Atom>; 1]>;
+pub type AtomPattern = Vec<Atom>;
 pub type InOutId = i32;
 pub type ConduitId = i32;
 //Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
@@ -369,14 +369,12 @@ impl Glyph {
     pub fn reposition_pattern(&mut self) -> bool {
         use GlyphType::*;
         match &mut self.glyph_type {
-            Input(meta_pattern, _)
-            | Output(meta_pattern, _, _)
-            | OutputRepeating(meta_pattern, _, _) => {
-                for pat in meta_pattern {
-                    for a in pat {
-                        a.pos = self.pos + rotate(a.pos, self.rot);
-                        a.rotate_connections(self.rot);
-                    }
+            Input(pattern, _)
+            | Output(pattern, _, _)
+            | OutputRepeating(pattern, _, _) => {
+                for a in pattern {
+                    a.pos = self.pos + rotate(a.pos, self.rot);
+                    a.rotate_connections(self.rot);
                 }
                 true
             }
@@ -1046,11 +1044,10 @@ impl World {
                 ),
                 TriplexBond => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
                 Unbonding => add_all(&mut self.area_touched, [pos, pos_bi]),
-                Input(meta_pattern, _)
-                | Output(meta_pattern, _, _)
-                | OutputRepeating(meta_pattern, _, _) => {
-                    let atom_points = &meta_pattern[0];
-                    add_all(&mut self.area_touched, atom_points.iter().map(|a| a.pos))
+                Input(pattern, _)
+                | Output(pattern, _, _)
+                | OutputRepeating(pattern, _, _) => {
+                    add_all(&mut self.area_touched, pattern.iter().map(|a| a.pos))
                 }
                 Track(pos_list) => add_all(&mut self.area_touched, pos_list.iter().copied()),
                 Disposal => add_all(
@@ -1073,17 +1070,14 @@ impl World {
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
             match &mut glyph.glyph_type {
-                Input(meta_pattern, _) => {
-                    let atom_spawn_points = &meta_pattern[0];
-                    if atom_spawn_points
+                Input(pattern, _) => {
+                    if pattern
                         .iter()
                         .all(|a| atoms.check_empty(motion, a.pos))
                     {
-                        for a in atom_spawn_points {
+                        for a in pattern {
                             atoms.create_atom(a.clone())?;
                         }
-                        let tmp = meta_pattern.remove(0);
-                        meta_pattern.push(tmp);
                     }
                 }
                 _ => {}
@@ -1097,9 +1091,8 @@ impl World {
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
             match &mut glyph.glyph_type {
-                Output(meta_pattern, output_count, _) => {
-                    let atom_drop_points = &meta_pattern[0];
-                    let full_match = atom_drop_points.iter().all(|a| -> bool {
+                Output(pattern, output_count, _) => {
+                    let full_match = pattern.iter().all(|a| -> bool {
                         let try_key = atoms.locs.get(&a.pos);
                         if let Some(&atom_key) = try_key {
                             &atoms.atom_map[atom_key] == a && !motion.atoms.contains_key(atom_key)
@@ -1108,19 +1101,16 @@ impl World {
                         }
                     });
                     if full_match {
-                        for a in atom_drop_points {
+                        for a in pattern {
                             atoms.destroy_atom_at(a.pos);
                         }
                         if *output_count > 0 {
                             *output_count -= 1;
                         }
-                        let tmp = meta_pattern.remove(0);
-                        meta_pattern.push(tmp);
                     }
                 }
-                OutputRepeating(meta_pattern, output_count, _) => {
-                    let atom_drop_points = &meta_pattern[0];
-                    let full_match = atom_drop_points.iter().all(|a| -> bool {
+                OutputRepeating(pattern, output_count, _) => {
+                    let full_match = pattern.iter().all(|a| -> bool {
                         let try_key = atoms.locs.get(&a.pos);
                         if let Some(&atom_key) = try_key {
                             &atoms.atom_map[atom_key] == a
@@ -1130,8 +1120,6 @@ impl World {
                     });
                     if full_match {
                         //TODO: Accurately detect partial infinites
-                        let tmp = meta_pattern.remove(0);
-                        meta_pattern.push(tmp);
                         if *output_count > 0 {
                             *output_count = 0;
                         }
@@ -2020,17 +2008,14 @@ impl World {
 
         let mut unfinished_conduit_count = 0;
         for (id, glyph) in world.glyphs.iter_mut().enumerate() {
-            if let GlyphType::Input(meta_pattern, _) = &mut glyph.glyph_type {
-                let atom_spawn_points = &meta_pattern[0];
-                if atom_spawn_points
+            if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
+                if pattern
                     .iter()
                     .all(|a| world.atoms.locs.get(&a.pos) == None)
                 {
-                    for a in atom_spawn_points {
+                    for a in pattern {
                         world.atoms.create_atom(a.clone())?;
                     }
-                    let tmp = meta_pattern.remove(0);
-                    meta_pattern.push(tmp);
                 }
             }
             if let GlyphType::Conduit(_pos, conduit_id) = &glyph.glyph_type {

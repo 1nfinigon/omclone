@@ -12,7 +12,6 @@ use simple_eyre::{
 };
 
 use num_traits::FromPrimitive;
-use smallvec::smallvec;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
@@ -492,12 +491,12 @@ pub struct FullPuzzle {
     //TODO: production data here
 }
 fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
-    let mut atoms = Vec::new();
+    let mut pattern = Vec::new();
     let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
     for i in 0..(parse_i32(f)? as usize) {
         let atom_type = AtomType::from_u8(parse_u8(f)?).ok_or(eyre!("Illegal atom type"))?;
         let pos = parse_bytepos(f)?;
-        atoms.push(Atom::new(pos, atom_type));
+        pattern.push(Atom::new(pos, atom_type));
         let check = atom_locs.insert(pos, i);
         ensure!(check == None, "Multiple atoms in same location!");
     }
@@ -514,33 +513,30 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
             .get(&to_pos)
             .ok_or(eyre!("bond2 to nonatom position"))?;
         let rot =
-            pos_to_rot(atoms[atom2].pos - atoms[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
-        atoms[atom1].connections[rot as usize] = bond_type;
-        atoms[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
+            pos_to_rot(pattern[atom2].pos - pattern[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
+        pattern[atom1].connections[rot as usize] = bond_type;
+        pattern[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
     }
-    let final_output = smallvec![atoms];
-    Ok(final_output)
+    Ok(pattern)
 }
-fn write_molecule(f: &mut impl Write, molecule: &AtomPattern) -> Result<()> {
-    ensure!(molecule.len() == 1, "Multiple input variants not supported when saving");
-    let atoms = &molecule[0];
+fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
     let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
-    write_i32(f, atoms.len().try_into()?)?;
-    for (i, atom) in atoms.into_iter().enumerate() {
+    write_i32(f, pattern.len().try_into()?)?;
+    for (i, atom) in pattern.into_iter().enumerate() {
         use num_traits::ToPrimitive;
         write_u8(f, atom.atom_type.to_u8().ok_or(eyre!("invalid atom type"))?)?;
         write_bytepos(f, atom.pos)?;
         atom_locs.insert(atom.pos, i);
     }
     let mut bonds: HashMap<(Pos, Pos), Bonds> = HashMap::new();
-    for atom1_idx in 0..atoms.len() {
+    for atom1_idx in 0..pattern.len() {
         for angle in 0..6 {
-            let bond_type = atoms[atom1_idx].connections[angle as usize];
+            let bond_type = pattern[atom1_idx].connections[angle as usize];
             if !bond_type.is_empty() {
-                let mut from_pos = atoms[atom1_idx].pos;
-                let mut to_pos = atoms[atom1_idx].pos + rot_to_pos(angle);
+                let mut from_pos = pattern[atom1_idx].pos;
+                let mut to_pos = pattern[atom1_idx].pos + rot_to_pos(angle);
                 let atom2_idx = *atom_locs.get(&to_pos).ok_or(eyre!("bond to nonatom position"))?;
-                ensure!(atoms[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type);
+                ensure!(pattern[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type);
                 if (from_pos.x, from_pos.y) > (to_pos.x, to_pos.y) {
                     std::mem::swap(&mut from_pos, &mut to_pos);
                 }
@@ -584,7 +580,7 @@ fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
             }
         }
     }
-    Ok(smallvec![output])
+    Ok(output)
 }
 
 pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
@@ -735,7 +731,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     id,
                     puzzle.outputs.len()
                 ))?;
-                let repeated_molecule = process_repeats(&molecule[0], 6)?;
+                let repeated_molecule = process_repeats(molecule, 6)?;
                 let output_glyph = GlyphType::OutputRepeating(
                     repeated_molecule,
                     6 * puzzle.output_multiplier,

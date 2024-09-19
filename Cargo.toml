@@ -31,13 +31,6 @@ path = "src/nn.rs"
 name="synth"
 path = "src/synth.rs"
 
-#[lib]
-#crate-type = ["cdylib"]
-#name="omclone_habcheck"
-#path = "src/hab_checker.rs"
-#required features doesn't work, need to add it manually
-#required-features = ["bindgen"]
-
 [profile.dev]
 opt-level = 3
 [profile.dev.package."*"]

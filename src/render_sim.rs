@@ -482,10 +482,10 @@ impl RenderDataBase {
             use GlyphType::*;
             temp_atoms_vec.clear();
             match &glyph.glyph_type {
-                Input(atoms_meta, _)
-                | Output(atoms_meta, _, _)
-                | OutputRepeating(atoms_meta, _, _) => {
-                    for atom in &atoms_meta[0] {
+                Input(pattern, _)
+                | Output(pattern, _, _)
+                | OutputRepeating(pattern, _, _) => {
+                    for atom in pattern {
                         temp_atoms_vec.push(atom.into());
                     }
                     self.draw_atoms(ctx, &temp_atoms_vec, camera);
@@ -541,12 +541,11 @@ impl RenderDataBase {
                 TriplexBond => 10,
                 Unbonding => 11,
                 Unification => 12,
-                Input(atoms_meta, _)
-                | Output(atoms_meta, _, _)
-                | OutputRepeating(atoms_meta, _, _) => {
-                    let atoms = &atoms_meta[0];
+                Input(pattern, _)
+                | Output(pattern, _, _)
+                | OutputRepeating(pattern, _, _) => {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
-                    for atom in atoms {
+                    for atom in pattern {
                         //transparent cover
                         let offset = pos_to_xy(&atom.pos);
                         ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
