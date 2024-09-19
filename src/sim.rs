@@ -1832,7 +1832,7 @@ pub struct WorldWithTapes {
 }
 
 impl WorldWithTapes {
-    /// Modifies the original arm to have the new instructions.
+    /// Modifies `original_tape` in-place to resolve Repeat and Reset instructions.
     /// Returns the length of the tape (repetition size)
     fn normalize_instructions(original_arm: &Arm, original_tape: &mut Tape, track_maps: &TrackMaps) -> Result<usize> {
         use ArmType::*;
