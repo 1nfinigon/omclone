@@ -111,9 +111,9 @@ enum RunState {
     Crashed(XYPos),
 }
 struct Loaded {
-    base_world: World,
-    curr_world: World,
-    backup_world: World,
+    base_world: WorldWithTapes,
+    curr_world: WorldWithTapes,
+    backup_world: WorldWithTapes,
     curr_time: f64,
     curr_substep: usize,
     backup_step: u64,
@@ -143,7 +143,7 @@ impl Loaded {
     }
     fn reset_world(&mut self) {
         if let RunState::Crashed(_) = self.run_state {
-            self.run_state = RunState::Manual(self.curr_world.timestep as usize);
+            self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
         }
         self.saved_motions.clear();
         self.curr_world = self.base_world.clone();
@@ -157,7 +157,7 @@ impl Loaded {
     }
     fn reset_to_backup(&mut self) {
         if let RunState::Crashed(_) = self.run_state {
-            self.run_state = RunState::Manual(self.curr_world.timestep as usize);
+            self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
         }
         self.saved_motions.clear();
         self.curr_world = self.backup_world.clone();
@@ -168,7 +168,7 @@ impl Loaded {
     }
     fn try_set_target_time(&mut self, target: usize) {
         if let RunState::Crashed(_) = self.run_state {
-            if self.curr_world.timestep as usize > target {
+            if self.curr_world.world.timestep as usize > target {
                 self.run_state = RunState::Manual(target);
             }
         } else {
@@ -182,22 +182,22 @@ impl Loaded {
                 self.saved_motions.clear();
                 return failcheck;
             }
-            self.substep_count = self.curr_world.substep_count(&self.saved_motions);
+            self.substep_count = self.curr_world.world.substep_count(&self.saved_motions);
             *substep_time = 1.0 / (self.substep_count as f64);
         }
         self.curr_substep += 1;
         let portion = self.curr_substep as f32 / self.substep_count as f32;
         if self.show_area {
             self.float_world
-                .regenerate(&self.curr_world, &self.saved_motions, portion);
-            self.curr_world.mark_area_and_collide(
+                .regenerate(&self.curr_world.world, &self.saved_motions, portion);
+            self.curr_world.world.mark_area_and_collide(
                 &self.float_world,
                 self.saved_motions.spawning_atoms.iter(),
             )?;
         }
         if self.curr_substep == self.substep_count {
             self.curr_substep = 0;
-            self.curr_world.finalize_step(&mut self.saved_motions)?;
+            self.curr_world.world.finalize_step(&mut self.saved_motions)?;
         }
         Ok(())
     }
@@ -225,34 +225,34 @@ impl Loaded {
 
         let mut substep_time = 1.0 / (self.substep_count as f64);
         let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
-        if self.curr_world.timestep < backup_target_timestep {
-            while self.curr_world.timestep < backup_target_timestep {
+        if self.curr_world.world.timestep < backup_target_timestep {
+            while self.curr_world.world.timestep < backup_target_timestep {
                 let output = self.advance(&mut substep_time);
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed(output.location);
                     self.message = Some(output.to_string());
                     self.curr_time =
-                        self.curr_world.timestep as f64 + (substep_time * self.curr_substep as f64);
+                        self.curr_world.world.timestep as f64 + (substep_time * self.curr_substep as f64);
                     return;
                 }
             }
             self.backup_step = backup_target_timestep;
             self.backup_world = self.curr_world.clone();
             assert_eq!(self.curr_substep, 0);
-            assert_eq!(backup_target_timestep, self.curr_world.timestep);
+            assert_eq!(backup_target_timestep, self.curr_world.world.timestep);
         }
 
         let target_timestep = target_time.floor() as u64;
         let target_substep = (target_time.fract() * self.substep_count as f64).floor() as usize;
-        while self.curr_world.timestep < target_timestep
-            || (self.curr_world.timestep == target_timestep && self.curr_substep < target_substep)
+        while self.curr_world.world.timestep < target_timestep
+            || (self.curr_world.world.timestep == target_timestep && self.curr_substep < target_substep)
         {
             let output = self.advance(&mut substep_time);
             if let Err(output) = output {
                 self.run_state = RunState::Crashed(output.location);
                 self.message = Some(output.to_string());
                 self.curr_time =
-                    self.curr_world.timestep as f64 + (substep_time * self.curr_substep as f64);
+                    self.curr_world.world.timestep as f64 + (substep_time * self.curr_substep as f64);
                 return;
             }
         }
@@ -311,18 +311,18 @@ impl MyMiniquadApp {
         println!("Check: {:?}", solution.stats);
         let init = parser::puzzle_prep(&puzzle, &solution)?;
         let mut max_timestep = 0;
-        for (a_num, a) in init.arms.iter().enumerate() {
-            println!("Arms {:02}: {:?}", a_num, a.instruction_tape.to_string());
-            max_timestep = max_timestep.max(a.instruction_tape.first)
+        for (a_num, tape) in init.tapes.iter().enumerate() {
+            println!("Arms {:02}: {:?}", a_num, tape.to_string());
+            max_timestep = max_timestep.max(tape.first);
         }
-        let world = World::setup_sim(&init)?;
+        let world = WorldWithTapes::setup_sim(&init)?;
         max_timestep += world.repeat_length * 2 + 100;
 
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
         saved_motions.clear();
-        let camera = CameraSetup::frame_center(&world, window::screen_size());
-        let tracks = setup_tracks(self.mq_ctx.as_mut(), &world.track_maps);
+        let camera = CameraSetup::frame_center(&world.world, window::screen_size());
+        let tracks = setup_tracks(self.mq_ctx.as_mut(), &world.world.track_maps);
         let new_loaded = Loaded {
             base_world: world.clone(),
             backup_world: world.clone(),
@@ -393,10 +393,10 @@ impl EventHandler for MyMiniquadApp {
             loaded.update();
             let display_portion = loaded.curr_time.fract() as f32;
             if loaded.saved_motions.arms.is_empty() {
-                loaded.float_world.generate_static(&loaded.curr_world);
+                loaded.float_world.generate_static(&loaded.curr_world.world);
             } else {
                 loaded.float_world.regenerate(
-                    &loaded.curr_world,
+                    &loaded.curr_world.world,
                     &loaded.saved_motions,
                     display_portion,
                 );
@@ -409,7 +409,7 @@ impl EventHandler for MyMiniquadApp {
         ctx.clear(Some((1., 1., 1., 1.)), None, None);
         ctx.begin_default_pass(PassAction::clear_color(0.5, 0.5, 0.5, 1.0));
         if let Loaded(loaded) = &mut self.app_state {
-            let world = &loaded.curr_world;
+            let world = &loaded.curr_world.world;
             let float_world = &loaded.float_world;
             self.render_data.draw(
                 ctx,
@@ -468,8 +468,8 @@ impl EventHandler for MyMiniquadApp {
                                 loaded.try_set_target_time(target_time);
                             }
 
-                            let min_size = loaded.base_world.arms.iter()
-                                .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                            let min_size = loaded.base_world.tapes.iter()
+                                .fold(0, |val, tape| usize::max(val, tape.instructions.len()));
                             ui.label("Loop length:");
 
                             let repeat_length_response = ui.add_enabled(EDITOR_ENABLED, egui::DragValue::new(&mut loaded.base_world.repeat_length)
@@ -491,7 +491,7 @@ impl EventHandler for MyMiniquadApp {
                                 if area_check.changed() {
                                     loaded.reset_to(0);
                                 }
-                                ui.monospace(format!("{:5}",loaded.curr_world.area_touched.len()));
+                                ui.monospace(format!("{:5}", loaded.curr_world.world.area_touched.len()));
                             }
                             ui.separator();
                             ui.label("Speed:");
@@ -527,7 +527,7 @@ impl EventHandler for MyMiniquadApp {
                             ui.add(egui::DragValue::new(&mut loaded.camera.offset[1])
                                 .speed(0.1));
                             if ui.button("Center").clicked(){
-                                loaded.camera = CameraSetup::frame_center(&loaded.base_world, screen_size);
+                                loaded.camera = CameraSetup::frame_center(&loaded.base_world.world, screen_size);
                             }
                         });
                         ui.horizontal(|ui|{
@@ -601,34 +601,32 @@ impl EventHandler for MyMiniquadApp {
                                     ui.checkbox(&mut loaded.tape_mode, "Tape/overwrite mode");
                                     ui.separator();
                                     if ui.button("space ends").clicked() {
-                                        for a in &mut loaded.base_world.arms{
-                                            let instr = &mut a.instruction_tape;
-                                            for _ in instr.instructions.len()..loaded.base_world.repeat_length{
-                                                a.instruction_tape.instructions.push(Instr::Empty);
+                                        for tape in loaded.base_world.tapes.iter_mut() {
+                                            for _ in tape.instructions.len()..loaded.base_world.repeat_length{
+                                                tape.instructions.push(Instr::Empty);
                                             }
                                         }
                                     }
                                     ui.separator();
                                     if ui.button("clear ends").clicked() {
-                                        for a in &mut loaded.base_world.arms{
-                                            let instr = &mut a.instruction_tape;
-                                            while instr.instructions.last() == Some(&Instr::Empty){
-                                                instr.instructions.pop();
+                                        for tape in loaded.base_world.tapes.iter_mut() {
+                                            while tape.instructions.last() == Some(&Instr::Empty){
+                                                tape.instructions.pop();
                                             }
                                         }
                                     }
                                     if ui.button("Optimize Pistons").clicked() {
                                         let mut pistons_added = 0;
                                         let mut pistons_removed = 0;
-                                        for a in &mut loaded.base_world.arms{
-                                            if a.instruction_tape.instructions.contains(&Instr::Extend) || a.instruction_tape.instructions.contains(&Instr::Retract) {
-                                                if a.arm_type == ArmType::PlainArm {
-                                                    a.arm_type = ArmType::Piston;
+                                        for (arm, tape) in loaded.base_world.world.arms.iter_mut().zip(loaded.base_world.tapes.iter()) {
+                                            if tape.instructions.contains(&Instr::Extend) || tape.instructions.contains(&Instr::Retract) {
+                                                if arm.arm_type == ArmType::PlainArm {
+                                                    arm.arm_type = ArmType::Piston;
                                                     pistons_added += 1;
                                                 }
                                             } else {
-                                                if a.arm_type == ArmType::Piston {
-                                                    a.arm_type = ArmType::PlainArm;
+                                                if arm.arm_type == ArmType::Piston {
+                                                    arm.arm_type = ArmType::PlainArm;
                                                     pistons_removed += 1;
                                                 }
                                             }
@@ -648,10 +646,10 @@ impl EventHandler for MyMiniquadApp {
                             egui::ScrollArea::horizontal().show(ui, |ui| {
                                 ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
                                 egui::ScrollArea::vertical().show(ui, |ui| {
-                                    for (a_num, a) in loaded.base_world.arms.iter_mut().enumerate(){
-                                        let text = a.instruction_tape.to_string();
-                                        let mut text_buf = TapeBuffer{
-                                            tape_ref: &mut a.instruction_tape,
+                                    for (a_num, tape) in loaded.base_world.tapes.iter_mut().enumerate() {
+                                        let text = tape.to_string();
+                                        let mut text_buf = TapeBuffer {
+                                            tape_ref: tape,
                                             earliest_edit: &mut earliest_edit,
                                             tape_mode: loaded.tape_mode,
                                             held_str: text,
@@ -677,28 +675,28 @@ impl EventHandler for MyMiniquadApp {
                             if let Some(target) = target_time {
                                 loaded.try_set_target_time(target);
                             }
-                            if let Some(edit_step) = earliest_edit{
+                            if let Some(edit_step) = earliest_edit {
                                 let arm_id = change_arm_id.unwrap();//If edit is performed, the change must be recorded
-                                let min_time = loaded.base_world.arms.iter()
-                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()+arm.instruction_tape.first));
+                                let min_time = loaded.base_world.tapes.iter()
+                                    .fold(0, |val, tape| usize::max(val, tape.instructions.len()+tape.first));
                                 if loaded.max_timestep < min_time{
                                     loaded.max_timestep = min_time;
                                 }
-                                let min_loop = loaded.base_world.arms.iter()
-                                    .fold(0, |val, arm| usize::max(val, arm.instruction_tape.instructions.len()));
+                                let min_loop = loaded.base_world.tapes.iter()
+                                    .fold(0, |val, tape| usize::max(val, tape.instructions.len()));
                                 if loaded.base_world.repeat_length < min_loop{
                                     loaded.base_world.repeat_length = min_loop;
                                     loaded.backup_world.repeat_length = min_loop;
                                     loaded.curr_world.repeat_length = min_loop;
                                 }
-                                loaded.backup_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
+                                loaded.backup_world.tapes[arm_id] = loaded.base_world.tapes[arm_id].clone();
                                 if edit_step <= loaded.curr_time as usize {
-                                    if let RunState::Crashed(_) = loaded.run_state{
-                                        loaded.run_state = RunState::Manual(loaded.curr_world.timestep as usize);
+                                    if let RunState::Crashed(_) = loaded.run_state {
+                                        loaded.run_state = RunState::Manual(loaded.curr_world.world.timestep as usize);
                                     }
                                     loaded.reset_to(edit_step as u64);
                                 } else {
-                                    loaded.curr_world.arms[arm_id].instruction_tape = loaded.base_world.arms[arm_id].instruction_tape.clone();
+                                    loaded.curr_world.tapes[arm_id] = loaded.base_world.tapes[arm_id].clone();
                                 }
                             }
                         });

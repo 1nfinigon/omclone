@@ -402,19 +402,17 @@ pub struct Arm {
     pub rot: Rot,
     pub len: i32,
     pub arm_type: ArmType,
-    pub instruction_tape: Tape,
     pub grabbing: bool,
     pub atoms_grabbed: [AtomKey; 6],
 }
 
 impl Arm {
-    pub fn new(pos: Pos, rot: Rot, len: i32, arm_type: ArmType, instruction_tape: Tape) -> Self {
+    pub fn new(pos: Pos, rot: Rot, len: i32, arm_type: ArmType) -> Self {
         Arm {
             pos,
             rot,
             len,
             arm_type,
-            instruction_tape,
             grabbing: false,
             atoms_grabbed: [AtomKey::null(); 6],
         }
@@ -446,6 +444,9 @@ impl Arm {
 pub struct InitialWorld {
     pub glyphs: Vec<Glyph>,
     pub arms: Vec<Arm>,
+
+    /// Same length as `arms`
+    pub tapes: Vec<Tape>,
 }
 
 pub type TrackMap = FxHashMap<Pos, Pos>;
@@ -469,10 +470,8 @@ pub struct World {
     pub area_touched: FxHashSet<Pos>,
     pub glyphs: Vec<Glyph>,
     pub arms: Vec<Arm>,
-    pub repeat_length: usize,
     pub track_maps: TrackMaps,
     pub cost: i32,
-    pub instruction_count: i32,
     pub conduit_pairs: ConduitPairMap,
 }
 type ConduitPairMap = FxHashMap<i32, ConduitInfo>;
@@ -888,7 +887,7 @@ impl World {
         &mut self,
         motion: &mut WorldStepInfo,
         arm_id: usize,
-        timestep: u64,
+        instruction: Instr,
     ) -> SimResult<()> {
         assert_eq!(
             motion.arms.len(),
@@ -901,9 +900,6 @@ impl World {
         use Instr::*;
         use Movement::*;
         let arm_type = arm.arm_type;
-        let tape = &arm.instruction_tape;
-        let timestep = timestep as usize;
-        let instruction = tape.get(timestep, self.repeat_length);
         const STILL: ArmMovement = Move(HeldStill);
         let action = match instruction {
             Extend => {
@@ -1590,8 +1586,9 @@ impl World {
         mark_area: bool,
         motion: &mut WorldStepInfo,
         float_world: &mut FloatWorld,
+        instructions: &[Instr]
     ) -> SimResult<()> {
-        self.prepare_step(motion)?;
+        self.prepare_step(motion, instructions)?;
         if mark_area {
             let substep_count = self.substep_count(motion);
             for substep in 0..substep_count {
@@ -1606,10 +1603,11 @@ impl World {
 
     /// Start a simulation step. This overwrites `motion` with information about
     /// the step.
-    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
+    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo, instructions: &[Instr]) -> SimResult<()> {
         motion.clear();
+        assert_eq!(instructions.len(), self.arms.len());
         for i in 0..self.arms.len() {
-            self.do_instruction(motion, i, self.timestep)?;
+            self.do_instruction(motion, i, instructions[i])?;
         }
         self.process_inputs(motion)?;
         self.process_glyphs(motion, true)?;
@@ -1724,13 +1722,123 @@ impl World {
         track_maps.minus.retain(|_, v| -> bool { v != &pos_nil });
     }
 
+    /// The main initialization function. Creates the initial state of the world
+    /// given an `InitialWorld`.
+    pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
+        let mut world = World {
+            timestep: 0,
+            atoms: WorldAtoms::new(),
+            area_touched: Default::default(),
+            glyphs: init.glyphs.clone(),
+            arms: init.arms.clone(),
+            track_maps: Default::default(),
+            cost: 0,
+            conduit_pairs: Default::default(),
+        };
+        for g in &mut world.glyphs {
+            use GlyphType::*;
+            world.cost += match &g.glyph_type {
+                Calcification | Bonding | Unbonding => 10,
+                Animismus | Projection | Dispersion | Purification => 20,
+                Duplication | Unification | TriplexBond => 20,
+                MultiBond => 30,
+                Disposal
+                | Equilibrium
+                | Output(_, _, _)
+                | OutputRepeating(_, _, _)
+                | Input(_, _)
+                | Conduit(_, _) => 0,
+                Track(v) => (v.len() as i32) * 5,
+            };
+            g.reposition_pattern(); //reposition input/output/conduits
+            if let Track(track_data) = &g.glyph_type {
+                World::add_track(&mut world.track_maps, track_data)?;
+            }
+        }
+        World::clean_track(&mut world.track_maps);
+        for a in &mut world.arms {
+            use ArmType::*;
+            world.cost += match a.arm_type {
+                PlainArm => 20,
+                DoubleArm | TripleArm | HexArm | VanBerlo => 30,
+                Piston => 40,
+            };
+            if a.arm_type == VanBerlo {
+                use AtomType::*;
+                a.grabbing = true;
+                const ATOM_SETUP: [AtomType; 6] = [Salt, Water, Air, Salt, Fire, Earth];
+                for i in 0..6 {
+                    let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
+                    let atom_type = ATOM_SETUP[i];
+                    let key = world.atoms.create_atom(Atom {
+                        pos,
+                        atom_type,
+                        connections: [Bonds::NO_BOND; 6],
+                        is_berlo: true,
+                    })?;
+                    a.atoms_grabbed[i] = key;
+                }
+            }
+        }
+
+        let mut unfinished_conduit_count = 0;
+        for (id, glyph) in world.glyphs.iter_mut().enumerate() {
+            if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
+                if pattern
+                    .iter()
+                    .all(|a| world.atoms.locs.get(&a.pos) == None)
+                {
+                    for a in pattern {
+                        world.atoms.create_atom(a.clone())?;
+                    }
+                }
+            }
+            if let GlyphType::Conduit(_pos, conduit_id) = &glyph.glyph_type {
+                if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id) {
+                    ensure!(
+                        pair_data.vecids.0 == pair_data.vecids.1,
+                        "Conduit {conduit_id} already modified!"
+                    );
+                    pair_data.vecids.1 = id;
+                    unfinished_conduit_count -= 1;
+                    pair_data.offset_pos -= glyph.pos;
+                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot - glyph.rot);
+                } else {
+                    let conduit_info = ConduitInfo {
+                        vecids: (id, id),
+                        offset_pos: glyph.pos,
+                        offset_rot: glyph.rot,
+                    };
+                    world.conduit_pairs.insert(*conduit_id, conduit_info);
+                    unfinished_conduit_count += 1;
+                }
+            }
+        }
+        ensure!(
+            unfinished_conduit_count == 0,
+            "Conduits not properly matched!"
+        );
+        world.initial_area()?;
+        Ok(world)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorldWithTapes {
+    pub world: World,
+    pub tapes: Vec<Tape>,
+    pub instruction_count: i32,
+    pub repeat_length: usize,
+}
+
+impl WorldWithTapes {
     /// Modifies the original arm to have the new instructions.
     /// Returns the length of the tape (repetition size)
-    fn normalize_instructions(original: &mut Arm, track_maps: &TrackMaps) -> Result<usize> {
+    fn normalize_instructions(original_arm: &Arm, original_tape: &mut Tape, track_maps: &TrackMaps) -> Result<usize> {
         use ArmType::*;
         use Instr::*;
-        let arm_type = original.arm_type;
-        let old_instructions = &original.instruction_tape.instructions;
+        let arm_type = original_arm.arm_type;
+        let old_instructions = &original_tape.instructions;
         let mut instructions = Vec::with_capacity(old_instructions.len() + 8);
         let mut repeat_source = 0;
         let mut repeat_ending = 0;
@@ -1738,9 +1846,9 @@ impl World {
         let mut curr = 0;
         let mut track_steps = 0;
         let mut rot_diff = 0;
-        let mut len = original.len;
+        let mut len = original_arm.len;
         let mut known_grab = false;
-        let mut position_check = original.pos;
+        let mut position_check = original_arm.pos;
         fn get_track_loop_length(track_map: &TrackMap, pos: Pos) -> Option<i32> {
             let mut my_pos = pos;
             let mut loop_length = 0;
@@ -1756,7 +1864,7 @@ impl World {
                 }
             }
         }
-        let track_loop = get_track_loop_length(&track_maps.plus, original.pos);
+        let track_loop = get_track_loop_length(&track_maps.plus, original_arm.pos);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
             if !any_nonrepeat && !matches!(instr, Repeat | Empty) {
@@ -1849,9 +1957,9 @@ impl World {
 
                         known_grab = false;
                         rot_diff = 0;
-                        len = original.len;
+                        len = original_arm.len;
                         track_steps = 0;
-                        position_check = original.pos;
+                        position_check = original_arm.pos;
                     }
                 }
                 Reset => {
@@ -1860,7 +1968,7 @@ impl World {
                         reset_vec.push(Drop);
                         known_grab = false;
                     }
-                    while len > original.len {
+                    while len > original_arm.len {
                         reset_vec.push(Retract);
                         len -= 1;
                     }
@@ -1896,11 +2004,11 @@ impl World {
                         reset_vec.push(Forward);
                         track_steps += 1;
                     }
-                    while len < original.len {
+                    while len < original_arm.len {
                         reset_vec.push(Extend);
                         len += 1;
                     }
-                    position_check = original.pos;
+                    position_check = original_arm.pos;
 
                     if reset_vec.len() == 0 {
                         reset_vec.push(Empty)
@@ -1928,8 +2036,8 @@ impl World {
         }
         instructions.shrink_to_fit();
         let len = instructions.len();
-        original.instruction_tape = Tape {
-            first: original.instruction_tape.first,
+        *original_tape = Tape {
+            first: original_tape.first,
             instructions,
         };
         Ok(len)
@@ -1938,130 +2046,59 @@ impl World {
     /// The main initialization function. Creates the initial state of the world
     /// given an `InitialWorld`.
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
-        let mut world = World {
-            timestep: 0,
-            atoms: WorldAtoms::new(),
-            area_touched: Default::default(),
-            glyphs: init.glyphs.clone(),
-            arms: init.arms.clone(),
-            repeat_length: 0,
-            track_maps: Default::default(),
-            cost: 0,
+        let mut self_ = Self {
+            world: World::setup_sim(init)?,
+            tapes: init.tapes.clone(),
             instruction_count: 0,
-            conduit_pairs: Default::default(),
+            repeat_length: 0,
         };
-        for g in &mut world.glyphs {
-            use GlyphType::*;
-            world.cost += match &g.glyph_type {
-                Calcification | Bonding | Unbonding => 10,
-                Animismus | Projection | Dispersion | Purification => 20,
-                Duplication | Unification | TriplexBond => 20,
-                MultiBond => 30,
-                Disposal
-                | Equilibrium
-                | Output(_, _, _)
-                | OutputRepeating(_, _, _)
-                | Input(_, _)
-                | Conduit(_, _) => 0,
-                Track(v) => (v.len() as i32) * 5,
-            };
-            g.reposition_pattern(); //reposition input/output/conduits
-            if let Track(track_data) = &g.glyph_type {
-                World::add_track(&mut world.track_maps, track_data)?;
-            }
-        }
-        World::clean_track(&mut world.track_maps);
-        for a in &mut world.arms {
-            use ArmType::*;
-            world.cost += match a.arm_type {
-                PlainArm => 20,
-                DoubleArm | TripleArm | HexArm | VanBerlo => 30,
-                Piston => 40,
-            };
-            let instr_len = World::normalize_instructions(a, &world.track_maps)?;
-            world.instruction_count += a
-                .instruction_tape
+        assert_eq!(self_.world.arms.len(), self_.tapes.len());
+        for (arm, tape) in self_.world.arms.iter().zip(self_.tapes.iter_mut()) {
+            let instr_len = Self::normalize_instructions(arm, tape, &self_.world.track_maps)?;
+            self_.instruction_count += tape
                 .instructions
                 .iter()
                 .filter(|&&a| a != Instr::Empty)
                 .count() as i32;
-            if world.repeat_length < instr_len {
-                world.repeat_length = instr_len;
-            }
-            if a.arm_type == VanBerlo {
-                use AtomType::*;
-                a.grabbing = true;
-                const ATOM_SETUP: [AtomType; 6] = [Salt, Water, Air, Salt, Fire, Earth];
-                for i in 0..6 {
-                    let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
-                    let atom_type = ATOM_SETUP[i];
-                    let key = world.atoms.create_atom(Atom {
-                        pos,
-                        atom_type,
-                        connections: [Bonds::NO_BOND; 6],
-                        is_berlo: true,
-                    })?;
-                    a.atoms_grabbed[i] = key;
-                }
+            if self_.repeat_length < instr_len {
+                self_.repeat_length = instr_len;
             }
         }
+        self_.world.timestep = self_.get_first_timestep();
+        Ok(self_)
+    }
 
-        let mut unfinished_conduit_count = 0;
-        for (id, glyph) in world.glyphs.iter_mut().enumerate() {
-            if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
-                if pattern
-                    .iter()
-                    .all(|a| world.atoms.locs.get(&a.pos) == None)
-                {
-                    for a in pattern {
-                        world.atoms.create_atom(a.clone())?;
-                    }
-                }
-            }
-            if let GlyphType::Conduit(_pos, conduit_id) = &glyph.glyph_type {
-                if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id) {
-                    ensure!(
-                        pair_data.vecids.0 == pair_data.vecids.1,
-                        "Conduit {conduit_id} already modified!"
-                    );
-                    pair_data.vecids.1 = id;
-                    unfinished_conduit_count -= 1;
-                    pair_data.offset_pos -= glyph.pos;
-                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot - glyph.rot);
-                } else {
-                    let conduit_info = ConduitInfo {
-                        vecids: (id, id),
-                        offset_pos: glyph.pos,
-                        offset_rot: glyph.rot,
-                    };
-                    world.conduit_pairs.insert(*conduit_id, conduit_info);
-                    unfinished_conduit_count += 1;
-                }
-            }
-        }
-        ensure!(
-            unfinished_conduit_count == 0,
-            "Conduits not properly matched!"
-        );
-        world.initial_area()?;
-        world.timestep = world.get_first_timestep();
-        Ok(world)
+    fn get_instructions(&self) -> Vec<Instr> {
+        self.tapes.iter().map(|tape| tape.get(self.world.timestep as usize, self.repeat_length)).collect()
+    }
+
+    pub fn run_step(
+        &mut self,
+        mark_area: bool,
+        motion: &mut WorldStepInfo,
+        float_world: &mut FloatWorld
+    ) -> SimResult<()> {
+        self.world.run_step(mark_area, motion, float_world, &self.get_instructions())
+    }
+
+    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {
+        self.world.prepare_step(motion, &self.get_instructions())
     }
 
     fn get_first_timestep(&self) -> u64 {
-        if self.arms.len() == 0 {
+        if self.tapes.len() == 0 {
             return 0;
         }
-        self.arms
+        self.tapes
             .iter()
-            .map(|a| a.instruction_tape.first as u64)
+            .map(|tape| tape.first as u64)
             .fold(u64::MAX, std::cmp::min)
     }
 
     pub fn get_stats(&self) -> SolutionStats {
-        let cycles = (self.timestep - self.get_first_timestep()) as i32;
-        let cost = self.cost;
-        let area = self.area_touched.len() as i32;
+        let cycles = (self.world.timestep - self.get_first_timestep()) as i32;
+        let cost = self.world.cost;
+        let area = self.world.area_touched.len() as i32;
         let instructions = self.instruction_count;
         SolutionStats {
             cycles,

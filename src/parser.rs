@@ -350,7 +350,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     }
     Ok(solution_output)
 }
-pub fn create_solution(world: &World, puzzle_name: String, solution_name: String) -> FullSolution {
+pub fn create_solution(world: &WorldWithTapes, puzzle_name: String, solution_name: String) -> FullSolution {
     let stats = None;
     let mut solution_output = FullSolution {
         puzzle_name,
@@ -359,7 +359,7 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         part_list: Vec::new(),
     };
     let part_list = &mut solution_output.part_list;
-    for glyph in &world.glyphs {
+    for glyph in &world.world.glyphs {
         let rot = glyph.rot;
         let pos = glyph.pos;
         let arm_size = 0;
@@ -398,7 +398,7 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
     }
     let mut found_first = false;
     let loop_len = world.repeat_length;
-    for (id, arm) in world.arms.iter().enumerate() {
+    for (id, (arm, tape)) in world.world.arms.iter().zip(world.tapes.iter()).enumerate() {
         let part_type = TArm(arm.arm_type);
         let pos = arm.pos;
         let arm_size = arm.len;
@@ -406,7 +406,6 @@ pub fn create_solution(world: &World, puzzle_name: String, solution_name: String
         let input_output_index = 0;
 
         let mut instructions = Vec::new();
-        let tape = &arm.instruction_tape;
         let mut step = tape.first as i32;
         for &instr in &tape.instructions {
             if instr != Instr::Empty {
@@ -675,7 +674,7 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
 pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
     //Convert from generic parts to glyphs, arms, etc.
     let mut glyphs = Vec::new();
-    let mut arms = Vec::new();
+    let mut arms_and_tapes = Vec::new();
     for p in &soln.part_list {
         match &p.part_type {
             TGlyph(gtype) => {
@@ -687,8 +686,9 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TArm(atype) => {
                 let instr = process_instructions(&p.instructions)?;
-                arms.push((
-                    Arm::new(p.pos, p.rot, p.arm_size, *atype, instr),
+                arms_and_tapes.push((
+                    Arm::new(p.pos, p.rot, p.arm_size, *atype),
+                    instr,
                     p.arm_index,
                 ));
             }
@@ -767,7 +767,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
         }
     }
-    arms.sort_by(|a, b| a.1.cmp(&b.1));
-    let arms = arms.into_iter().map(|a| a.0).collect();
-    Ok(InitialWorld { glyphs, arms })
+    arms_and_tapes.sort_by(|a, b| a.2.cmp(&b.2));
+    let (arms, tapes) = arms_and_tapes.into_iter().map(|(arm, tape, _)| (arm, tape)).unzip();
+    Ok(InitialWorld { glyphs, arms, tapes })
 }
