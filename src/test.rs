@@ -15,8 +15,8 @@ fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: fs::ReadDir) {
                 let f_puzzle = File::open(f.path()).unwrap();
                 let fname = f.file_name().into_string().unwrap().replace(".puzzle", "");
                 if let Ok(puzzle) = parse_puzzle(&mut BufReader::new(f_puzzle)) {
-                    if puzzle.outputs.iter().any(|atoms_meta| {
-                        atoms_meta[0]
+                    if puzzle.outputs.iter().any(|atoms| {
+                        atoms
                             .iter()
                             .any(|atom| atom.atom_type == AtomType::RepeatingOutputMarker)
                     }) {
@@ -55,7 +55,7 @@ fn check_solution(stats: &mut (usize, usize), fpath: &Path, puzzle_map: &PuzzleM
             }
             Ok(s) => s,
         };
-        let mut world = match World::setup_sim(&init) {
+        let mut world = match WorldWithTapes::setup_sim(&init) {
             Err(e) => {
                 println!("Failed to setup {:?}: {}", fpath, e);
                 return;
@@ -65,12 +65,12 @@ fn check_solution(stats: &mut (usize, usize), fpath: &Path, puzzle_map: &PuzzleM
         stats.1 += 1;
         let mut float_world = FloatWorld::new();
         let mut motions = WorldStepInfo::new();
-        while !world.is_complete() && world.timestep < 500_000 {
+        while !world.world.is_complete() && world.world.timestep < 500_000 {
             let step = world.run_step(CHECK_AREA, &mut motions, &mut float_world);
             if let Err(e) = step {
                 println!(
                     "Simulation error on step {} puzzle {}: {:?}: {}",
-                    world.timestep, sol.puzzle_name, fpath, e
+                    world.world.timestep, sol.puzzle_name, fpath, e
                 );
                 return;
             }
