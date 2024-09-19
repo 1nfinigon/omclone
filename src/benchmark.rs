@@ -42,7 +42,7 @@ fn main() -> Result<()> {
             let curr_time = std::time::Instant::now();
             let duration = curr_time - start_time;
             let duration_per_step = duration.div_f64(iteration as f64);
-            println!("Iterations: {:<9} Duration per step: {:1}us", iteration, duration_per_step.as_secs_f32() / 1e-6);
+            println!("Iterations: {:<9} Duration per step: {:.2}us", iteration, duration_per_step.as_secs_f32() / 1e-6);
         }
     }
     Ok(())
