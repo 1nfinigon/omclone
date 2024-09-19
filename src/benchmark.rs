@@ -21,7 +21,7 @@ fn main() -> Result<()> {
     //println!("Check: {:?}", sol.stats);
     let init = parser::puzzle_prep(&puzzle, &sol)?;
 
-    let mut world = sim::World::setup_sim(&init)?;
+    let mut world = sim::WorldWithTapes::setup_sim(&init)?;
     let mut float_world = sim::FloatWorld::new();
     let mut motions = sim::WorldStepInfo::new();
     /*
@@ -34,7 +34,16 @@ fn main() -> Result<()> {
     println!("Complete! {:?}", stats);
     Ok(())
     */
-    loop {
+
+    let start_time = std::time::Instant::now();
+    for iteration in 1.. {
         world.run_step(true, &mut motions, &mut float_world)?;
+        if iteration % 10000 == 0 {
+            let curr_time = std::time::Instant::now();
+            let duration = curr_time - start_time;
+            let duration_per_step = duration.div_f64(iteration as f64);
+            println!("Iterations: {:<9} Duration per step: {:1}us", iteration, duration_per_step.as_secs_f32() / 1e-6);
+        }
     }
+    Ok(())
 }
