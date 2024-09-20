@@ -11,7 +11,7 @@ use core::ops::Range;
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::eyre::Result;
 struct TapeBuffer<'a> {
-    tape_ref: &'a mut Tape,
+    tape_ref: &'a mut Tape<BasicInstr>,
     earliest_edit: &'a mut Option<usize>,
     tape_mode: bool,
     held_str: String,
@@ -31,9 +31,9 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_> {
         let char_index = char_index;
         *self.earliest_edit = Some(char_index);
         let tape = &mut self.tape_ref;
-        let instr_mapped: Vec<Instr> = text
+        let instr_mapped: Vec<BasicInstr> = text
             .chars()
-            .filter_map(|x| Instr::from_char(x.to_ascii_lowercase()))
+            .filter_map(|x| BasicInstr::from_char(x.to_ascii_lowercase()))
             .collect();
         let inserted = instr_mapped.len();
 
@@ -46,7 +46,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_> {
         };
         let instr_chain = instr_mapped
             .into_iter()
-            .chain(std::iter::repeat(Instr::Empty).take(empty_extension));
+            .chain(std::iter::repeat(BasicInstr::Empty).take(empty_extension));
         let splice_index = char_index - tape.first;
         let splice_range = if self.tape_mode {
             splice_index..usize::min(splice_index + text.len(), tape.instructions.len())
@@ -64,7 +64,7 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_> {
         if self.tape_mode {
             for x in char_range {
                 if x >= tape.first {
-                    tape.instructions[x - tape.first] = Instr::Empty;
+                    tape.instructions[x - tape.first] = BasicInstr::Empty;
                 }
             }
         } else {
@@ -603,14 +603,14 @@ impl EventHandler for MyMiniquadApp {
                                     if ui.button("space ends").clicked() {
                                         for tape in loaded.base_world.tapes.iter_mut() {
                                             for _ in tape.instructions.len()..loaded.base_world.repeat_length{
-                                                tape.instructions.push(Instr::Empty);
+                                                tape.instructions.push(BasicInstr::Empty);
                                             }
                                         }
                                     }
                                     ui.separator();
                                     if ui.button("clear ends").clicked() {
                                         for tape in loaded.base_world.tapes.iter_mut() {
-                                            while tape.instructions.last() == Some(&Instr::Empty){
+                                            while tape.instructions.last() == Some(&BasicInstr::Empty){
                                                 tape.instructions.pop();
                                             }
                                         }
@@ -619,7 +619,7 @@ impl EventHandler for MyMiniquadApp {
                                         let mut pistons_added = 0;
                                         let mut pistons_removed = 0;
                                         for (arm, tape) in loaded.base_world.world.arms.iter_mut().zip(loaded.base_world.tapes.iter()) {
-                                            if tape.instructions.contains(&Instr::Extend) || tape.instructions.contains(&Instr::Retract) {
+                                            if tape.instructions.contains(&BasicInstr::Extend) || tape.instructions.contains(&BasicInstr::Retract) {
                                                 if arm.arm_type == ArmType::PlainArm {
                                                     arm.arm_type = ArmType::Piston;
                                                     pistons_added += 1;

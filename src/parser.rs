@@ -408,8 +408,8 @@ pub fn create_solution(world: &WorldWithTapes, puzzle_name: String, solution_nam
         let mut instructions = Vec::new();
         let mut step = tape.first as i32;
         for &instr in &tape.instructions {
-            if instr != Instr::Empty {
-                instructions.push((step, instr));
+            if instr != BasicInstr::Empty {
+                instructions.push((step, instr.into()));
             }
             step += 1;
         }
@@ -645,7 +645,7 @@ pub fn write_puzzle(f: &mut impl Write, puzzle: &FullPuzzle) -> Result<()> {
     Ok(())
 }
 
-fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape> {
+fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape<Instr>> {
     let mut first = usize::MAX; //A giant value
     let mut instructions = Vec::new();
     for &(pos, instr) in input {

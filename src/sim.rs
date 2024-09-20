@@ -49,9 +49,53 @@ fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError {
 pub type Rot = i32;
 pub type Pos = Vector2<i32>;
 
+/// A basic instruction that can be executed in one timestep (i.e. no Repeat,
+/// Reset, Noop)
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum BasicInstr {
+    Empty,
+    RotateClockwise,
+    RotateCounterClockwise,
+    Extend,
+    Retract,
+    Grab,
+    Drop,
+    PivotClockwise,
+    PivotCounterClockwise,
+    Forward,
+    Back,
+}
+
+impl BasicInstr {
+    pub fn from_char(input: char) -> Option<Self> {
+        match input {
+            'd' => Some(Self::RotateClockwise),
+            'a' => Some(Self::RotateCounterClockwise),
+            'w' => Some(Self::Extend),
+            's' => Some(Self::Retract),
+            'f' => Some(Self::Grab),
+            'r' => Some(Self::Drop),
+            'e' => Some(Self::PivotClockwise),
+            'q' => Some(Self::PivotCounterClockwise),
+            'g' => Some(Self::Forward),
+            't' => Some(Self::Back),
+            ' ' => Some(Self::Empty),
+            _ => None,
+        }
+    }
+    pub fn to_char(&self) -> char {
+        let instr: Instr = (*self).into();
+        instr.to_char()
+    }
+}
+
+/// An instruction that can be written into the saved solution tape (i.e.
+/// includes Repeat, Reset, Noop)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Instr {
+    Empty,
     RotateClockwise,
     RotateCounterClockwise,
     Extend,
@@ -65,8 +109,48 @@ pub enum Instr {
     Repeat,
     Reset,
     Noop,
-    Empty,
 }
+
+impl From<BasicInstr> for Instr {
+    fn from(value: BasicInstr) -> Self {
+        match value {
+            BasicInstr::Empty => Self::Empty,
+            BasicInstr::RotateClockwise => Self::RotateClockwise,
+            BasicInstr::RotateCounterClockwise => Self::RotateCounterClockwise,
+            BasicInstr::Extend => Self::Extend,
+            BasicInstr::Retract => Self::Retract,
+            BasicInstr::Grab => Self::Grab,
+            BasicInstr::Drop => Self::Drop,
+            BasicInstr::PivotClockwise => Self::PivotClockwise,
+            BasicInstr::PivotCounterClockwise => Self::PivotCounterClockwise,
+            BasicInstr::Forward => Self::Forward,
+            BasicInstr::Back => Self::Back,
+        }
+    }
+}
+
+impl TryFrom<Instr> for BasicInstr {
+    type Error = ();
+    fn try_from(value: Instr) -> std::result::Result<Self, Self::Error> {
+        match value {
+            Instr::Empty => Ok(Self::Empty),
+            Instr::RotateClockwise => Ok(Self::RotateClockwise),
+            Instr::RotateCounterClockwise => Ok(Self::RotateCounterClockwise),
+            Instr::Extend => Ok(Self::Extend),
+            Instr::Retract => Ok(Self::Retract),
+            Instr::Grab => Ok(Self::Grab),
+            Instr::Drop => Ok(Self::Drop),
+            Instr::PivotClockwise => Ok(Self::PivotClockwise),
+            Instr::PivotCounterClockwise => Ok(Self::PivotCounterClockwise),
+            Instr::Forward => Ok(Self::Forward),
+            Instr::Back => Ok(Self::Back),
+            Instr::Repeat => Err(()),
+            Instr::Reset => Err(()),
+            Instr::Noop => Err(()),
+        }
+    }
+}
+
 impl Instr {
     pub fn to_byte(&self) -> u8 {
         use Instr::*;
@@ -126,46 +210,46 @@ impl Instr {
             Empty => ' ',
         }
     }
-    pub fn from_char(input: char) -> Option<Self> {
-        use Instr::*;
-        match input {
-            'd' => Some(RotateClockwise),
-            'a' => Some(RotateCounterClockwise),
-            'w' => Some(Extend),
-            's' => Some(Retract),
-            'f' => Some(Grab),
-            'r' => Some(Drop),
-            'e' => Some(PivotClockwise),
-            'q' => Some(PivotCounterClockwise),
-            'g' => Some(Forward),
-            't' => Some(Back),
-            //'C' =>  Some(Repeat                ),
-            //'X' =>  Some(Reset                 ),
-            //'O' =>  Some(Noop                  ),
-            ' ' => Some(Empty),
-            _ => None,
-        }
+}
+
+pub trait InstrToChar {
+    fn to_char(&self) -> char;
+}
+
+impl InstrToChar for BasicInstr {
+    fn to_char(&self) -> char {
+        self.to_char()
+    }
+}
+
+impl InstrToChar for Instr {
+    fn to_char(&self) -> char {
+        self.to_char()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Tape {
+pub struct Tape<InstrT> {
     pub first: usize,
-    pub instructions: Vec<Instr>,
+    pub instructions: Vec<InstrT>,
 }
-impl Tape {
-    pub fn get(&self, timestep: usize, loop_len: usize) -> Instr {
-        use Instr::Empty;
+
+impl<InstrT: Copy + From<BasicInstr>> Tape<InstrT> {
+    pub fn get(&self, timestep: usize, loop_len: usize) -> InstrT {
+        use BasicInstr::Empty;
         if timestep >= self.first && loop_len > 0 {
             let after_first = timestep - self.first;
             *self
                 .instructions
                 .get(after_first % loop_len)
-                .unwrap_or(&Empty)
+                .unwrap_or(&Empty.into())
         } else {
-            Empty
+            Empty.into()
         }
     }
+}
+
+impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
     pub fn to_string(&self) -> String {
         let mut output = " ".repeat(self.first);
         for i in &self.instructions {
@@ -173,8 +257,9 @@ impl Tape {
         }
         output
     }
+
     pub fn noop_clear_and_string(&mut self) -> String {
-        while self.instructions.get(0).unwrap_or(&Instr::Noop) == &Instr::Empty {
+        while self.instructions.get(0) == Some(&BasicInstr::Empty.into()) {
             self.first += 1;
             self.instructions.remove(0);
         }
@@ -446,7 +531,7 @@ pub struct InitialWorld {
     pub arms: Vec<Arm>,
 
     /// Same length as `arms`
-    pub tapes: Vec<Tape>,
+    pub tapes: Vec<Tape<Instr>>,
 }
 
 pub type TrackMap = FxHashMap<Pos, Pos>;
@@ -887,7 +972,7 @@ impl World {
         &mut self,
         motion: &mut WorldStepInfo,
         arm_id: usize,
-        instruction: Instr,
+        instruction: BasicInstr,
     ) -> SimResult<()> {
         assert_eq!(
             motion.arms.len(),
@@ -897,7 +982,7 @@ impl World {
         let arm = &mut self.arms[arm_id];
         use ArmMovement::*;
         use ArmType::*;
-        use Instr::*;
+        use BasicInstr::*;
         use Movement::*;
         let arm_type = arm.arm_type;
         const STILL: ArmMovement = Move(HeldStill);
@@ -960,9 +1045,6 @@ impl World {
                 .minus
                 .get(&arm.pos)
                 .map_or(STILL, |&x| Move(Linear(x))),
-            Repeat | Reset | Noop => {
-                panic!("Unprocessed instruction!");
-            }
             Empty => (STILL),
         };
         let rotation_store = arm.rot;
@@ -1586,7 +1668,7 @@ impl World {
         mark_area: bool,
         motion: &mut WorldStepInfo,
         float_world: &mut FloatWorld,
-        instructions: &[Instr]
+        instructions: &[BasicInstr]
     ) -> SimResult<()> {
         self.prepare_step(motion, instructions)?;
         if mark_area {
@@ -1603,7 +1685,7 @@ impl World {
 
     /// Start a simulation step. This overwrites `motion` with information about
     /// the step.
-    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo, instructions: &[Instr]) -> SimResult<()> {
+    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo, instructions: &[BasicInstr]) -> SimResult<()> {
         motion.clear();
         assert_eq!(instructions.len(), self.arms.len());
         for i in 0..self.arms.len() {
@@ -1826,7 +1908,7 @@ impl World {
 #[derive(Debug, Clone)]
 pub struct WorldWithTapes {
     pub world: World,
-    pub tapes: Vec<Tape>,
+    pub tapes: Vec<Tape<BasicInstr>>,
     pub instruction_count: i32,
     pub repeat_length: usize,
 }
@@ -1834,12 +1916,12 @@ pub struct WorldWithTapes {
 impl WorldWithTapes {
     /// Modifies `original_tape` in-place to resolve Repeat and Reset instructions.
     /// Returns the length of the tape (repetition size)
-    fn normalize_instructions(original_arm: &Arm, original_tape: &mut Tape, track_maps: &TrackMaps) -> Result<usize> {
+    fn normalize_instructions(original_arm: &Arm, original_tape: &Tape<Instr>, track_maps: &TrackMaps) -> Result<(usize, Tape<BasicInstr>)> {
         use ArmType::*;
         use Instr::*;
         let arm_type = original_arm.arm_type;
         let old_instructions = &original_tape.instructions;
-        let mut instructions = Vec::with_capacity(old_instructions.len() + 8);
+        let mut instructions: Vec<BasicInstr> = Vec::with_capacity(old_instructions.len() + 8);
         let mut repeat_source = 0;
         let mut repeat_ending = 0;
         let mut any_nonrepeat = false;
@@ -1871,46 +1953,43 @@ impl WorldWithTapes {
                 any_nonrepeat = true;
                 repeat_source = curr;
             }
-            if !matches!(instr, Repeat | Reset | Noop) {
-                instructions.push(instr);
+            if let Ok(basic_instr) = instr.try_into() {
+                instructions.push(basic_instr);
                 curr += 1;
             }
-            let mut basic_move = |instr: Instr| -> Result<()> {
+            let mut basic_move = |instr: BasicInstr| -> Result<()> {
                 match instr {
-                    Extend => {
+                    BasicInstr::Extend => {
                         if arm_type == Piston && len < 3 {
                             len += 1;
                         }
                     }
-                    Retract => {
+                    BasicInstr::Retract => {
                         if arm_type == Piston && len > 1 {
                             len -= 1;
                         }
                     }
-                    RotateCounterClockwise => {
+                    BasicInstr::RotateCounterClockwise => {
                         rot_diff += 1;
                     }
-                    RotateClockwise => {
+                    BasicInstr::RotateClockwise => {
                         rot_diff -= 1;
                     }
-                    Grab => known_grab = true,
-                    Drop => known_grab = false,
-                    Forward => {
+                    BasicInstr::Grab => known_grab = true,
+                    BasicInstr::Drop => known_grab = false,
+                    BasicInstr::Forward => {
                         if let Some(offset) = track_maps.plus.get(&position_check) {
                             track_steps += 1;
                             position_check += offset;
                         }
                     }
-                    Back => {
+                    BasicInstr::Back => {
                         if let Some(offset) = track_maps.minus.get(&position_check) {
                             track_steps -= 1;
                             position_check += offset;
                         }
                     }
-                    PivotCounterClockwise | PivotClockwise | Empty => {}
-                    Reset | Repeat | Noop => {
-                        bail!("Instruction {:?} not basic move!", instr);
-                    }
+                    BasicInstr::PivotCounterClockwise | BasicInstr::PivotClockwise | BasicInstr::Empty => {}
                 }
                 Ok(())
             };
@@ -1925,7 +2004,7 @@ impl WorldWithTapes {
                 | Back
                 | PivotCounterClockwise
                 | PivotClockwise => {
-                    basic_move(instr)?;
+                    basic_move(instr.try_into().unwrap())?;
                     repeat_ending = curr;
                 }
                 Empty => {}
@@ -1933,7 +2012,7 @@ impl WorldWithTapes {
                 Repeat => {
                     let rep_len = repeat_ending - repeat_source;
                     if rep_len == 0 {
-                        instructions.push(Empty);
+                        instructions.push(BasicInstr::Empty);
                         curr += 1;
                     } else {
                         for i in 0..rep_len {
@@ -1963,13 +2042,13 @@ impl WorldWithTapes {
                     }
                 }
                 Reset => {
-                    let mut reset_vec = Vec::new();
+                    let mut reset_vec: Vec<BasicInstr> = Vec::new();
                     if known_grab {
-                        reset_vec.push(Drop);
+                        reset_vec.push(BasicInstr::Drop);
                         known_grab = false;
                     }
                     while len > original_arm.len {
-                        reset_vec.push(Retract);
+                        reset_vec.push(BasicInstr::Retract);
                         len -= 1;
                     }
                     while rot_diff > 3 {
@@ -1979,11 +2058,11 @@ impl WorldWithTapes {
                         rot_diff += 6;
                     }
                     while rot_diff > 0 {
-                        reset_vec.push(RotateClockwise);
+                        reset_vec.push(BasicInstr::RotateClockwise);
                         rot_diff -= 1;
                     }
                     while rot_diff < 0 {
-                        reset_vec.push(RotateCounterClockwise);
+                        reset_vec.push(BasicInstr::RotateCounterClockwise);
                         rot_diff += 1;
                     }
                     // look for a path forward on the track that's shorter than
@@ -1997,21 +2076,21 @@ impl WorldWithTapes {
                         }
                     }
                     while track_steps > 0 {
-                        reset_vec.push(Back);
+                        reset_vec.push(BasicInstr::Back);
                         track_steps -= 1;
                     }
                     while track_steps < 0 {
-                        reset_vec.push(Forward);
+                        reset_vec.push(BasicInstr::Forward);
                         track_steps += 1;
                     }
                     while len < original_arm.len {
-                        reset_vec.push(Extend);
+                        reset_vec.push(BasicInstr::Extend);
                         len += 1;
                     }
                     position_check = original_arm.pos;
 
                     if reset_vec.len() == 0 {
-                        reset_vec.push(Empty)
+                        reset_vec.push(BasicInstr::Empty);
                     };
                     for i in 0..reset_vec.len() {
                         ensure!(
@@ -2029,18 +2108,18 @@ impl WorldWithTapes {
                     repeat_ending = curr;
                 }
                 Noop => {
-                    instructions.push(Empty);
+                    instructions.push(BasicInstr::Empty);
                     curr += 1;
                 }
             };
         }
         instructions.shrink_to_fit();
         let len = instructions.len();
-        *original_tape = Tape {
+        let new_tape = Tape {
             first: original_tape.first,
             instructions,
         };
-        Ok(len)
+        Ok((len, new_tape))
     }
 
     /// The main initialization function. Creates the initial state of the world
@@ -2048,18 +2127,19 @@ impl WorldWithTapes {
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
         let mut self_ = Self {
             world: World::setup_sim(init)?,
-            tapes: init.tapes.clone(),
+            tapes: Vec::new(),
             instruction_count: 0,
             repeat_length: 0,
         };
-        assert_eq!(self_.world.arms.len(), self_.tapes.len());
-        for (arm, tape) in self_.world.arms.iter().zip(self_.tapes.iter_mut()) {
-            let instr_len = Self::normalize_instructions(arm, tape, &self_.world.track_maps)?;
+        assert_eq!(self_.world.arms.len(), init.tapes.len());
+        for (arm, init_tape) in self_.world.arms.iter().zip(init.tapes.iter()) {
+            let (instr_len, tape) = Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
             self_.instruction_count += tape
                 .instructions
                 .iter()
-                .filter(|&&a| a != Instr::Empty)
+                .filter(|&&a| a != BasicInstr::Empty)
                 .count() as i32;
+            self_.tapes.push(tape);
             if self_.repeat_length < instr_len {
                 self_.repeat_length = instr_len;
             }
@@ -2068,7 +2148,7 @@ impl WorldWithTapes {
         Ok(self_)
     }
 
-    fn get_instructions(&self) -> Vec<Instr> {
+    fn get_instructions(&self) -> Vec<BasicInstr> {
         self.tapes.iter().map(|tape| tape.get(self.world.timestep as usize, self.repeat_length)).collect()
     }
 
