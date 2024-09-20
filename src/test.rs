@@ -32,6 +32,31 @@ fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: fs::ReadDir) {
     }
 }
 
+fn read_solution_recurse(
+    stats: &mut (usize, usize),
+    puzzle_map: &PuzzleMap,
+    directory: fs::ReadDir,
+) {
+    for f in directory {
+        if let Ok(f) = f {
+            let ftype = f.file_type().unwrap();
+            if ftype.is_dir() {
+                read_solution_recurse(stats, puzzle_map, fs::read_dir(f.path()).unwrap());
+            } else if ftype.is_file() {
+                let fpath = f.path();
+                let lname = fpath.to_str().unwrap().to_ascii_lowercase();
+                /*if lname.contains("overlap") || lname.contains("tourney-2019\\week6") || lname.contains("tourney-2021\\week 6"){
+                    //println!("----{:?}",fpath);
+                    continue;
+                }*/
+                if lname.contains(".solution") {
+                    check_solution(stats, &fpath, puzzle_map);
+                }
+            }
+        }
+    }
+}
+
 fn check_solution(stats: &mut (usize, usize), fpath: &Path, puzzle_map: &PuzzleMap) {
     let f_sol = File::open(fpath).unwrap();
     let sol_maybe = parse_solution(&mut BufReader::new(f_sol));
@@ -99,30 +124,6 @@ fn check_all() {
     std::env::set_var("RUST_BACKTRACE", "full");
     let mut puzzle_map = PuzzleMap::new();
     read_puzzle_recurse(&mut puzzle_map, fs::read_dir(PUZZLE_DIR).unwrap());
-    fn read_solution_recurse(
-        stats: &mut (usize, usize),
-        puzzle_map: &PuzzleMap,
-        directory: fs::ReadDir,
-    ) {
-        for f in directory {
-            if let Ok(f) = f {
-                let ftype = f.file_type().unwrap();
-                if ftype.is_dir() {
-                    read_solution_recurse(stats, puzzle_map, fs::read_dir(f.path()).unwrap());
-                } else if ftype.is_file() {
-                    let fpath = f.path();
-                    let lname = fpath.to_str().unwrap().to_ascii_lowercase();
-                    /*if lname.contains("overlap") || lname.contains("tourney-2019\\week6") || lname.contains("tourney-2021\\week 6"){
-                        //println!("----{:?}",fpath);
-                        continue;
-                    }*/
-                    if lname.contains(".solution") {
-                        check_solution(stats, &fpath, puzzle_map);
-                    }
-                }
-            }
-        }
-    }
     let mut stats = (0, 0);
     read_solution_recurse(
         &mut stats,
