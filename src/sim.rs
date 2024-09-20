@@ -450,6 +450,51 @@ impl Glyph {
     pub fn reposition(&self, rel_pos: Pos) -> Pos {
         self.pos + rotate(rel_pos, self.rot)
     }
+    pub fn positions(&self) -> SmallVec<[Pos; 7]> {
+        let pos = self.pos; //primary position
+        let pos_bi = self.reposition(Pos::new(1, 0)); //position for all 2-sized selfs
+        let pos_tri = self.reposition(Pos::new(0, 1)); //third (closely packed) position
+
+        let pos_ani = self.reposition(Pos::new(1, -1));
+
+        let pos_disp2 = self.reposition(Pos::new(1, -1));
+        let pos_disp3 = self.reposition(Pos::new(0, -1));
+        let pos_disp4 = self.reposition(Pos::new(-1, 0));
+
+        let pos_multi2 = self.reposition(Pos::new(0, -1));
+        let pos_multi3 = self.reposition(Pos::new(-1, 1));
+
+        let pos_unif2 = self.reposition(Pos::new(-1, 1));
+        let pos_unif3 = self.reposition(Pos::new(0, -1));
+        let pos_unif4 = self.reposition(Pos::new(1, -1));
+
+        match &self.glyph_type {
+            GlyphType::Calcification => smallvec::smallvec![pos],
+            GlyphType::Animismus => smallvec::smallvec![pos, pos_bi, pos_tri, pos_ani],
+            GlyphType::Projection => smallvec::smallvec![pos, pos_bi],
+            GlyphType::Dispersion => smallvec::smallvec![pos, pos_bi, pos_disp2, pos_disp3, pos_disp4],
+            GlyphType::Unification => smallvec::smallvec![pos, pos_tri, pos_unif2, pos_unif3, pos_unif4],
+            GlyphType::Purification => smallvec::smallvec![pos, pos_bi, pos_tri],
+            GlyphType::Duplication => smallvec::smallvec![pos, pos_bi],
+            GlyphType::Bonding => smallvec::smallvec![pos, pos_bi],
+            GlyphType::MultiBond => smallvec::smallvec![pos, pos_bi, pos_multi2, pos_multi3],
+            GlyphType::TriplexBond => smallvec::smallvec![pos, pos_bi, pos_tri],
+            GlyphType::Unbonding => smallvec::smallvec![pos, pos_bi],
+            GlyphType::Input(pattern, _)
+            | GlyphType::Output(pattern, _, _)
+            | GlyphType::OutputRepeating(pattern, _, _) => {
+                pattern.iter().map(|a| a.pos).collect()
+            }
+            GlyphType::Track(pos_list) => pos_list.iter().copied().collect(),
+            GlyphType::Disposal => smallvec::smallvec![
+                    pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,
+                ],
+            GlyphType::Conduit(_atom_teleport, _) => smallvec::smallvec![
+                //TODO
+            ],
+            GlyphType::Equilibrium => smallvec::smallvec![pos],
+        }
+    }
     //returns true if it was a glyph that can be repositioned
     pub fn reposition_pattern(&mut self) -> bool {
         use GlyphType::*;
@@ -1071,70 +1116,12 @@ impl World {
     fn initial_area(&mut self) -> SimResult<()> {
         use GlyphType::*;
         for glyph in &mut self.glyphs {
-            let pos = glyph.pos; //primary position
-            let pos_bi = glyph.reposition(Pos::new(1, 0)); //position for all 2-sized glyphs
-            let pos_tri = glyph.reposition(Pos::new(0, 1)); //third (closely packed) position
-
-            let pos_ani = glyph.reposition(Pos::new(1, -1));
-
-            let pos_disp2 = glyph.reposition(Pos::new(1, -1));
-            let pos_disp3 = glyph.reposition(Pos::new(0, -1));
-            let pos_disp4 = glyph.reposition(Pos::new(-1, 0));
-
-            let pos_multi2 = glyph.reposition(Pos::new(0, -1));
-            let pos_multi3 = glyph.reposition(Pos::new(-1, 1));
-
-            let pos_unif2 = glyph.reposition(Pos::new(-1, 1));
-            let pos_unif3 = glyph.reposition(Pos::new(0, -1));
-            let pos_unif4 = glyph.reposition(Pos::new(1, -1));
-            fn add_all(
-                area_set: &mut FxHashSet<Pos>,
-                input: impl IntoIterator<Item = Pos>,
-            ) -> SimResult<()> {
-                for p in input {
-                    area_set.insert(p);
-                    /*if !area_set.insert(p){
-                        return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
-                    }*/
-                }
-                Ok(())
+            for p in glyph.positions() {
+                self.area_touched.insert(p);
+                /*if !self.area_touched.insert(p){
+                return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
+            }*/
             }
-            match &glyph.glyph_type {
-                Calcification => add_all(&mut self.area_touched, [pos]),
-                Animismus => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri, pos_ani]),
-                Projection => add_all(&mut self.area_touched, [pos, pos_bi]),
-                Dispersion => add_all(
-                    &mut self.area_touched,
-                    [pos, pos_bi, pos_disp2, pos_disp3, pos_disp4],
-                ),
-                Unification => add_all(
-                    &mut self.area_touched,
-                    [pos, pos_tri, pos_unif2, pos_unif3, pos_unif4],
-                ),
-                Purification => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
-                Duplication => add_all(&mut self.area_touched, [pos, pos_bi]),
-                Bonding => add_all(&mut self.area_touched, [pos, pos_bi]),
-                MultiBond => add_all(
-                    &mut self.area_touched,
-                    [pos, pos_bi, pos_multi2, pos_multi3],
-                ),
-                TriplexBond => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
-                Unbonding => add_all(&mut self.area_touched, [pos, pos_bi]),
-                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
-                    add_all(&mut self.area_touched, pattern.iter().map(|a| a.pos))
-                }
-                Track(pos_list) => add_all(&mut self.area_touched, pos_list.iter().copied()),
-                Disposal => add_all(
-                    &mut self.area_touched,
-                    [
-                        pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,
-                    ],
-                ),
-                Conduit(_atom_teleport, _) => {
-                    Ok(()) //TODO
-                }
-                Equilibrium => add_all(&mut self.area_touched, [pos]),
-            }?;
         }
         Ok(())
     }
