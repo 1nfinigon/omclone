@@ -1,4 +1,4 @@
-use crate::{parser, render_library::GFXPos, render_sim::*, sim::*};
+use crate::{parser, render_library::GFXPos, render_sim::*, sim::*, utils};
 use miniquad::*;
 use std::{io::prelude::*, io::BufReader, io::BufWriter};
 
@@ -287,7 +287,7 @@ impl MyMiniquadApp {
     pub fn new() -> Self {
         let mut mq_ctx = window::new_rendering_backend();
         let render_data = RenderDataBase::new(mq_ctx.as_mut());
-        let (base_str, puzzle_str, solution_str) = get_default_path_strs();
+        let (base_str, puzzle_str, solution_str) = utils::get_default_path_strs();
         let base = String::from(base_str);
         let puzzle = String::from(puzzle_str);
         let solution = String::from(solution_str);

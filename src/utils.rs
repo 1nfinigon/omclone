@@ -30,3 +30,12 @@ pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: fs::ReadDir) {
         }
     }
 }
+
+pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str) {
+    const DEFAULT_PATHS: &str = include_str!("default_paths.txt");
+    let mut path_data = DEFAULT_PATHS.lines();
+    let base = path_data.next().unwrap();
+    let puzzle = path_data.next().unwrap();
+    let solution = path_data.next().unwrap();
+    (base, puzzle, solution)
+}
