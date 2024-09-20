@@ -1,9 +1,14 @@
-use crate::parser::*;
+use crate::parser;
 use crate::sim::*;
 use std::{collections::HashMap, fs, fs::File, io::BufReader, path::Path};
 
+#[cfg(feature = "color_eyre")]
+use color_eyre::Result;
+#[cfg(not(feature = "color_eyre"))]
+use simple_eyre::Result;
+
 pub const PUZZLE_DIR: &str = "test/puzzle";
-pub type PuzzleMap = HashMap<String, FullPuzzle>;
+pub type PuzzleMap = HashMap<String, parser::FullPuzzle>;
 pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: fs::ReadDir) {
     for f in directory {
         if let Ok(f) = f {
@@ -13,7 +18,7 @@ pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: fs::ReadDir) {
             } else if ftype.is_file() {
                 let f_puzzle = File::open(f.path()).unwrap();
                 let fname = f.file_name().into_string().unwrap().replace(".puzzle", "");
-                if let Ok(puzzle) = parse_puzzle(&mut BufReader::new(f_puzzle)) {
+                if let Ok(puzzle) = parser::parse_puzzle(&mut BufReader::new(f_puzzle)) {
                     if puzzle.outputs.iter().any(|atoms| {
                         atoms
                             .iter()
@@ -38,4 +43,14 @@ pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str) {
     let puzzle = path_data.next().unwrap();
     let solution = path_data.next().unwrap();
     (base, puzzle, solution)
+}
+
+pub fn get_default_puzzle_solution() -> Result<(parser::FullPuzzle, parser::FullSolution)> {
+    let (base_str, puzzle_str, solution_str) = get_default_path_strs();
+    let base_path = Path::new(base_str);
+    let f_puzzle = File::open(base_path.join(puzzle_str))?;
+    let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle))?;
+    let f_sol = File::open(base_path.join(solution_str))?;
+    let sol = parser::parse_solution(&mut BufReader::new(f_sol))?;
+    Ok((puzzle, sol))
 }

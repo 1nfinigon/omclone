@@ -13,12 +13,7 @@ fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "full");
     install()?;
 
-    let (base_str, puzzle_str, solution_str) = utils::get_default_path_strs();
-    let base_path = Path::new(base_str);
-    let f_puzzle = File::open(base_path.join(puzzle_str))?;
-    let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puzzle))?;
-    let f_sol = File::open(base_path.join(solution_str))?;
-    let sol = parser::parse_solution(&mut BufReader::new(f_sol))?;
+    let (puzzle, sol) = utils::get_default_puzzle_solution()?;
     //println!("Check: {:?}", sol.stats);
     let init = parser::puzzle_prep(&puzzle, &sol)?;
 

@@ -1,5 +1,6 @@
 mod parser;
 mod sim;
+mod utils;
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::{eyre::Result, install};
@@ -13,7 +14,7 @@ fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "full");
     install()?;
 
-    let (base_str, puzzle_str, _solution_str) = sim::get_default_path_strs();
+    let (base_str, puzzle_str, _solution_str) = utils::get_default_path_strs();
     let base = PathBuf::from(String::from(base_str));
     let puzzle = String::from(puzzle_str);
     //let solution = String::from(solution_str);
