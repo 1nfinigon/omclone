@@ -472,8 +472,12 @@ impl Glyph {
             GlyphType::Calcification => smallvec::smallvec![pos],
             GlyphType::Animismus => smallvec::smallvec![pos, pos_bi, pos_tri, pos_ani],
             GlyphType::Projection => smallvec::smallvec![pos, pos_bi],
-            GlyphType::Dispersion => smallvec::smallvec![pos, pos_bi, pos_disp2, pos_disp3, pos_disp4],
-            GlyphType::Unification => smallvec::smallvec![pos, pos_tri, pos_unif2, pos_unif3, pos_unif4],
+            GlyphType::Dispersion => {
+                smallvec::smallvec![pos, pos_bi, pos_disp2, pos_disp3, pos_disp4]
+            }
+            GlyphType::Unification => {
+                smallvec::smallvec![pos, pos_tri, pos_unif2, pos_unif3, pos_unif4]
+            }
             GlyphType::Purification => smallvec::smallvec![pos, pos_bi, pos_tri],
             GlyphType::Duplication => smallvec::smallvec![pos, pos_bi],
             GlyphType::Bonding => smallvec::smallvec![pos, pos_bi],
@@ -482,13 +486,11 @@ impl Glyph {
             GlyphType::Unbonding => smallvec::smallvec![pos, pos_bi],
             GlyphType::Input(pattern, _)
             | GlyphType::Output(pattern, _, _)
-            | GlyphType::OutputRepeating(pattern, _, _) => {
-                pattern.iter().map(|a| a.pos).collect()
-            }
+            | GlyphType::OutputRepeating(pattern, _, _) => pattern.iter().map(|a| a.pos).collect(),
             GlyphType::Track(pos_list) => pos_list.iter().copied().collect(),
-            GlyphType::Disposal => smallvec::smallvec![
-                    pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,
-                ],
+            GlyphType::Disposal => {
+                smallvec::smallvec![pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,]
+            }
             GlyphType::Conduit(_atom_teleport, _) => smallvec::smallvec![
                 //TODO
             ],
@@ -1119,8 +1121,8 @@ impl World {
             for p in glyph.positions() {
                 self.area_touched.insert(p);
                 /*if !self.area_touched.insert(p){
-                return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
-            }*/
+                    return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
+                }*/
             }
         }
         Ok(())
