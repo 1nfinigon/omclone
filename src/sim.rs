@@ -454,9 +454,7 @@ impl Glyph {
     pub fn reposition_pattern(&mut self) -> bool {
         use GlyphType::*;
         match &mut self.glyph_type {
-            Input(pattern, _)
-            | Output(pattern, _, _)
-            | OutputRepeating(pattern, _, _) => {
+            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
                 for a in pattern {
                     a.pos = self.pos + rotate(a.pos, self.rot);
                     a.rotate_connections(self.rot);
@@ -1122,9 +1120,7 @@ impl World {
                 ),
                 TriplexBond => add_all(&mut self.area_touched, [pos, pos_bi, pos_tri]),
                 Unbonding => add_all(&mut self.area_touched, [pos, pos_bi]),
-                Input(pattern, _)
-                | Output(pattern, _, _)
-                | OutputRepeating(pattern, _, _) => {
+                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
                     add_all(&mut self.area_touched, pattern.iter().map(|a| a.pos))
                 }
                 Track(pos_list) => add_all(&mut self.area_touched, pos_list.iter().copied()),
@@ -1149,10 +1145,7 @@ impl World {
             let atoms = &mut self.atoms;
             match &mut glyph.glyph_type {
                 Input(pattern, _) => {
-                    if pattern
-                        .iter()
-                        .all(|a| atoms.check_empty(motion, a.pos))
-                    {
+                    if pattern.iter().all(|a| atoms.check_empty(motion, a.pos)) {
                         for a in pattern {
                             atoms.create_atom(a.clone())?;
                         }
@@ -1668,7 +1661,7 @@ impl World {
         mark_area: bool,
         motion: &mut WorldStepInfo,
         float_world: &mut FloatWorld,
-        instructions: &[BasicInstr]
+        instructions: &[BasicInstr],
     ) -> SimResult<()> {
         self.prepare_step(motion, instructions)?;
         if mark_area {
@@ -1685,7 +1678,11 @@ impl World {
 
     /// Start a simulation step. This overwrites `motion` with information about
     /// the step.
-    pub fn prepare_step(&mut self, motion: &mut WorldStepInfo, instructions: &[BasicInstr]) -> SimResult<()> {
+    pub fn prepare_step(
+        &mut self,
+        motion: &mut WorldStepInfo,
+        instructions: &[BasicInstr],
+    ) -> SimResult<()> {
         motion.clear();
         assert_eq!(instructions.len(), self.arms.len());
         for i in 0..self.arms.len() {
@@ -1866,10 +1863,7 @@ impl World {
         let mut unfinished_conduit_count = 0;
         for (id, glyph) in world.glyphs.iter_mut().enumerate() {
             if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
-                if pattern
-                    .iter()
-                    .all(|a| world.atoms.locs.get(&a.pos) == None)
-                {
+                if pattern.iter().all(|a| world.atoms.locs.get(&a.pos) == None) {
                     for a in pattern {
                         world.atoms.create_atom(a.clone())?;
                     }
@@ -1916,7 +1910,11 @@ pub struct WorldWithTapes {
 impl WorldWithTapes {
     /// Modifies `original_tape` in-place to resolve Repeat and Reset instructions.
     /// Returns the length of the tape (repetition size)
-    fn normalize_instructions(original_arm: &Arm, original_tape: &Tape<Instr>, track_maps: &TrackMaps) -> Result<(usize, Tape<BasicInstr>)> {
+    fn normalize_instructions(
+        original_arm: &Arm,
+        original_tape: &Tape<Instr>,
+        track_maps: &TrackMaps,
+    ) -> Result<(usize, Tape<BasicInstr>)> {
         use ArmType::*;
         use Instr::*;
         let arm_type = original_arm.arm_type;
@@ -1989,7 +1987,9 @@ impl WorldWithTapes {
                             position_check += offset;
                         }
                     }
-                    BasicInstr::PivotCounterClockwise | BasicInstr::PivotClockwise | BasicInstr::Empty => {}
+                    BasicInstr::PivotCounterClockwise
+                    | BasicInstr::PivotClockwise
+                    | BasicInstr::Empty => {}
                 }
                 Ok(())
             };
@@ -2133,7 +2133,8 @@ impl WorldWithTapes {
         };
         assert_eq!(self_.world.arms.len(), init.tapes.len());
         for (arm, init_tape) in self_.world.arms.iter().zip(init.tapes.iter()) {
-            let (instr_len, tape) = Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
+            let (instr_len, tape) =
+                Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
             self_.instruction_count += tape
                 .instructions
                 .iter()
@@ -2149,16 +2150,20 @@ impl WorldWithTapes {
     }
 
     fn get_instructions(&self) -> Vec<BasicInstr> {
-        self.tapes.iter().map(|tape| tape.get(self.world.timestep as usize, self.repeat_length)).collect()
+        self.tapes
+            .iter()
+            .map(|tape| tape.get(self.world.timestep as usize, self.repeat_length))
+            .collect()
     }
 
     pub fn run_step(
         &mut self,
         mark_area: bool,
         motion: &mut WorldStepInfo,
-        float_world: &mut FloatWorld
+        float_world: &mut FloatWorld,
     ) -> SimResult<()> {
-        self.world.run_step(mark_area, motion, float_world, &self.get_instructions())
+        self.world
+            .run_step(mark_area, motion, float_world, &self.get_instructions())
     }
 
     pub fn prepare_step(&mut self, motion: &mut WorldStepInfo) -> SimResult<()> {

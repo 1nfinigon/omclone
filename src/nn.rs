@@ -44,17 +44,16 @@ struct Arm {
     exists: Binary,
     grabbing: Binary,
     holding_atom: Binary,
-    plain_arm: [ArmGen<2,3,4>; 6],
-    double_arm: [ArmGen<3,5,7>; 3],
-    triple_arm: [ArmGen<4,7,10>; 2],
-    hex_arm: [ArmGen<7,13,19>; 1],
-    piston: [ArmGen<2,3,4>; 6],
+    plain_arm: [ArmGen<2, 3, 4>; 6],
+    double_arm: [ArmGen<3, 5, 7>; 3],
+    triple_arm: [ArmGen<4, 7, 10>; 2],
+    hex_arm: [ArmGen<7, 13, 19>; 1],
+    piston: [ArmGen<2, 3, 4>; 6],
     van_berlo: [OneHot<7>; 6],
 }
 
 #[derive(Copy, Clone, OmnnFeature)]
-struct Glyph<const N: usize>(
-    [OneHot<N_ORIENTATIONS>; N]);
+struct Glyph<const N: usize>([OneHot<N_ORIENTATIONS>; N]);
 
 #[derive(Copy, Clone, OmnnFeature)]
 struct Glyphs {
@@ -89,7 +88,12 @@ struct Bond {
 
 impl OmnnFeatureWrite<sim::Bonds> for Bond {
     fn write_internal(&self, data: sim::Bonds, offset: &mut u64, output: &mut Vec<u64>) {
-        let Self {normal, triplex_r, triplex_k, triplex_y} = self;
+        let Self {
+            normal,
+            triplex_r,
+            triplex_k,
+            triplex_y,
+        } = self;
         normal.write(data.intersects(sim::Bonds::NORMAL), offset, output);
         triplex_r.write(data.intersects(sim::Bonds::TRIPLEX_R), offset, output);
         triplex_k.write(data.intersects(sim::Bonds::TRIPLEX_K), offset, output);
@@ -98,9 +102,7 @@ impl OmnnFeatureWrite<sim::Bonds> for Bond {
 }
 
 #[derive(Copy, Clone, OmnnFeature)]
-struct AtomType (
-    OneHot<17>
-);
+struct AtomType(OneHot<17>);
 
 impl OmnnFeatureWrite<sim::AtomType> for AtomType {
     fn write_internal(&self, data: sim::AtomType, offset: &mut u64, output: &mut Vec<u64>) {

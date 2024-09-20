@@ -350,7 +350,11 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
     }
     Ok(solution_output)
 }
-pub fn create_solution(world: &WorldWithTapes, puzzle_name: String, solution_name: String) -> FullSolution {
+pub fn create_solution(
+    world: &WorldWithTapes,
+    puzzle_name: String,
+    solution_name: String,
+) -> FullSolution {
     let stats = None;
     let mut solution_output = FullSolution {
         puzzle_name,
@@ -534,8 +538,12 @@ fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
             if !bond_type.is_empty() {
                 let mut from_pos = pattern[atom1_idx].pos;
                 let mut to_pos = pattern[atom1_idx].pos + rot_to_pos(angle);
-                let atom2_idx = *atom_locs.get(&to_pos).ok_or(eyre!("bond to nonatom position"))?;
-                ensure!(pattern[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type);
+                let atom2_idx = *atom_locs
+                    .get(&to_pos)
+                    .ok_or(eyre!("bond to nonatom position"))?;
+                ensure!(
+                    pattern[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type
+                );
                 if (from_pos.x, from_pos.y) > (to_pos.x, to_pos.y) {
                     std::mem::swap(&mut from_pos, &mut to_pos);
                 }
@@ -587,8 +595,7 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     let puzzle_name = parse_str(f)?;
     let creator_id = parse_u64(f)?;
     let allowed_parts = parse_u64(f)?;
-    let allowed_parts =
-        AllowedParts::from_bits(allowed_parts)
+    let allowed_parts = AllowedParts::from_bits(allowed_parts)
         .ok_or(eyre!("allowed parts bitfield error: {:b}", allowed_parts))?;
     let mut inputs = Vec::new();
     for _ in 0..parse_i32(f)? {
@@ -768,6 +775,13 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
         }
     }
     arms_and_tapes.sort_by(|a, b| a.2.cmp(&b.2));
-    let (arms, tapes) = arms_and_tapes.into_iter().map(|(arm, tape, _)| (arm, tape)).unzip();
-    Ok(InitialWorld { glyphs, arms, tapes })
+    let (arms, tapes) = arms_and_tapes
+        .into_iter()
+        .map(|(arm, tape, _)| (arm, tape))
+        .unzip();
+    Ok(InitialWorld {
+        glyphs,
+        arms,
+        tapes,
+    })
 }

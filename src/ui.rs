@@ -197,7 +197,9 @@ impl Loaded {
         }
         if self.curr_substep == self.substep_count {
             self.curr_substep = 0;
-            self.curr_world.world.finalize_step(&mut self.saved_motions)?;
+            self.curr_world
+                .world
+                .finalize_step(&mut self.saved_motions)?;
         }
         Ok(())
     }
@@ -231,8 +233,8 @@ impl Loaded {
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed(output.location);
                     self.message = Some(output.to_string());
-                    self.curr_time =
-                        self.curr_world.world.timestep as f64 + (substep_time * self.curr_substep as f64);
+                    self.curr_time = self.curr_world.world.timestep as f64
+                        + (substep_time * self.curr_substep as f64);
                     return;
                 }
             }
@@ -245,14 +247,15 @@ impl Loaded {
         let target_timestep = target_time.floor() as u64;
         let target_substep = (target_time.fract() * self.substep_count as f64).floor() as usize;
         while self.curr_world.world.timestep < target_timestep
-            || (self.curr_world.world.timestep == target_timestep && self.curr_substep < target_substep)
+            || (self.curr_world.world.timestep == target_timestep
+                && self.curr_substep < target_substep)
         {
             let output = self.advance(&mut substep_time);
             if let Err(output) = output {
                 self.run_state = RunState::Crashed(output.location);
                 self.message = Some(output.to_string());
-                self.curr_time =
-                    self.curr_world.world.timestep as f64 + (substep_time * self.curr_substep as f64);
+                self.curr_time = self.curr_world.world.timestep as f64
+                    + (substep_time * self.curr_substep as f64);
                 return;
             }
         }

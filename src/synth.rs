@@ -6,8 +6,8 @@ use color_eyre::{eyre::Result, install};
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::{eyre::Result, install};
 
-use std::{io::prelude::*, io::BufReader, io::BufWriter};
 use std::{fs::File, path::PathBuf};
+use std::{io::prelude::*, io::BufReader, io::BufWriter};
 
 fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "full");

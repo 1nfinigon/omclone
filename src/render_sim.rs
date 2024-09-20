@@ -482,9 +482,7 @@ impl RenderDataBase {
             use GlyphType::*;
             temp_atoms_vec.clear();
             match &glyph.glyph_type {
-                Input(pattern, _)
-                | Output(pattern, _, _)
-                | OutputRepeating(pattern, _, _) => {
+                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
                     for atom in pattern {
                         temp_atoms_vec.push(atom.into());
                     }
@@ -541,9 +539,7 @@ impl RenderDataBase {
                 TriplexBond => 10,
                 Unbonding => 11,
                 Unification => 12,
-                Input(pattern, _)
-                | Output(pattern, _, _)
-                | OutputRepeating(pattern, _, _) => {
+                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for atom in pattern {
                         //transparent cover
