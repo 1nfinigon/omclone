@@ -1,19 +1,16 @@
-# omclone
-A runner of Opus Magnum solutions with a UI that will help long tape solves.
+```
+$ cargo run --features color_eyre,display_ui,editor_ui --bin omclone
+$ cargo run --features color_eyre,benchmark --bin omclone_benchmark
+$ cargo test --features color_eyre,display_ui,editor_ui --bin omclone -- --nocapture
+```
 
-Before compiling, you should rename "default_paths_SAMPLE.txt" to "default_paths.txt"
-and edit the correct path to your Opus Magnum puzzle/solution folder into it.
+# In progress
 
-Code is heavily influenced by omsim (https://github.com/ianh/omsim).
+-   Actions for a single arm at a time (in order)
+-   Simple MCTS without graph search
 
+# Future work
 
-Enable only one of "editor_ui" or "display_ui" to get the corresponding app
-You can use "cargo build --release --target wasm32-unknown-unknown" to build the js version. Example html pages are in display_html
-You may want to change between opt-level "3" and "s" for executable vs. wasm respectively.
-----
-Enable feature "color-eyre" for improved error reporting. Right now most errors hard crash.
-Enable "benchmark" to get a program which will just run the default solution forever (useful for performance analysis)
-
-To use "hab_checker", uncomment its lib in Cargo.toml, enable "bindgen" and compile with "wasm-pack build --target web".
-
-You used to be able to enable "cx_checker" and compile with "wasm-pack build --target no-modules" to get the .wasm and .js in pkg folder. However, this functionality is currently broken.
+-   Parallelise MCTS, batch NN evlaluations
+-   Does allowing action selection for any arm (rather than the next one in order)
+    improve strength?

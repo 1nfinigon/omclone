@@ -68,6 +68,38 @@ pub enum BasicInstr {
 }
 
 impl BasicInstr {
+    pub const LEN_AS_U8: u8 = 11;
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Self::Empty => 0,
+            Self::RotateClockwise => 1,
+            Self::RotateCounterClockwise => 2,
+            Self::Extend => 3,
+            Self::Retract => 4,
+            Self::Grab => 5,
+            Self::Drop => 6,
+            Self::PivotClockwise => 7,
+            Self::PivotCounterClockwise => 8,
+            Self::Forward => 9,
+            Self::Back => 10,
+        }
+    }
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Empty),
+            1 => Some(Self::RotateClockwise),
+            2 => Some(Self::RotateCounterClockwise),
+            3 => Some(Self::Extend),
+            4 => Some(Self::Retract),
+            5 => Some(Self::Grab),
+            6 => Some(Self::Drop),
+            7 => Some(Self::PivotClockwise),
+            8 => Some(Self::PivotCounterClockwise),
+            9 => Some(Self::Forward),
+            10 => Some(Self::Back),
+            _ => None,
+        }
+    }
     pub fn from_char(input: char) -> Option<Self> {
         match input {
             'd' => Some(Self::RotateClockwise),

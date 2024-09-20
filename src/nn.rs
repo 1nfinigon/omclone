@@ -1,11 +1,5 @@
-mod sim;
-
 use omnn_feature::*;
-
-#[cfg(feature = "color_eyre")]
-use color_eyre::{eyre::Result, install};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{eyre::Result, install};
+use crate::sim;
 
 const N_WIDTH: usize = 16;
 const N_HEIGHT: usize = 16;
@@ -163,12 +157,4 @@ struct State {
     spatiotemporal: [[[SpatiotemporalState; N_HEIGHT]; N_WIDTH]; N_HISTORY_CYCLES],
     temporal: [TemporalState; N_HISTORY_CYCLES],
     global: GlobalState,
-}
-
-fn main() -> Result<()> {
-    std::env::set_var("RUST_BACKTRACE", "full");
-    install()?;
-
-    println!("{}", State::new().size());
-    Ok(())
 }

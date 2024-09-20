@@ -24,8 +24,8 @@ required-features = ["benchmark"]
 path = "src/benchmark.rs"
 
 [[bin]]
-name="nn"
-path = "src/nn.rs"
+name="solver"
+path = "src/solver.rs"
 
 [[bin]]
 name="synth"
@@ -49,6 +49,8 @@ bitflags = "2.6"
 nalgebra = "0.33"
 num-traits = "0.2"
 enum-primitive-derive = "0.3.0"
+rand = "0.8.5"
+rand_pcg = "0.3.1"
 rustc-hash = "2.0"
 smallvec = "1.11"
 
