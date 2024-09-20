@@ -2,6 +2,7 @@ mod parser;
 mod sim;
 #[cfg(test)]
 mod test;
+mod utils;
 
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod render_library;
