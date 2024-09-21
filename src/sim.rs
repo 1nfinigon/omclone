@@ -51,55 +51,39 @@ pub type Pos = Vector2<i32>;
 
 /// A basic instruction that can be executed in one timestep (i.e. no Repeat,
 /// Reset, Noop)
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Primitive)]
 #[repr(u8)]
 pub enum BasicInstr {
-    Empty,
-    RotateClockwise,
-    RotateCounterClockwise,
-    Extend,
-    Retract,
-    Grab,
-    Drop,
-    PivotClockwise,
-    PivotCounterClockwise,
-    Forward,
-    Back,
+    Empty = 0,
+    RotateClockwise = 1,
+    RotateCounterClockwise = 2,
+    Extend = 3,
+    Retract = 4,
+    Grab = 5,
+    Drop = 6,
+    PivotClockwise = 7,
+    PivotCounterClockwise = 8,
+    Forward = 9,
+    Back = 10,
 }
 
 impl BasicInstr {
     pub const LEN_AS_U8: u8 = 11;
     pub fn to_u8(&self) -> u8 {
-        match self {
-            Self::Empty => 0,
-            Self::RotateClockwise => 1,
-            Self::RotateCounterClockwise => 2,
-            Self::Extend => 3,
-            Self::Retract => 4,
-            Self::Grab => 5,
-            Self::Drop => 6,
-            Self::PivotClockwise => 7,
-            Self::PivotCounterClockwise => 8,
-            Self::Forward => 9,
-            Self::Back => 10,
-        }
+        <Self as num_traits::ToPrimitive>::to_u8(self).unwrap()
     }
     pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Empty),
-            1 => Some(Self::RotateClockwise),
-            2 => Some(Self::RotateCounterClockwise),
-            3 => Some(Self::Extend),
-            4 => Some(Self::Retract),
-            5 => Some(Self::Grab),
-            6 => Some(Self::Drop),
-            7 => Some(Self::PivotClockwise),
-            8 => Some(Self::PivotCounterClockwise),
-            9 => Some(Self::Forward),
-            10 => Some(Self::Back),
-            _ => None,
-        }
+        <Self as num_traits::FromPrimitive>::from_u8(value)
     }
+}
+
+#[test]
+fn basic_instr_len() {
+    assert!(BasicInstr::from_u8(BasicInstr::LEN_AS_U8).is_none());
+    assert!(BasicInstr::from_u8(BasicInstr::LEN_AS_U8 - 1).is_some());
+}
+
+impl BasicInstr {
     pub fn from_char(input: char) -> Option<Self> {
         match input {
             'd' => Some(Self::RotateClockwise),
