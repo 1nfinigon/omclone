@@ -213,8 +213,7 @@ impl TreeSearch {
                         *self.node_mut(node_idx) = Node::Terminal(win);
                         break win;
                     } else {
-                        let real_node_id =
-                            RealNodeId(self.real_nodes.len().try_into().unwrap());
+                        let real_node_id = RealNodeId(self.real_nodes.len().try_into().unwrap());
                         self.real_nodes.push(RealNode::new());
 
                         *self.node_mut(node_idx) = Node::Real(real_node_id);
@@ -271,7 +270,9 @@ impl TreeSearch {
         match self.node(NodeId(0)) {
             &Node::Real(real_node_idx) => self
                 .root
-                .next_updates().ok().unwrap()
+                .next_updates()
+                .ok()
+                .unwrap()
                 .iter()
                 .enumerate()
                 .map(|(child_id, &update)| {

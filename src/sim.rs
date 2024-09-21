@@ -447,6 +447,7 @@ pub enum GlyphType {
     OutputRepeating(AtomPattern, i32, InOutId),
 } //Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
   //This should probably be made consistent
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ArmType {
     PlainArm,
@@ -456,6 +457,20 @@ pub enum ArmType {
     Piston,
     VanBerlo,
 }
+
+impl ArmType {
+    pub fn angles_between_arm(self) -> Rot {
+        match self {
+            Self::PlainArm => 6,
+            Self::DoubleArm => 3,
+            Self::TripleArm => 2,
+            Self::HexArm => 1,
+            Self::Piston => 6,
+            Self::VanBerlo => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub pos: Pos,
@@ -561,17 +576,6 @@ impl Arm {
             arm_type,
             grabbing: false,
             atoms_grabbed: [AtomKey::null(); 6],
-        }
-    }
-    pub fn angles_between_arm(arm_type: ArmType) -> Rot {
-        use ArmType::*;
-        match arm_type {
-            PlainArm => 6,
-            DoubleArm => 3,
-            TripleArm => 2,
-            HexArm => 1,
-            Piston => 6,
-            VanBerlo => 1,
         }
     }
     fn do_motion(&mut self, action: ArmMovement) {
@@ -1082,7 +1086,7 @@ impl World {
             Grab => {
                 if !arm.grabbing && arm_type != VanBerlo {
                     arm.grabbing = true;
-                    for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
+                    for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
                         let grab_pos = arm.pos + (rot_to_pos(arm.rot + r) * arm.len);
                         let null_key = AtomKey::null();
                         let mut current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
@@ -1634,7 +1638,7 @@ impl World {
                 ATOM_ARM_RADIUS_SQUARED,
                 "atom/arm collision!",
             )?;
-            for r in (0..6).step_by(Arm::angles_between_arm(arm.arm_type) as usize) {
+            for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
                 let angle = arm.rot + rot_to_angle(r);
                 let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos + offset);

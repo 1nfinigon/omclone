@@ -1,4 +1,3 @@
-
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct NonNan(pub f32);
 

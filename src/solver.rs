@@ -1,5 +1,5 @@
-mod nonnan;
 mod nn;
+mod nonnan;
 mod parser;
 mod search;
 mod search_state;

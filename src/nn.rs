@@ -1,5 +1,5 @@
-use omnn_feature::*;
 use crate::sim;
+use omnn_feature::*;
 
 const N_WIDTH: usize = 16;
 const N_HEIGHT: usize = 16;

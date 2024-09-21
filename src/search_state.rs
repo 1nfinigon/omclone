@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use crate::sim::*;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct State {
@@ -25,7 +25,8 @@ impl State {
         self.instr_buffer.push(update);
         if self.instr_buffer.len() == n_arms {
             // commit buffer
-            let instr_buffer = std::mem::replace(&mut self.instr_buffer, Vec::with_capacity(n_arms));
+            let instr_buffer =
+                std::mem::replace(&mut self.instr_buffer, Vec::with_capacity(n_arms));
             let mut new_world = (*self.world).clone();
             let mut motions = WorldStepInfo::new();
             let mut float_world = FloatWorld::new();
@@ -33,7 +34,7 @@ impl State {
             match result {
                 Ok(()) => {
                     self.world = Arc::new(new_world);
-                },
+                }
                 Err(_) => {
                     self.errored = true;
                 }
@@ -63,21 +64,19 @@ impl State {
     pub fn next_updates(&self) -> std::result::Result<&'static [BasicInstr], f32> {
         match self.evaluate_final_state() {
             Some(final_eval) => Err(final_eval),
-            None => {
-                Ok(&[
-                    BasicInstr::Empty,
-                    BasicInstr::RotateClockwise,
-                    BasicInstr::RotateCounterClockwise,
-                    BasicInstr::Extend,
-                    BasicInstr::Retract,
-                    BasicInstr::Grab,
-                    BasicInstr::Drop,
-                    BasicInstr::PivotClockwise,
-                    BasicInstr::PivotCounterClockwise,
-                    BasicInstr::Forward,
-                    BasicInstr::Back,
-                ])
-            }
+            None => Ok(&[
+                BasicInstr::Empty,
+                BasicInstr::RotateClockwise,
+                BasicInstr::RotateCounterClockwise,
+                BasicInstr::Extend,
+                BasicInstr::Retract,
+                BasicInstr::Grab,
+                BasicInstr::Drop,
+                BasicInstr::PivotClockwise,
+                BasicInstr::PivotCounterClockwise,
+                BasicInstr::Forward,
+                BasicInstr::Back,
+            ]),
         }
     }
 }
