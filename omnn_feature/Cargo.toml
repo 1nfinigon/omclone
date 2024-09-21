@@ -1,8 +1,0 @@
-[package]
-name = "omnn_feature"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-omnn_feature_derive = { path = "../omnn_feature_derive" }

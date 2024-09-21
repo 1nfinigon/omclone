@@ -18,6 +18,14 @@ fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "full");
     install()?;
 
+    println!(
+        "{} spatial features, {} spatiotemporal features",
+        nn::feature_offsets::Spatial::SIZE,
+        nn::feature_offsets::Spatiotemporal::SIZE
+    );
+    println!("{:?}", nn::feature_offsets::Spatial::OFFSETS);
+    println!("{:?}", nn::feature_offsets::Spatiotemporal::OFFSETS);
+
     let (puzzle, solution) = utils::get_default_puzzle_solution()?;
     let init = parser::puzzle_prep(&puzzle, &solution)?;
     let mut world = sim::WorldWithTapes::setup_sim(&init)?;
