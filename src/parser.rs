@@ -681,23 +681,6 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape<Instr>> {
     })
 }
 
-/// Applies a relative->absolute transformation in place, adding `pos` and
-/// applying `rot`.
-fn reposition_pattern(pattern: &mut AtomPattern, pos: Pos, rot: Rot) {
-    for a in pattern {
-        a.pos = pos + rotate(a.pos, rot);
-        a.rotate_connections(rot);
-    }
-}
-
-/// Applies a relative->absolute transformation in place, adding `pos` and
-/// applying `rot`.
-fn reposition_locs(locs: &mut Vec<Pos>, pos: Pos, rot: Rot) {
-    for a in locs {
-        *a = pos + rotate(*a, rot);
-    }
-}
-
 pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
     //Convert from generic parts to glyphs, arms, etc.
     let mut glyphs = Vec::new();
@@ -721,42 +704,41 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TInput => {
                 let id = p.input_output_index;
-                let mut pattern = puzzle
-                    .inputs
-                    .get(id as usize)
-                    .ok_or(eyre!(
-                        "Input ID {} not found (max {})",
-                        id,
-                        puzzle.inputs.len()
-                    ))?
-                    .clone();
-                reposition_pattern(&mut pattern, p.pos, p.rot);
-                let input_glyph = GlyphType::Input(pattern, p.input_output_index);
-                glyphs.push(Glyph {
+                let pattern = puzzle.inputs.get(id as usize).ok_or(eyre!(
+                    "Input ID {} not found (max {})",
+                    id,
+                    puzzle.inputs.len()
+                ))?;
+                let input_glyph = GlyphType::Input(pattern.clone(), p.input_output_index);
+                let mut glyph = Glyph {
                     glyph_type: input_glyph,
-                    pos: p.pos,
-                    rot: p.rot,
-                });
+                    pos: Pos::zeros(),
+                    rot: 0,
+                };
+                glyph.rot_by(p.rot);
+                glyph.move_by(p.pos);
+                glyphs.push(glyph);
             }
             TOutput => {
                 let id = p.input_output_index;
-                let mut pattern = puzzle
-                    .outputs
-                    .get(id as usize)
-                    .ok_or(eyre!(
-                        "Output ID {} not found (max {})",
-                        id,
-                        puzzle.outputs.len()
-                    ))?
-                    .clone();
-                reposition_pattern(&mut pattern, p.pos, p.rot);
-                let output_glyph =
-                    GlyphType::Output(pattern, 6 * puzzle.output_multiplier, p.input_output_index);
-                glyphs.push(Glyph {
+                let pattern = puzzle.outputs.get(id as usize).ok_or(eyre!(
+                    "Output ID {} not found (max {})",
+                    id,
+                    puzzle.outputs.len()
+                ))?;
+                let output_glyph = GlyphType::Output(
+                    pattern.clone(),
+                    6 * puzzle.output_multiplier,
+                    p.input_output_index,
+                );
+                let mut glyph = Glyph {
                     glyph_type: output_glyph,
-                    pos: p.pos,
-                    rot: p.rot,
-                });
+                    pos: Pos::zeros(),
+                    rot: 0,
+                };
+                glyph.rot_by(p.rot);
+                glyph.move_by(p.pos);
+                glyphs.push(glyph);
             }
             TOutputRep => {
                 let id = p.input_output_index;
@@ -765,42 +747,48 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     id,
                     puzzle.outputs.len()
                 ))?;
-                let mut pattern = process_repeats(pattern, 6)?;
-                reposition_pattern(&mut pattern, p.pos, p.rot);
+                let pattern = process_repeats(pattern, 6)?;
                 let output_glyph = GlyphType::OutputRepeating(
                     pattern,
                     6 * puzzle.output_multiplier,
                     p.input_output_index,
                 );
-                glyphs.push(Glyph {
+                let mut glyph = Glyph {
                     glyph_type: output_glyph,
-                    pos: p.pos,
-                    rot: p.rot,
-                });
+                    pos: Pos::zeros(),
+                    rot: 0,
+                };
+                glyph.rot_by(p.rot);
+                glyph.move_by(p.pos);
+                glyphs.push(glyph);
             }
             TTrack => {
-                let mut track_locs = p
+                let track_locs = p
                     .tracks
                     .clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
-                reposition_locs(&mut track_locs, p.pos, p.rot);
-                glyphs.push(Glyph {
+                let mut glyph = Glyph {
                     glyph_type: GlyphType::Track(track_locs),
-                    pos: p.pos,
-                    rot: p.rot,
-                });
+                    pos: Pos::zeros(),
+                    rot: 0,
+                };
+                glyph.rot_by(p.rot);
+                glyph.move_by(p.pos);
+                glyphs.push(glyph);
             }
             TConduit => {
-                let (conduit_id, mut conduit_locs) = p
+                let (conduit_id, conduit_locs) = p
                     .conduit
                     .clone()
                     .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
-                reposition_locs(&mut conduit_locs, p.pos, p.rot);
-                glyphs.push(Glyph {
+                let mut glyph = Glyph {
                     glyph_type: GlyphType::Conduit(conduit_locs, conduit_id),
-                    pos: p.pos,
-                    rot: p.rot,
-                });
+                    pos: Pos::zeros(),
+                    rot: 0,
+                };
+                glyph.rot_by(p.rot);
+                glyph.move_by(p.pos);
+                glyphs.push(glyph);
             }
         }
     }

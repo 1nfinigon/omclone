@@ -464,6 +464,46 @@ pub enum GlyphType {
     OutputRepeating(AtomPattern, i32, InOutId),
 }
 
+impl GlyphType {
+    pub fn move_by(&mut self, pos: Pos) {
+        use GlyphType::*;
+        match self {
+            Calcification | Animismus | Projection | Dispersion | Purification | Duplication
+            | Unification | Bonding | Unbonding | TriplexBond | MultiBond | Disposal
+            | Equilibrium => (),
+            Track(locs) | Conduit(locs, _) => {
+                for a in locs {
+                    *a += pos;
+                }
+            }
+            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+                for a in pattern {
+                    a.pos += pos;
+                }
+            }
+        }
+    }
+    pub fn rot_by(&mut self, rot: Rot) {
+        use GlyphType::*;
+        match self {
+            Calcification | Animismus | Projection | Dispersion | Purification | Duplication
+            | Unification | Bonding | Unbonding | TriplexBond | MultiBond | Disposal
+            | Equilibrium => (),
+            Track(locs) | Conduit(locs, _) => {
+                for a in locs {
+                    *a = rotate(*a, rot);
+                }
+            }
+            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+                for a in pattern {
+                    a.pos = rotate(a.pos, rot);
+                    a.rotate_connections(rot);
+                }
+            }
+        }
+    }
+}
+
 impl From<BasicGlyphType> for GlyphType {
     fn from(value: BasicGlyphType) -> Self {
         match value {
@@ -543,6 +583,14 @@ pub struct Glyph {
     pub glyph_type: GlyphType,
 }
 impl Glyph {
+    pub fn move_by(&mut self, pos: Pos) {
+        self.pos += pos;
+        self.glyph_type.move_by(pos);
+    }
+    pub fn rot_by(&mut self, rot: Rot) {
+        self.rot = normalize_dir(self.rot + rot);
+        self.glyph_type.rot_by(rot);
+    }
     pub fn absolute_position(&self, rel_pos: Pos) -> Pos {
         self.pos + rotate(rel_pos, self.rot)
     }
@@ -657,6 +705,23 @@ impl InitialWorld {
             }
         }
         (area_touched, has_overlap)
+    }
+    pub fn move_by(&mut self, pos: Pos) {
+        for glyph in self.glyphs.iter_mut() {
+            glyph.move_by(pos);
+        }
+        for arm in self.arms.iter_mut() {
+            arm.pos += pos;
+        }
+    }
+    pub fn rot_by(&mut self, rot: Rot) {
+        for glyph in self.glyphs.iter_mut() {
+            glyph.rot_by(rot);
+        }
+        for arm in self.arms.iter_mut() {
+            arm.pos = rotate(arm.pos, rot);
+            arm.rot = normalize_dir(arm.rot + rot);
+        }
     }
 }
 
