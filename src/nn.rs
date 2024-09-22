@@ -327,6 +327,27 @@ pub mod features {
             }
         }
 
+        fn normalize_position(pos: sim::Pos) -> Option<(usize, usize)> {
+            if 0 <= pos.x && (pos.x as usize) < N_WIDTH && 0 <= pos.y && (pos.y as usize) < N_HEIGHT
+            {
+                Some((pos.x as usize, pos.y as usize))
+            } else {
+                None
+            }
+        }
+
+        fn get_spatial_mut(&mut self, pos: sim::Pos) -> Option<&mut [f32; Spatial::SIZE]> {
+            Self::normalize_position(pos).map(|(x, y)| &mut self.spatial[y][x])
+        }
+
+        fn get_spatiotemporal_mut(
+            &mut self,
+            time: usize,
+            pos: sim::Pos,
+        ) -> Option<&mut [f32; Spatiotemporal::SIZE]> {
+            Self::normalize_position(pos).map(|(x, y)| &mut self.spatiotemporal[time][y][x])
+        }
+
         /// Helper function for setting features relating to an Atom.
         fn set_atom(
             atom: &sim::Atom,
@@ -396,81 +417,87 @@ pub mod features {
             for glyph in world.glyphs.iter() {
                 let positions = glyph.positions();
                 for (i, position) in positions.iter().enumerate() {
-                    // TODO: fix position hex skew
-                    // TODO: handle bounds and negatives
-                    let features = &mut self.spatial[position.y as usize][position.x as usize];
-                    features[glyph_orientation.get_onehot_offset(glyph.rot as usize)] = 1.;
-                    use sim::GlyphType;
-                    match &glyph.glyph_type {
-                        GlyphType::Calcification => {
-                            features[glyph_calcification.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Animismus => features[glyph_animismus.get_onehot_offset(i)] = 1.,
-                        GlyphType::Projection => {
-                            features[glyph_projection.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Dispersion => {
-                            features[glyph_dispersion.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Purification => {
-                            features[glyph_purification.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Duplication => {
-                            features[glyph_duplication.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Unification => {
-                            features[glyph_unification.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Bonding => features[glyph_bonding.get_onehot_offset(i)] = 1.,
-                        GlyphType::Unbonding => features[glyph_unbonding.get_onehot_offset(i)] = 1.,
-                        GlyphType::TriplexBond => {
-                            features[glyph_triplex_bond.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::MultiBond => {
-                            features[glyph_multi_bond.get_onehot_offset(i)] = 1.
-                        }
-                        GlyphType::Disposal => features[glyph_disposal.get_onehot_offset(i)] = 1.,
-                        GlyphType::Equilibrium => (),
-                        GlyphType::Track(pos_list) => {
-                            assert!(pos_list[i] == *position);
-                            if i >= 1 {
-                                let other_pos = positions[i - 1];
-                                let rot = sim::pos_to_rot(other_pos - position).unwrap();
-                                features[track_minus_dir.get_onehot_offset(rot as usize)] = 1.;
+                    if let Some(features) = self.get_spatial_mut(*position) {
+                        features[glyph_orientation
+                            .get_onehot_offset(sim::normalize_dir(glyph.rot) as usize)] = 1.;
+                        use sim::GlyphType;
+                        match &glyph.glyph_type {
+                            GlyphType::Calcification => {
+                                features[glyph_calcification.get_onehot_offset(i)] = 1.
                             }
-                            if i + 1 < positions.len() {
-                                let other_pos = positions[i + 1];
-                                let rot = sim::pos_to_rot(other_pos - position).unwrap();
-                                features[track_plus_dir.get_onehot_offset(rot as usize)] = 1.;
+                            GlyphType::Animismus => {
+                                features[glyph_animismus.get_onehot_offset(i)] = 1.
                             }
-                        }
-                        GlyphType::Conduit(_, _) => unimplemented!(),
-                        GlyphType::Input(pattern, _id) => {
-                            assert!(pattern[i].pos == *position);
-                            Self::set_atom(
-                                &pattern[i],
-                                features,
-                                input_atom_type,
-                                input_bonds,
-                                None,
-                            );
-                        }
-                        GlyphType::Output(pattern, count_left, _id) => {
-                            assert!(pattern[i].pos == *position);
-                            Self::set_atom(
-                                &pattern[i],
-                                features,
-                                output_atom_type,
-                                output_bonds,
-                                None,
-                            );
-                            if *count_left > 0 {
-                                features[output_count_minus_one
-                                    .get_onehot_offset((*count_left as usize) - 1)] = 1.;
+                            GlyphType::Projection => {
+                                features[glyph_projection.get_onehot_offset(i)] = 1.
                             }
-                        }
-                        GlyphType::OutputRepeating(_, _, _) => unimplemented!(),
-                    };
+                            GlyphType::Dispersion => {
+                                features[glyph_dispersion.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Purification => {
+                                features[glyph_purification.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Duplication => {
+                                features[glyph_duplication.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Unification => {
+                                features[glyph_unification.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Bonding => features[glyph_bonding.get_onehot_offset(i)] = 1.,
+                            GlyphType::Unbonding => {
+                                features[glyph_unbonding.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::TriplexBond => {
+                                features[glyph_triplex_bond.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::MultiBond => {
+                                features[glyph_multi_bond.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Disposal => {
+                                features[glyph_disposal.get_onehot_offset(i)] = 1.
+                            }
+                            GlyphType::Equilibrium => (),
+                            GlyphType::Track(pos_list) => {
+                                assert!(pos_list[i] == *position);
+                                if i >= 1 {
+                                    let other_pos = positions[i - 1];
+                                    let rot = sim::pos_to_rot(other_pos - position).unwrap();
+                                    features[track_minus_dir.get_onehot_offset(rot as usize)] = 1.;
+                                }
+                                if i + 1 < positions.len() {
+                                    let other_pos = positions[i + 1];
+                                    let rot = sim::pos_to_rot(other_pos - position).unwrap();
+                                    features[track_plus_dir.get_onehot_offset(rot as usize)] = 1.;
+                                }
+                            }
+                            GlyphType::Conduit(_, _) => unimplemented!(),
+                            GlyphType::Input(pattern, _id) => {
+                                assert!(pattern[i].pos == *position);
+                                Self::set_atom(
+                                    &pattern[i],
+                                    features,
+                                    input_atom_type,
+                                    input_bonds,
+                                    None,
+                                );
+                            }
+                            GlyphType::Output(pattern, count_left, _id) => {
+                                assert!(pattern[i].pos == *position);
+                                Self::set_atom(
+                                    &pattern[i],
+                                    features,
+                                    output_atom_type,
+                                    output_bonds,
+                                    None,
+                                );
+                                if *count_left > 0 {
+                                    features[output_count_minus_one
+                                        .get_onehot_offset((*count_left as usize) - 1)] = 1.;
+                                }
+                            }
+                            GlyphType::OutputRepeating(_, _, _) => unimplemented!(),
+                        };
+                    }
                 }
             }
         }
@@ -494,9 +521,9 @@ pub mod features {
             } = Spatiotemporal::OFFSETS;
 
             for position in world.area_touched.iter() {
-                // TODO: position
-                self.spatiotemporal[time][position.y as usize][position.x as usize]
-                    [used.get_offset()] = 1.;
+                if let Some(features) = self.get_spatiotemporal_mut(time, *position) {
+                    features[used.get_offset()] = 1.;
+                }
             }
 
             for arm in world.arms.iter() {
@@ -508,33 +535,34 @@ pub mod features {
                     grabbing,
                     atoms_grabbed,
                 } = arm;
-                // TODO: position
-                let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
-                features[arm_base_length.get_onehot_offset((len - 1).try_into().unwrap())] = 1.;
-                if *arm_type == sim::ArmType::Piston {
-                    features[arm_base_is_piston.get_offset()] = 1.;
-                }
-                if *grabbing {
-                    features[arm_base_is_grabbing.get_offset()] = 1.;
-                }
-                if *arm_type == sim::ArmType::VanBerlo {
-                    features[arm_base_is_berlo.get_offset()] = 1.;
-                }
-                for rel_r in (0..6).step_by(arm_type.angles_between_arm() as usize) {
-                    let abs_r = sim::normalize_dir(rel_r + rot);
-                    features[arm_in_orientation[abs_r as usize].get_offset()] = 1.;
-                    use slotmap::Key;
-                    if !atoms_grabbed[rel_r as usize].is_null() {
-                        features
-                            [arm_in_orientation_and_holding_atom[abs_r as usize].get_offset()] = 1.;
+                if let Some(features) = self.get_spatiotemporal_mut(time, *pos) {
+                    features[arm_base_length.get_onehot_offset((len - 1).try_into().unwrap())] = 1.;
+                    if *arm_type == sim::ArmType::Piston {
+                        features[arm_base_is_piston.get_offset()] = 1.;
+                    }
+                    if *grabbing {
+                        features[arm_base_is_grabbing.get_offset()] = 1.;
+                    }
+                    if *arm_type == sim::ArmType::VanBerlo {
+                        features[arm_base_is_berlo.get_offset()] = 1.;
+                    }
+                    for rel_r in (0..6).step_by(arm_type.angles_between_arm() as usize) {
+                        let abs_r = sim::normalize_dir(rel_r + rot);
+                        features[arm_in_orientation[abs_r as usize].get_offset()] = 1.;
+                        use slotmap::Key;
+                        if !atoms_grabbed[rel_r as usize].is_null() {
+                            features[arm_in_orientation_and_holding_atom[abs_r as usize]
+                                .get_offset()] = 1.;
+                        }
                     }
                 }
             }
 
             for atom in world.atoms.atom_map.values() {
                 let pos = atom.pos;
-                let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
-                Self::set_atom(atom, features, atom_type, atom_bonds, Some(atom_is_berlo));
+                if let Some(features) = self.get_spatiotemporal_mut(time, pos) {
+                    Self::set_atom(atom, features, atom_type, atom_bonds, Some(atom_is_berlo));
+                }
             }
 
             let Temporal { cycles } = Temporal::OFFSETS;
@@ -560,9 +588,10 @@ pub mod features {
             let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
             let arm = &world.arms[arm_idx];
             let pos = arm.pos;
-            let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
-            use num_traits::ToPrimitive;
-            features[arm_base_instr.get_onehot_offset(instr.to_usize().unwrap())] = 1.;
+            if let Some(features) = self.get_spatiotemporal_mut(time, pos) {
+                use num_traits::ToPrimitive;
+                features[arm_base_instr.get_onehot_offset(instr.to_usize().unwrap())] = 1.;
+            }
         }
 
         /// Copies all temporal data one timestep later. The current timestep's
