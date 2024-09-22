@@ -1145,6 +1145,12 @@ impl World {
                 }*/
             }
         }
+        for arm in self.arms.iter() {
+            for n in 0..=arm.len {
+                self.area_touched
+                    .insert(arm.pos + rot_dist_to_pos(n, arm.rot));
+            }
+        }
         Ok(())
     }
 
