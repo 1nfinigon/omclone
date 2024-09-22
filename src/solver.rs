@@ -27,7 +27,12 @@ fn main() -> Result<()> {
     println!("{:?}", nn::feature_offsets::Spatiotemporal::OFFSETS);
 
     let (puzzle, solution) = utils::get_default_puzzle_solution()?;
-    let init = parser::puzzle_prep(&puzzle, &solution)?;
+    let mut init = parser::puzzle_prep(&puzzle, &solution)?;
+    init.centre();
+    init.move_by(sim::Pos::new(
+        nn::constants::N_WIDTH as i32 / 2,
+        nn::constants::N_HEIGHT as i32 / 2,
+    ));
     let mut world = sim::WorldWithTapes::setup_sim(&init)?;
 
     let mut motion = sim::WorldStepInfo::new();

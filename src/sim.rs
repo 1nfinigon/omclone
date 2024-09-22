@@ -723,6 +723,21 @@ impl InitialWorld {
             arm.rot = normalize_dir(arm.rot + rot);
         }
     }
+
+    /// Recentres the solution so that the bounding box is centred around (0, 0)
+    pub fn centre(&mut self) {
+        let (area_touched, _) = self.mark_initial_area_and_detect_overlap();
+        if area_touched.is_empty() {
+            return;
+        }
+        let min_x = area_touched.iter().map(|p| p.x).min().unwrap();
+        let max_x = area_touched.iter().map(|p| p.x).max().unwrap();
+        let min_y = area_touched.iter().map(|p| p.y).min().unwrap();
+        let max_y = area_touched.iter().map(|p| p.y).max().unwrap();
+        let centre_x = (max_x + min_x) / 2;
+        let centre_y = (max_y + min_y) / 2;
+        self.move_by(Pos::new(-centre_x, -centre_y));
+    }
 }
 
 pub type TrackMap = FxHashMap<Pos, Pos>;

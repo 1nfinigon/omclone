@@ -1,7 +1,7 @@
 use crate::sim;
 use smallvec::SmallVec;
 
-mod constants {
+pub mod constants {
 
     pub const N_WIDTH: usize = 16;
     pub const N_HEIGHT: usize = 16;
