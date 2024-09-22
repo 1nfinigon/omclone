@@ -71,6 +71,10 @@ pub mod feature_offsets {
             self.offset + i
         }
 
+        pub fn get_offsets(&self) -> std::ops::Range<usize> {
+            self.offset..(self.offset + N)
+        }
+
         const fn assign(offset: usize) -> (usize, Self) {
             (offset + N, Self { offset })
         }
@@ -392,7 +396,7 @@ pub mod features {
                 for (i, position) in positions.iter().enumerate() {
                     // TODO: fix position hex skew
                     // TODO: handle bounds and negatives
-                    let features = &mut self.spatial[position.x as usize][position.y as usize];
+                    let features = &mut self.spatial[position.y as usize][position.x as usize];
                     features[glyph_orientation.get_onehot_offset(glyph.rot as usize)] = 1.;
                     use sim::GlyphType;
                     match &glyph.glyph_type {
@@ -472,8 +476,10 @@ pub mod features {
             self.global[cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
         }
 
+        /// Sets the temporal data at relative time `time` to reflect the current world.
+        /// Does _not_ set `arm_base_instr`; see `set_temporal_instr` for that.
         #[deny(unused_variables)]
-        pub fn set_temporal(&mut self, world: &sim::World, time: usize) {
+        pub fn set_temporal_except_instr(&mut self, time: usize, world: &sim::World) {
             let Spatiotemporal {
                 used,
                 arm_base_length,
@@ -482,7 +488,7 @@ pub mod features {
                 arm_base_is_berlo,
                 arm_in_orientation,
                 arm_in_orientation_and_holding_atom,
-                arm_base_instr,
+                arm_base_instr: _,
                 atom_type,
                 atom_bonds,
                 atom_is_berlo,
@@ -490,7 +496,7 @@ pub mod features {
 
             for position in world.area_touched.iter() {
                 // TODO: position
-                self.spatiotemporal[time][position.x as usize][position.y as usize]
+                self.spatiotemporal[time][position.y as usize][position.x as usize]
                     [used.get_offset()] = 1.;
             }
 
@@ -504,7 +510,7 @@ pub mod features {
                     atoms_grabbed,
                 } = arm;
                 // TODO: position
-                let features = &mut self.spatiotemporal[time][pos.x as usize][pos.y as usize];
+                let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
                 features[arm_base_length.get_onehot_offset((len - 1).try_into().unwrap())] = 1.;
                 if *arm_type == sim::ArmType::Piston {
                     features[arm_base_is_piston.get_offset()] = 1.;
@@ -526,19 +532,51 @@ pub mod features {
                 }
             }
 
-            // TODO! either comes from tape... or from tree_search state. where????
-            let _ = arm_base_instr;
-
             for atom in world.atoms.atom_map.values() {
                 let pos = atom.pos;
-                let features = &mut self.spatiotemporal[time][pos.x as usize][pos.y as usize];
+                let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
                 Self::set_atom(atom, features, atom_type, atom_bonds, Some(atom_is_berlo));
             }
         }
 
-        pub fn clear_temporal(&mut self, world: sim::World) {
-            self.spatiotemporal =
-                [[[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT]; N_HISTORY_CYCLES];
+        pub fn set_temporal_instr(
+            &mut self,
+            time: usize,
+            world: &sim::World,
+            arm_idx: usize,
+            instr: sim::BasicInstr,
+        ) {
+            let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
+            let arm = &world.arms[arm_idx];
+            let pos = arm.pos;
+            let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
+            use num_traits::ToPrimitive;
+            features[arm_base_instr.get_onehot_offset(instr.to_usize().unwrap())] = 1.;
+        }
+
+        /// Copies all temporal data one timestep later. The current timestep is
+        /// left unmodified.
+        pub fn shift_temporal(&mut self, world: sim::World) {
+            self.spatiotemporal
+                .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
+        }
+
+        /// Fully erases the current timestep's temporal data.
+        pub fn clear_temporal(&mut self, time: usize) {
+            self.spatiotemporal[0] = [[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT];
+        }
+
+        /// Erases the current timestep's temporal instr data.
+        pub fn clear_temporal_instr(&mut self, time: usize) {
+            let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
+            for y in 0..N_WIDTH {
+                for x in 0..N_HEIGHT {
+                    let features = &mut self.spatiotemporal[time][y][x];
+                    for offset in arm_base_instr.get_offsets() {
+                        features[offset] = 0.;
+                    }
+                }
+            }
         }
     }
 }
