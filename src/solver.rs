@@ -23,8 +23,7 @@ fn main() -> Result<()> {
         nn::feature_offsets::Spatial::SIZE,
         nn::feature_offsets::Spatiotemporal::SIZE
     );
-    println!("{:?}", nn::feature_offsets::Spatial::OFFSETS);
-    println!("{:?}", nn::feature_offsets::Spatiotemporal::OFFSETS);
+    println!("{:?} total input size", std::mem::size_of::<nn::Features>());
 
     let (puzzle, solution) = utils::get_default_puzzle_solution()?;
     let mut init = parser::puzzle_prep(&puzzle, &solution)?;

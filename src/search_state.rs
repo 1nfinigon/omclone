@@ -7,13 +7,13 @@ pub struct State {
     pub errored: bool,
     pub world: Arc<World>,
     pub instr_buffer: Vec<BasicInstr>,
-    pub nn_features: nn::Features,
+    pub nn_features: Box<nn::Features>,
 }
 
 impl State {
     pub fn new(world: World) -> Self {
         let n_arms = world.arms.len();
-        let mut nn_features = nn::Features::new();
+        let mut nn_features = Box::new(nn::Features::new());
         nn_features.set_nontemporal(&world);
         nn_features.init_all_temporal(&world);
         Self {
