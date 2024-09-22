@@ -9,7 +9,7 @@ pub mod constants {
     pub const N_OUTPUTS: usize = 4;
     pub const N_ARMS: usize = 12;
     pub const N_TRACKS: usize = 6;
-    pub const N_HISTORY_CYCLES: usize = 2;
+    pub const N_HISTORY_CYCLES: usize = 20;
     pub const N_MAX_CYCLES: usize = 500;
     pub const N_MAX_PRODUCTS: usize = 6;
 
@@ -307,9 +307,9 @@ pub mod features {
 
     #[derive(Clone)]
     pub struct Features {
-        spatial: [[[f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
-        spatiotemporal: [[[[f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT]; N_HISTORY_CYCLES],
-        temporal: [[f32; Temporal::SIZE]; N_HISTORY_CYCLES],
+        pub spatial: [[[f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
+        pub spatiotemporal: [[[[f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT]; N_HISTORY_CYCLES],
+        pub temporal: [[f32; Temporal::SIZE]; N_HISTORY_CYCLES],
     }
 
     impl Features {
