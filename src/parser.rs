@@ -561,6 +561,9 @@ fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
     }
     Ok(())
 }
+
+/// `input` needs to be in relative space (i.e. call this before
+/// `reposition_pattern`).
 fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     let mut rep_offset = None;
     for atom in input {
@@ -677,6 +680,24 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape<Instr>> {
         instructions,
     })
 }
+
+/// Applies a relative->absolute transformation in place, adding `pos` and
+/// applying `rot`.
+fn reposition_pattern(pattern: &mut AtomPattern, pos: Pos, rot: Rot) {
+    for a in pattern {
+        a.pos = pos + rotate(a.pos, rot);
+        a.rotate_connections(rot);
+    }
+}
+
+/// Applies a relative->absolute transformation in place, adding `pos` and
+/// applying `rot`.
+fn reposition_locs(locs: &mut Vec<Pos>, pos: Pos, rot: Rot) {
+    for a in locs {
+        *a = pos + rotate(*a, rot);
+    }
+}
+
 pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
     //Convert from generic parts to glyphs, arms, etc.
     let mut glyphs = Vec::new();
@@ -700,12 +721,17 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TInput => {
                 let id = p.input_output_index;
-                let molecule = puzzle.inputs.get(id as usize).ok_or(eyre!(
-                    "Input ID {} not found (max {})",
-                    id,
-                    puzzle.inputs.len()
-                ))?;
-                let input_glyph = GlyphType::Input(molecule.clone(), p.input_output_index);
+                let mut pattern = puzzle
+                    .inputs
+                    .get(id as usize)
+                    .ok_or(eyre!(
+                        "Input ID {} not found (max {})",
+                        id,
+                        puzzle.inputs.len()
+                    ))?
+                    .clone();
+                reposition_pattern(&mut pattern, p.pos, p.rot);
+                let input_glyph = GlyphType::Input(pattern, p.input_output_index);
                 glyphs.push(Glyph {
                     glyph_type: input_glyph,
                     pos: p.pos,
@@ -714,16 +740,18 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TOutput => {
                 let id = p.input_output_index;
-                let molecule = puzzle.outputs.get(id as usize).ok_or(eyre!(
-                    "Output  ID {} not found (max {})",
-                    id,
-                    puzzle.outputs.len()
-                ))?;
-                let output_glyph = GlyphType::Output(
-                    molecule.clone(),
-                    6 * puzzle.output_multiplier,
-                    p.input_output_index,
-                );
+                let mut pattern = puzzle
+                    .outputs
+                    .get(id as usize)
+                    .ok_or(eyre!(
+                        "Output ID {} not found (max {})",
+                        id,
+                        puzzle.outputs.len()
+                    ))?
+                    .clone();
+                reposition_pattern(&mut pattern, p.pos, p.rot);
+                let output_glyph =
+                    GlyphType::Output(pattern, 6 * puzzle.output_multiplier, p.input_output_index);
                 glyphs.push(Glyph {
                     glyph_type: output_glyph,
                     pos: p.pos,
@@ -732,14 +760,15 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
             }
             TOutputRep => {
                 let id = p.input_output_index;
-                let molecule = puzzle.outputs.get(id as usize).ok_or(eyre!(
+                let pattern = puzzle.outputs.get(id as usize).ok_or(eyre!(
                     "Output(rep) ID {} not found (max {})",
                     id,
                     puzzle.outputs.len()
                 ))?;
-                let repeated_molecule = process_repeats(molecule, 6)?;
+                let mut pattern = process_repeats(pattern, 6)?;
+                reposition_pattern(&mut pattern, p.pos, p.rot);
                 let output_glyph = GlyphType::OutputRepeating(
-                    repeated_molecule,
+                    pattern,
                     6 * puzzle.output_multiplier,
                     p.input_output_index,
                 );
@@ -750,23 +779,25 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 });
             }
             TTrack => {
-                let tracks = p
+                let mut track_locs = p
                     .tracks
                     .clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
+                reposition_locs(&mut track_locs, p.pos, p.rot);
                 glyphs.push(Glyph {
-                    glyph_type: GlyphType::Track(tracks),
+                    glyph_type: GlyphType::Track(track_locs),
                     pos: p.pos,
                     rot: p.rot,
                 });
             }
             TConduit => {
-                let conduits = p
+                let (conduit_id, mut conduit_locs) = p
                     .conduit
                     .clone()
                     .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
+                reposition_locs(&mut conduit_locs, p.pos, p.rot);
                 glyphs.push(Glyph {
-                    glyph_type: GlyphType::Conduit(conduits.1, conduits.0),
+                    glyph_type: GlyphType::Conduit(conduit_locs, conduit_id),
                     pos: p.pos,
                     rot: p.rot,
                 });

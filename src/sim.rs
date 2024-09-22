@@ -442,7 +442,6 @@ pub enum BasicGlyphType {
     Equilibrium,
 }
 
-//Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlyphType {
     Calcification,
@@ -463,8 +462,7 @@ pub enum GlyphType {
     Input(AtomPattern, InOutId),
     Output(AtomPattern, i32, InOutId),
     OutputRepeating(AtomPattern, i32, InOutId),
-} //Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
-  //This should probably be made consistent
+}
 
 impl From<BasicGlyphType> for GlyphType {
     fn from(value: BasicGlyphType) -> Self {
@@ -593,33 +591,6 @@ impl Glyph {
                 //TODO
             ],
             GlyphType::Equilibrium => smallvec::smallvec![pos],
-        }
-    }
-    //returns true if it was a glyph that can be repositioned
-    pub fn reposition_pattern(&mut self) -> bool {
-        use GlyphType::*;
-        match &mut self.glyph_type {
-            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
-                for a in pattern {
-                    a.pos = self.pos + rotate(a.pos, self.rot);
-                    a.rotate_connections(self.rot);
-                }
-                true
-            }
-            Conduit(locs, _id) => {
-                let p = self.pos;
-                for a in locs.iter_mut() {
-                    *a = p + rotate(*a, self.rot);
-                }
-                true
-            }
-            Track(locs) => {
-                for a in locs {
-                    *a = self.pos + rotate(*a, self.rot);
-                }
-                true
-            }
-            _ => false,
         }
     }
 }
@@ -1911,7 +1882,6 @@ impl World {
                 | Conduit(_, _) => 0,
                 Track(v) => (v.len() as i32) * 5,
             };
-            g.reposition_pattern(); //reposition input/output/conduits
             if let Track(track_data) = &g.glyph_type {
                 World::add_track(&mut world.track_maps, track_data)?;
             }
