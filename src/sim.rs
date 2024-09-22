@@ -543,26 +543,26 @@ pub struct Glyph {
     pub glyph_type: GlyphType,
 }
 impl Glyph {
-    pub fn reposition(&self, rel_pos: Pos) -> Pos {
+    pub fn absolute_position(&self, rel_pos: Pos) -> Pos {
         self.pos + rotate(rel_pos, self.rot)
     }
     pub fn positions(&self) -> SmallVec<[Pos; 7]> {
         let pos = self.pos; //primary position
-        let pos_bi = self.reposition(Pos::new(1, 0)); //position for all 2-sized selfs
-        let pos_tri = self.reposition(Pos::new(0, 1)); //third (closely packed) position
+        let pos_bi = self.absolute_position(Pos::new(1, 0)); //position for all 2-sized selfs
+        let pos_tri = self.absolute_position(Pos::new(0, 1)); //third (closely packed) position
 
-        let pos_ani = self.reposition(Pos::new(1, -1));
+        let pos_ani = self.absolute_position(Pos::new(1, -1));
 
-        let pos_disp2 = self.reposition(Pos::new(1, -1));
-        let pos_disp3 = self.reposition(Pos::new(0, -1));
-        let pos_disp4 = self.reposition(Pos::new(-1, 0));
+        let pos_disp2 = self.absolute_position(Pos::new(1, -1));
+        let pos_disp3 = self.absolute_position(Pos::new(0, -1));
+        let pos_disp4 = self.absolute_position(Pos::new(-1, 0));
 
-        let pos_multi2 = self.reposition(Pos::new(0, -1));
-        let pos_multi3 = self.reposition(Pos::new(-1, 1));
+        let pos_multi2 = self.absolute_position(Pos::new(0, -1));
+        let pos_multi3 = self.absolute_position(Pos::new(-1, 1));
 
-        let pos_unif2 = self.reposition(Pos::new(-1, 1));
-        let pos_unif3 = self.reposition(Pos::new(0, -1));
-        let pos_unif4 = self.reposition(Pos::new(1, -1));
+        let pos_unif2 = self.absolute_position(Pos::new(-1, 1));
+        let pos_unif3 = self.absolute_position(Pos::new(0, -1));
+        let pos_unif4 = self.absolute_position(Pos::new(1, -1));
 
         match &self.glyph_type {
             GlyphType::Calcification => smallvec::smallvec![pos],
@@ -1313,21 +1313,21 @@ impl World {
             let rot = normalize_dir(glyph.rot) as usize;
 
             let pos = glyph.pos; //primary position
-            let pos_bi = glyph.reposition(Pos::new(1, 0)); //position for all 2-sized glyphs
-            let pos_tri = glyph.reposition(Pos::new(0, 1)); //third (closely packed) position
+            let pos_bi = glyph.absolute_position(Pos::new(1, 0)); //position for all 2-sized glyphs
+            let pos_tri = glyph.absolute_position(Pos::new(0, 1)); //third (closely packed) position
 
-            let pos_ani = glyph.reposition(Pos::new(1, -1));
+            let pos_ani = glyph.absolute_position(Pos::new(1, -1));
 
-            let pos_disp2 = glyph.reposition(Pos::new(1, -1));
-            let pos_disp3 = glyph.reposition(Pos::new(0, -1));
-            let pos_disp4 = glyph.reposition(Pos::new(-1, 0));
+            let pos_disp2 = glyph.absolute_position(Pos::new(1, -1));
+            let pos_disp3 = glyph.absolute_position(Pos::new(0, -1));
+            let pos_disp4 = glyph.absolute_position(Pos::new(-1, 0));
 
-            let pos_multi2 = glyph.reposition(Pos::new(0, -1));
-            let pos_multi3 = glyph.reposition(Pos::new(-1, 1));
+            let pos_multi2 = glyph.absolute_position(Pos::new(0, -1));
+            let pos_multi3 = glyph.absolute_position(Pos::new(-1, 1));
 
-            let pos_unif2 = glyph.reposition(Pos::new(-1, 1));
-            let pos_unif3 = glyph.reposition(Pos::new(0, -1));
-            let pos_unif4 = glyph.reposition(Pos::new(1, -1));
+            let pos_unif2 = glyph.absolute_position(Pos::new(-1, 1));
+            let pos_unif3 = glyph.absolute_position(Pos::new(0, -1));
+            let pos_unif4 = glyph.absolute_position(Pos::new(1, -1));
 
             fn pop_check_make(
                 atoms: &mut WorldAtoms,
