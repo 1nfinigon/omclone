@@ -637,6 +637,29 @@ pub struct InitialWorld {
     pub tapes: Vec<Tape<Instr>>,
 }
 
+impl InitialWorld {
+    /// Returns `true` if overlap is detected
+    fn mark_initial_area_and_detect_overlap(&self) -> (FxHashSet<Pos>, bool) {
+        let mut area_touched = FxHashSet::default();
+        let mut has_overlap = false;
+        for glyph in self.glyphs.iter() {
+            for p in glyph.positions() {
+                if !area_touched.insert(p) {
+                    has_overlap = true;
+                }
+            }
+        }
+        for arm in self.arms.iter() {
+            for n in 0..=arm.len {
+                if !area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot)) && n == 0 {
+                    has_overlap = true;
+                }
+            }
+        }
+        (area_touched, has_overlap)
+    }
+}
+
 pub type TrackMap = FxHashMap<Pos, Pos>;
 
 #[derive(Debug, Clone, Default)]
@@ -1170,25 +1193,6 @@ impl World {
             }
         }
         motion.arms.push(action);
-        Ok(())
-    }
-
-    fn initial_area(&mut self) -> SimResult<()> {
-        use GlyphType::*;
-        for glyph in &mut self.glyphs {
-            for p in glyph.positions() {
-                self.area_touched.insert(p);
-                /*if !self.area_touched.insert(p){
-                    return Err(SimError{error_str:"Overlap detected!", location:pos_to_xy(p)});
-                }*/
-            }
-        }
-        for arm in self.arms.iter() {
-            for n in 0..=arm.len {
-                self.area_touched
-                    .insert(arm.pos + rot_dist_to_pos(n, arm.rot));
-            }
-        }
         Ok(())
     }
 
@@ -1857,10 +1861,11 @@ impl World {
     /// The main initialization function. Creates the initial state of the world
     /// given an `InitialWorld`.
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
+        let (area_touched, _has_overlap) = init.mark_initial_area_and_detect_overlap();
         let mut world = World {
             timestep: 0,
             atoms: WorldAtoms::new(),
-            area_touched: Default::default(),
+            area_touched,
             glyphs: init.glyphs.clone(),
             arms: init.arms.clone(),
             track_maps: Default::default(),
@@ -1946,7 +1951,6 @@ impl World {
             unfinished_conduit_count == 0,
             "Conduits not properly matched!"
         );
-        world.initial_area()?;
         Ok(world)
     }
 }
