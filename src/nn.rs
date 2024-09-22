@@ -35,11 +35,6 @@ pub mod constants {
 
 use constants::*;
 
-struct NNContext {
-    time_limit: u64,
-    history: SmallVec<[sim::World; N_HISTORY_CYCLES - 1]>,
-}
-
 pub mod feature_offsets {
     use super::constants::*;
     use crate::sim;
