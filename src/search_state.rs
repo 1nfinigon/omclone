@@ -1,3 +1,4 @@
+use crate::nn;
 use crate::sim::*;
 use std::sync::Arc;
 
@@ -6,15 +7,20 @@ pub struct State {
     pub errored: bool,
     pub world: Arc<World>,
     pub instr_buffer: Vec<BasicInstr>,
+    pub nn_features: nn::Features,
 }
 
 impl State {
     pub fn new(world: World) -> Self {
         let n_arms = world.arms.len();
+        let mut nn_features = nn::Features::new();
+        nn_features.set_nontemporal(&world);
+        nn_features.init_all_temporal(&world);
         Self {
             errored: false,
             world: Arc::new(world),
             instr_buffer: Vec::with_capacity(n_arms),
+            nn_features,
         }
     }
 
@@ -23,6 +29,7 @@ impl State {
         let n_arms = self.world.arms.len();
         assert!(self.instr_buffer.len() < n_arms, "instr_buffer should have been committed to the world already, if all arms have instructions");
         self.instr_buffer.push(update);
+        self.nn_features.set_temporal_instr(0, &*self.world, n_arms, update);
         if self.instr_buffer.len() == n_arms {
             // commit buffer
             let instr_buffer =
@@ -33,6 +40,8 @@ impl State {
             let result = new_world.run_step(true, &mut motions, &mut float_world, &instr_buffer);
             match result {
                 Ok(()) => {
+                    self.nn_features.shift_temporal();
+                    self.nn_features.set_temporal_except_instr(0, &new_world);
                     self.world = Arc::new(new_world);
                 }
                 Err(_) => {

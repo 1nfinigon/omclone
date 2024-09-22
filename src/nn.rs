@@ -282,11 +282,11 @@ pub mod feature_offsets {
         };
     }
 
-    pub struct Global {
+    pub struct Temporal {
         pub cycles: Float,
     }
 
-    impl Global {
+    impl Temporal {
         const fn new_and_size() -> (Self, usize) {
             let offset = 0usize;
             let (offset, cycles) = Float::assign(offset);
@@ -314,7 +314,7 @@ pub mod features {
     pub struct Features {
         spatial: [[[f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
         spatiotemporal: [[[[f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT]; N_HISTORY_CYCLES],
-        global: [f32; Global::SIZE],
+        temporal: [[f32; Temporal::SIZE]; N_HISTORY_CYCLES],
     }
 
     impl Features {
@@ -323,10 +323,11 @@ pub mod features {
                 spatial: [[[0f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
                 spatiotemporal: [[[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT];
                     N_HISTORY_CYCLES],
-                global: [0f32; Global::SIZE],
+                temporal: [[0f32; Temporal::SIZE]; N_HISTORY_CYCLES],
             }
         }
 
+        /// Helper function for setting features relating to an Atom.
         fn set_atom(
             atom: &sim::Atom,
             features: &mut [f32],
@@ -366,6 +367,7 @@ pub mod features {
             }
         }
 
+        /// Set all nontemporal data.
         #[deny(unused_variables)]
         pub fn set_nontemporal(&mut self, world: &sim::World) {
             let Spatial {
@@ -471,9 +473,6 @@ pub mod features {
                     };
                 }
             }
-
-            let Global { cycles } = Global::OFFSETS;
-            self.global[cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
         }
 
         /// Sets the temporal data at relative time `time` to reflect the current world.
@@ -537,6 +536,18 @@ pub mod features {
                 let features = &mut self.spatiotemporal[time][pos.y as usize][pos.x as usize];
                 Self::set_atom(atom, features, atom_type, atom_bonds, Some(atom_is_berlo));
             }
+
+            let Temporal { cycles } = Temporal::OFFSETS;
+            self.temporal[time][cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
+        }
+
+        /// Set all timesteps' data to this world. Used for initialization.
+        pub fn init_all_temporal(&mut self, world: &sim::World) {
+            self.set_temporal_except_instr(0, world);
+            for time in 1..N_HISTORY_CYCLES {
+                self.spatiotemporal[time] = self.spatiotemporal[0];
+                self.temporal[time] = self.temporal[0];
+            }
         }
 
         pub fn set_temporal_instr(
@@ -554,9 +565,9 @@ pub mod features {
             features[arm_base_instr.get_onehot_offset(instr.to_usize().unwrap())] = 1.;
         }
 
-        /// Copies all temporal data one timestep later. The current timestep is
-        /// left unmodified.
-        pub fn shift_temporal(&mut self, world: sim::World) {
+        /// Copies all temporal data one timestep later. The current timestep's
+        /// temporal data is left unmodified.
+        pub fn shift_temporal(&mut self) {
             self.spatiotemporal
                 .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
         }
@@ -564,6 +575,7 @@ pub mod features {
         /// Fully erases the current timestep's temporal data.
         pub fn clear_temporal(&mut self, time: usize) {
             self.spatiotemporal[0] = [[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT];
+            self.temporal[0] = [0f32; Temporal::SIZE];
         }
 
         /// Erases the current timestep's temporal instr data.
@@ -580,3 +592,5 @@ pub mod features {
         }
     }
 }
+
+pub use features::Features;
