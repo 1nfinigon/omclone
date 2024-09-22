@@ -424,6 +424,24 @@ pub enum ArmMovement {
 pub type AtomPattern = Vec<Atom>;
 pub type InOutId = i32;
 pub type ConduitId = i32;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BasicGlyphType {
+    Calcification,
+    Animismus,
+    Projection,
+    Dispersion,
+    Purification,
+    Duplication,
+    Unification,
+    Bonding,
+    Unbonding,
+    TriplexBond,
+    MultiBond,
+    Disposal,
+    Equilibrium,
+}
+
 //Note: pre-setup, AtomPatterns are local and must be offset/rotated. After, they are global.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlyphType {
@@ -447,6 +465,55 @@ pub enum GlyphType {
     OutputRepeating(AtomPattern, i32, InOutId),
 } //Warning: Currently these Pos are relative in InitialWorld/preprocess, and absolute for World/during processing
   //This should probably be made consistent
+
+impl From<BasicGlyphType> for GlyphType {
+    fn from(value: BasicGlyphType) -> Self {
+        match value {
+            BasicGlyphType::Calcification => Self::Calcification,
+            BasicGlyphType::Animismus => Self::Animismus,
+            BasicGlyphType::Projection => Self::Projection,
+            BasicGlyphType::Dispersion => Self::Dispersion,
+            BasicGlyphType::Purification => Self::Purification,
+            BasicGlyphType::Duplication => Self::Duplication,
+            BasicGlyphType::Unification => Self::Unification,
+            BasicGlyphType::Bonding => Self::Bonding,
+            BasicGlyphType::Unbonding => Self::Unbonding,
+            BasicGlyphType::TriplexBond => Self::TriplexBond,
+            BasicGlyphType::MultiBond => Self::MultiBond,
+            BasicGlyphType::Disposal => Self::Disposal,
+            BasicGlyphType::Equilibrium => Self::Equilibrium,
+        }
+    }
+}
+
+impl TryFrom<&GlyphType> for BasicGlyphType {
+    type Error = ();
+    fn try_from(value: &GlyphType) -> std::result::Result<Self, Self::Error> {
+        match value {
+            GlyphType::Calcification => Ok(Self::Calcification),
+            GlyphType::Animismus => Ok(Self::Animismus),
+            GlyphType::Projection => Ok(Self::Projection),
+            GlyphType::Dispersion => Ok(Self::Dispersion),
+            GlyphType::Purification => Ok(Self::Purification),
+            GlyphType::Duplication => Ok(Self::Duplication),
+            GlyphType::Unification => Ok(Self::Unification),
+            GlyphType::Bonding => Ok(Self::Bonding),
+            GlyphType::Unbonding => Ok(Self::Unbonding),
+            GlyphType::TriplexBond => Ok(Self::TriplexBond),
+            GlyphType::MultiBond => Ok(Self::MultiBond),
+            GlyphType::Disposal => Ok(Self::Disposal),
+            GlyphType::Equilibrium => Ok(Self::Equilibrium),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<GlyphType> for BasicGlyphType {
+    type Error = ();
+    fn try_from(value: GlyphType) -> std::result::Result<Self, Self::Error> {
+        <BasicGlyphType as TryFrom<&GlyphType>>::try_from(&value)
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ArmType {
@@ -2138,7 +2205,7 @@ impl WorldWithTapes {
     }
 
     /// The main initialization function. Creates the initial state of the world
-    /// given an `InitialWorld`.
+    /// (including tape) given an `InitialWorld`.
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
         let mut self_ = Self {
             world: World::setup_sim(init)?,

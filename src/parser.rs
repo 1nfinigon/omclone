@@ -204,7 +204,7 @@ fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> 
 
 #[derive(Debug, PartialEq, Eq)]
 enum PartType {
-    TGlyph(GlyphType),
+    TGlyph(BasicGlyphType),
     TArm(ArmType),
     TTrack,
     TInput,
@@ -226,7 +226,7 @@ struct Part {
 }
 fn name_to_part_type(name: String) -> Result<PartType> {
     use ArmType::*;
-    use GlyphType::*;
+    use BasicGlyphType::*;
     Ok(match name.as_str() {
         "glyph-calcification" => TGlyph(Calcification),
         "glyph-life-and-death" => TGlyph(Animismus),
@@ -257,7 +257,7 @@ fn name_to_part_type(name: String) -> Result<PartType> {
 }
 fn part_type_to_name(part: &PartType) -> Result<&'static str> {
     use ArmType::*;
-    use GlyphType::*;
+    use BasicGlyphType::*;
     Ok(match part {
         TGlyph(Calcification) => "glyph-calcification",
         TGlyph(Animismus) => "glyph-life-and-death",
@@ -283,7 +283,6 @@ fn part_type_to_name(part: &PartType) -> Result<&'static str> {
         TOutput => "out-std",
         TOutputRep => "out-rep",
         TConduit => "pipe",
-        _ => bail!("Illegal part type {:?} in write attempt!", part),
     })
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
@@ -386,7 +385,7 @@ pub fn create_solution(
                 None,
                 Some((*id, conduit.iter().map(|x| rotate(x - pos, -rot)).collect())),
             ),
-            normal_glyph_type => (TGlyph(normal_glyph_type.clone()), 0, None, None),
+            basic_glyph_type => (TGlyph(basic_glyph_type.try_into().unwrap()), 0, None, None),
         };
         part_list.push(Part {
             part_type,
@@ -686,7 +685,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
         match &p.part_type {
             TGlyph(gtype) => {
                 glyphs.push(Glyph {
-                    glyph_type: gtype.clone(),
+                    glyph_type: (*gtype).into(),
                     pos: p.pos,
                     rot: p.rot,
                 });
