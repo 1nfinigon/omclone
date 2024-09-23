@@ -67,10 +67,35 @@ class GlobalPool1dTime2d(torch.nn.Module):
         B = input.shape[0]
         C = input.shape[1]
         T = input.shape[2]
-        assert(C == self.in_channels)
-        max = torch.max(input.view(B, C, T, -1), dim=3).view(B, C, T, 1, 1)
+        max = torch.max(input.view(B, C, T, -1), dim=3).values.view(B, C, T, 1, 1)
         mean = torch.mean(input, dim=(3, 4), keepdim=True)
         return torch.cat((max, mean), dim=1)
+
+if __name__ == "__main__":
+    # test trace generalizability
+    C = 2
+    input1 = torch.rand(1,C,3,4,5)
+    input2 = torch.rand(1,C,3,4,5)
+    model = GlobalPool1dTime2d(C)
+    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+
+if __name__ == "__main__":
+    # test correctness
+    def gen_wh(n):
+        return [[n, n-1], [n-2, n-3]]
+    c0t0 = gen_wh(4)
+    c0t1 = gen_wh(8)
+    c1t0 = gen_wh(104)
+    c1t1 = gen_wh(108)
+    input = torch.tensor([[ [ c0t0, c0t1 ], [ c1t0, c1t1 ]]], dtype=torch.float)
+    model = GlobalPool1dTime2d(C)
+    output = model(input)
+    c0t0max, c0t0mean = [[4]], [[2.5]]
+    c0t1max, c0t1mean = [[8]], [[6.5]]
+    c1t0max, c1t0mean = [[104]], [[102.5]]
+    c1t1max, c1t1mean = [[108]], [[106.5]]
+    expected_output = torch.tensor([[[c0t0max, c0t1max], [c1t0max, c1t1max], [c0t0mean, c0t1mean], [c1t0mean, c1t1mean]]], dtype=torch.float)
+    assert(torch.allclose(output, expected_output))
 
 class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
     """
