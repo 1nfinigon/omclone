@@ -71,4 +71,4 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 
 color-eyre = {version = "0.6", optional = true}
 simple-eyre = "0.3"
-
+eyre = "0.6"

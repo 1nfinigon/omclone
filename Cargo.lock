@@ -874,6 +874,7 @@ dependencies = [
  "egui",
  "egui-miniquad",
  "enum-primitive-derive",
+ "eyre",
  "fontdue",
  "image",
  "miniquad",

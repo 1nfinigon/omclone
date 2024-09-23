@@ -426,10 +426,12 @@ if __name__ == "__main__":
 class ValueHead(torch.nn.Module):
     """
     Input:  BCHW
-    Output: B3
+    Output: BV   (V = number of value head outputs)
 
     Torchscript: Trace generalizes across B, H, W
     """
+
+    OUTPUTS = 2
 
     def __init__(self, trunk_channels, head_channels, value_channels, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -442,7 +444,7 @@ class ValueHead(torch.nn.Module):
         self.global_pool = GlobalPool2d(head_channels, has_time_dimension=False)
         self.fc_pre = torch.nn.Linear(self.global_pool.out_channels, value_channels)
         self.relu = torch.nn.ReLU()
-        self.fc_post = torch.nn.Linear(value_channels, 3)
+        self.fc_post = torch.nn.Linear(value_channels, self.OUTPUTS)
 
     def forward(self, input):
         input = self.conv_in(input)
@@ -528,9 +530,10 @@ print("Model has {} trainable parameters".format(params))
 
 # construct a sample input, for tracing
 
-spatial = torch.rand(2, SPATIAL_FEATURES, 1, 1)
-spatiotemporal = torch.rand(2, SPATIOTEMPORAL_FEATURES, N_HISTORY_CYCLES, 1, 1)
-temporal = torch.rand(2, TEMPORAL_FEATURES, 1)
+dtype = torch.float
+spatial = torch.rand((2, SPATIAL_FEATURES, 1, 1), dtype=dtype)
+spatiotemporal = torch.rand((2, SPATIOTEMPORAL_FEATURES, N_HISTORY_CYCLES, 1, 1), dtype=dtype)
+temporal = torch.rand((2, TEMPORAL_FEATURES, 1), dtype=dtype)
 
 the_model.eval()
 traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal))

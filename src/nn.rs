@@ -618,3 +618,93 @@ pub mod features {
 }
 
 pub use features::Features;
+
+mod model {
+    use super::*;
+    use eyre;
+    use tch;
+
+    const MODEL_FILENAME: &'static str = "pytorch/model.pt";
+
+    struct Model {
+        module: tch::CModule,
+        device: tch::Device,
+    }
+
+    struct Evaluation {
+        /// Softmaxed from policy head
+        policy: [[[f32; N_INSTR_TYPES]; N_WIDTH]; N_HEIGHT],
+
+        /// Softmaxed outcome prediction from value head
+        win: f32,
+        loss_by_cycles: f32,
+        //loss_by_area: f32,
+
+        //cycles_left: f32, -- think about making this N(0, 1) in the raw output. Maybe interpret this as scaled relative to the given cycle limit?
+        //area_left: f32,
+    }
+
+    impl Model {
+        fn load() -> eyre::Result<Self> {
+            let device = tch::Device::cuda_if_available();
+            let module = tch::CModule::load(MODEL_FILENAME)?;
+            Ok(Self{ module, device })
+        }
+
+        fn forward(&self, features: &Features) -> eyre::Result<Evaluation> {
+            // TODO: all this copying is very slow
+            let options = (tch::Kind::Float, self.device);
+
+            let s = feature_offsets::Spatial::SIZE;
+            let h = constants::N_HEIGHT;
+            let w = constants::N_WIDTH;
+            let x = feature_offsets::Spatiotemporal::SIZE;
+            let t = constants::N_HISTORY_CYCLES;
+            let g = feature_offsets::Temporal::SIZE;
+
+            let mut spatial_input = Vec::with_capacity(s*h*w);
+            let mut spatiotemporal_input = Vec::with_capacity(x*t*h*w);
+            let mut temporal_input = Vec::with_capacity(g*t);
+
+            for i_s in 0..s {
+                for i_h in 0..h {
+                    for i_w in 0..w {
+                        spatial_input.push(features.spatial[i_h][i_w][i_s]);
+                    }
+                }
+            }
+
+            for i_x in 0..x {
+                for i_t in 0..t {
+                    for i_h in 0..h {
+                        for i_w in 0..w {
+                            spatiotemporal_input.push(features.spatiotemporal[i_t][i_h][i_w][i_x]);
+                        }
+                    }
+                }
+            }
+
+            for i_g in 0..g {
+                for i_t in 0..t {
+                    temporal_input.push(features.temporal[i_t][i_g]);
+                }
+            }
+
+            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?;
+            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?;
+            let temporal_input = tch::Tensor::f_from_slice(&temporal_input[..])?;
+
+            let input = tch::IValue::Tuple(vec![
+                tch::IValue::Tensor(spatial_input),
+                tch::IValue::Tensor(spatiotemporal_input),
+                tch::IValue::Tensor(temporal_input),
+            ]);
+
+            let output = self.module.forward_is(&[input])?;
+
+            let (policy, value): (tch::Tensor, tch::Tensor) = output.try_into()?;
+
+            unimplemented!()
+        }
+    }
+}
