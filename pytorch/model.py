@@ -67,6 +67,8 @@ class GlobalPool1dTime2d(torch.nn.Module):
         B = input.shape[0]
         C = input.shape[1]
         T = input.shape[2]
+        if not torch.jit.is_tracing():
+            assert(C == self.in_channels)
         max = torch.max(input.view(B, C, T, -1), dim=3).values.view(B, C, T, 1, 1)
         mean = torch.mean(input, dim=(3, 4), keepdim=True)
         return torch.cat((max, mean), dim=1)
