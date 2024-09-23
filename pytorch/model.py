@@ -362,7 +362,7 @@ if __name__ == "__main__":
 
     B = 11
     H = 14
-    W = 14
+    W = 15
     input2 = torch.rand(B, C, T, H, W)
 
     model = Trunk(C, C // 2, T, ["res", "respool", "res", "convtime", "res", "respool", "res"])
@@ -375,6 +375,8 @@ class PolicyHead(torch.nn.Module):
     """
     Input:  BCHW
     Output: BNHW (N = N_INSTR_TYPES)
+
+    Torchscript: Trace generalizes across B, H, W
     """
 
     def __init__(self, trunk_channels, head_channels, *args, **kwargs):
@@ -400,7 +402,34 @@ class PolicyHead(torch.nn.Module):
         input = self.conv_out(input)
         return input
 
+if __name__ == "__main__":
+    # test trace generalizability
+    B = 1
+    C = 6
+    H = 4
+    W = 5
+    N = 2
+    input1 = torch.rand(B, C, H, W)
+
+    B = 11
+    H = 14
+    W = 15
+    input2 = torch.rand(B, C, H, W)
+
+    model = PolicyHead(C, N)
+    output = model(input2)
+    assert(output.size() == (B, N_INSTR_TYPES, H, W))
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
+
 class ValueHead(torch.nn.Module):
+    """
+    Input:  BCHW
+    Output: B3
+
+    Torchscript: Trace generalizes across B, H, W
+    """
+
     def __init__(self, trunk_channels, head_channels, value_channels, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -409,7 +438,7 @@ class ValueHead(torch.nn.Module):
         self.value_channels = value_channels
 
         self.conv_in = torch.nn.Conv2d(trunk_channels, head_channels, 1)
-        self.global_pool = GlobalPool2d(head_channels)
+        self.global_pool = GlobalPool2d(head_channels, has_time_dimension=False)
         self.fc_pre = torch.nn.Linear(self.global_pool.out_channels, value_channels)
         self.relu = torch.nn.ReLU()
         self.fc_post = torch.nn.Linear(value_channels, 3)
@@ -417,8 +446,27 @@ class ValueHead(torch.nn.Module):
     def forward(self, input):
         input = self.conv_in(input)
         input = self.global_pool(input)
-        input = input.squeeze(dim=(3, 4))
+        input = input.squeeze(dim=(-1, -2))
         input = self.fc_pre(input)
         input = self.relu(input)
         input = self.fc_post(input)
         return input
+
+if __name__ == "__main__":
+    # test trace generalizability
+    B = 1
+    C = 6
+    H = 4
+    W = 5
+    input1 = torch.rand(B, C, H, W)
+
+    B = 11
+    H = 14
+    W = 15
+    input2 = torch.rand(B, C, H, W)
+
+    model = ValueHead(C, 4, 2)
+    output = model(input2)
+    assert(output.size() == (B, 3))
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
