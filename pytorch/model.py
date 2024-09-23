@@ -3,6 +3,7 @@
 # https://ppwwyyxx.com/blog/2022/TorchScript-Tracing-vs-Scripting/
 
 import torch
+import numpy as np
 
 N_INSTR_TYPES = 11
 
@@ -510,3 +511,7 @@ the_model.append(Heads(trunk_channels=CHANNELS,
                        value_head_channels=HEAD_CHANNELS,
                        value_channels=VALUE_CHANNELS))
 print(the_model)
+
+model_parameters = filter(lambda p: p.requires_grad, the_model.parameters())
+params = sum([np.prod(p.size()) for p in model_parameters])
+print("{} trainable parameters".format(params))
