@@ -453,65 +453,88 @@ class ValueHead(torch.nn.Module):
         input = self.fc_post(input)
         return input
 
-class Heads(torch.nn.Module):
-    def __init__(self, trunk_channels, policy_head_channels, value_head_channels, value_channels, *args, **kwargs):
+class ModelV1(torch.nn.Module):
+    def __init__(self,
+                 spatial_features,
+                 spatiotemporal_features,
+                 temporal_features,
+                 time_size,
+                 trunk_channels, pool_channels, trunk_layers,
+                 policy_head_channels, value_head_channels, value_channels, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.policy_head = PolicyHead(trunk_channels, policy_head_channels, *args, **kwargs)
-        self.value_head = ValueHead(trunk_channels, value_head_channels, value_channels, *args, **kwargs)
+        self.input_embedder = InputEmbedder(
+            spatial_features=spatial_features,
+            spatiotemporal_features=spatiotemporal_features,
+            temporal_features=temporal_features,
+            channels=trunk_channels,
+            *args, **kwargs)
+        self.trunk = Trunk(
+            channels=trunk_channels,
+            pool_channels=pool_channels,
+            time_size=time_size,
+            layers=trunk_layers,
+            *args, **kwargs)
+        self.policy_head = PolicyHead(
+            trunk_channels, policy_head_channels, *args, **kwargs)
+        self.value_head = ValueHead(
+            trunk_channels, value_head_channels, value_channels, *args, **kwargs)
 
-    def forward(self, input):
-        policy = self.policy_head(input)
-        value = self.value_head(input)
-        (policy, value)
-
-if __name__ == "__main__":
-    # test trace generalizability
-    B = 1
-    C = 6
-    H = 4
-    W = 5
-    input1 = torch.rand(B, C, H, W)
-
-    B = 11
-    H = 14
-    W = 15
-    input2 = torch.rand(B, C, H, W)
-
-    model = ValueHead(C, 4, 2)
-    output = model(input2)
-    assert(output.size() == (B, 3))
-    traced_output = torch.jit.trace(model, input1)(input2)
-    assert torch.allclose(traced_output, output)
+    def forward(self, spatial_input, spatiotemporal_input, temporal_input):
+        channels = self.input_embedder(spatial_input, spatiotemporal_input, temporal_input)
+        channels = self.trunk(channels)
+        policy = self.policy_head(channels)
+        value = self.value_head(channels)
+        return (policy, value)
 
 
 
-the_model = torch.nn.Sequential()
+
+# constants from nn.rs
+SPATIAL_FEATURES = 143
+SPATIOTEMPORAL_FEATURES = 72
+TEMPORAL_FEATURES = 1
+N_HISTORY_CYCLES = 20
+
+# tunable constants
 CHANNELS = 16
 HEAD_CHANNELS = 16
 VALUE_CHANNELS = 8
-the_model.append(InputEmbedder(spatial_features=143,
-                               spatiotemporal_features=72,
-                               temporal_features=1,
-                               channels=CHANNELS))
-the_model.append(Trunk(channels=CHANNELS,
-                       pool_channels=C // 2,
-                       time_size=T,
-                       layers=[
-                           "res",
-                           "respool",
-                           "res",
-                           "convtime",
-                           "res",
-                           "respool",
-                           "res"
-                       ]))
-the_model.append(Heads(trunk_channels=CHANNELS,
-                       policy_head_channels=HEAD_CHANNELS,
-                       value_head_channels=HEAD_CHANNELS,
-                       value_channels=VALUE_CHANNELS))
-print(the_model)
+LAYERS = [
+    "res",
+    "respool",
+    "res",
+    "convtime",
+    "res",
+    "respool",
+    "res"
+]
+
+the_model = ModelV1(
+    spatial_features = SPATIAL_FEATURES,
+    spatiotemporal_features = SPATIOTEMPORAL_FEATURES,
+    temporal_features = TEMPORAL_FEATURES,
+    time_size = N_HISTORY_CYCLES,
+    trunk_channels = CHANNELS,
+    pool_channels = CHANNELS // 2,
+    trunk_layers = LAYERS,
+    policy_head_channels = HEAD_CHANNELS,
+    value_head_channels = HEAD_CHANNELS,
+    value_channels = VALUE_CHANNELS)
 
 model_parameters = filter(lambda p: p.requires_grad, the_model.parameters())
 params = sum([np.prod(p.size()) for p in model_parameters])
-print("{} trainable parameters".format(params))
+print("Model has {} trainable parameters".format(params))
+
+# construct a sample input, for tracing
+
+spatial = torch.rand(2, SPATIAL_FEATURES, 1, 1)
+spatiotemporal = torch.rand(2, SPATIOTEMPORAL_FEATURES, N_HISTORY_CYCLES, 1, 1)
+temporal = torch.rand(2, TEMPORAL_FEATURES, 1)
+
+the_model.eval()
+traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal))
+
+FILENAME = 'model.pt'
+traced_model.save(FILENAME)
+print("Saved model to {}".format(FILENAME))
