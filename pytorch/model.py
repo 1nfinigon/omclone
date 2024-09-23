@@ -104,6 +104,8 @@ class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
     Input:       BCTHW
     Pool input:  BPTHW
     Output:      BCTHW
+
+    Torchscript: Trace generalizes across shape
     """
 
     def __init__(self, in_channels, pool_channels, *args, **kwargs):
@@ -113,19 +115,31 @@ class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
         self.pool_channels = pool_channels
 
         self.bn_pool = torch.nn.BatchNorm3d(pool_channels)
-        self.pool = GlobalPool1DTime2d(pool_channels)
+        self.pool = GlobalPool1dTime2d(pool_channels)
         self.fc_pool = torch.nn.Linear(self.pool.out_channels, in_channels)
 
     def forward(self, input, pool_input):
-        assert(input.shape[1] == self.in_channels)
-        assert(pool_input.shape[1] == self.pool_channels)
+        if not torch.jit.is_tracing():
+            assert(input.shape[1] == self.in_channels)
+            assert(pool_input.shape[1] == self.pool_channels)
         bias = self.bn_pool(pool_input)
         bias = self.pool(bias)
-        bias = bias.view(-1, self.fc_pool.in_features)
-        bias = self.fc_pool(bias)
-        bias = bias.view(-1, self.fc_pool.out_features, 1, 1, 1)
-        input += bias
-        return input
+        bias = bias.squeeze(dim=4).squeeze(dim=3).permute((0, 2, 1))
+        bias = self.fc_pool(bias).permute((0, 2, 1)).unsqueeze(dim=-1).unsqueeze(dim=-1)
+        return input + bias
+
+if __name__ == "__main__":
+    # test trace generalizability
+    C = 2
+    P = 6
+    input1 = torch.rand(1, C, 3, 4, 5)
+    pool1 = torch.rand(1, P, 3, 4, 5)
+    input2 = torch.rand(7, C, 9, 10, 11)
+    pool2 = torch.rand(7, P, 9, 10, 11)
+    model = GlobalPoolBiasStructure1dTime2d(C, P)
+    output = model(input2, pool2)
+    traced_output = torch.jit.trace(model, (input1, pool1))(input2, pool2)
+    assert torch.allclose(traced_output, output)
 
 class PreActivationResBlock(torch.nn.Module):
     """
