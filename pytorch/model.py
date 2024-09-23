@@ -84,27 +84,31 @@ if __name__ == "__main__":
     output_centre.backward(inputs=[input])
     assert(input.grad.count_nonzero() == 7)
 
-class GlobalPool1dTime2d(torch.nn.Module):
+class GlobalPool2d(torch.nn.Module):
     """
-    Input:  BCTHW
-    Output: BXT11 (X=2*C)
+    Input:  BCHW or BCTHW
+    Output: BX11 or BXT11 (X=2*C)
 
     Torchscript: Trace generalizes across H, W
     """
 
-    def __init__(self, in_channels, *args, **kwargs):
+    def __init__(self, in_channels, has_time_dimension, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.has_time_dimension = has_time_dimension
         self.in_channels = in_channels
         self.out_channels = 2 * self.in_channels
 
     def forward(self, input):
         B = input.shape[0]
         C = input.shape[1]
-        T = input.shape[2]
         if not torch.jit.is_tracing():
             assert(C == self.in_channels)
-        max = torch.max(input.view(B, C, T, -1), dim=3).values.view(B, C, T, 1, 1)
-        mean = torch.mean(input, dim=(3, 4), keepdim=True)
+        if self.has_time_dimension:
+            T = input.shape[2]
+            max = torch.max(input.view(B, C, T, -1), dim=-1).values.view(B, C, T, 1, 1)
+        else:
+            max = torch.max(input.view(B, C, -1), dim=-1).values.view(B, C, 1, 1)
+        mean = torch.mean(input, dim=(-1, -2), keepdim=True)
         return torch.cat((max, mean), dim=1)
 
 if __name__ == "__main__":
@@ -112,8 +116,20 @@ if __name__ == "__main__":
     C = 2
     input1 = torch.rand(1,C,3,4,5)
     input2 = torch.rand(1,C,3,14,15)
-    model = GlobalPool1dTime2d(C)
-    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+    model = GlobalPool2d(C, has_time_dimension=True)
+    output = model(input2)
+    assert(output.size() == (1,2*C,3,1,1))
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
+
+    C = 2
+    input1 = torch.rand(1,C,4,5)
+    input2 = torch.rand(1,C,14,15)
+    model = GlobalPool2d(C, has_time_dimension=False)
+    output = model(input2)
+    assert(output.size() == (1,2*C,1,1))
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
 
 if __name__ == "__main__":
     # test correctness
@@ -124,7 +140,7 @@ if __name__ == "__main__":
     c1t0 = gen_wh(104)
     c1t1 = gen_wh(108)
     input = torch.tensor([[ [ c0t0, c0t1 ], [ c1t0, c1t1 ]]], dtype=torch.float)
-    model = GlobalPool1dTime2d(C)
+    model = GlobalPool2d(C, has_time_dimension=True)
     output = model(input)
     c0t0max, c0t0mean = [[4]], [[2.5]]
     c0t1max, c0t1mean = [[8]], [[6.5]]
@@ -133,23 +149,27 @@ if __name__ == "__main__":
     expected_output = torch.tensor([[[c0t0max, c0t1max], [c1t0max, c1t1max], [c0t0mean, c0t1mean], [c1t0mean, c1t1mean]]], dtype=torch.float)
     assert(torch.allclose(output, expected_output))
 
-class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
+class GlobalPoolBiasStructure2d(torch.nn.Module):
     """
-    Input:       BCTHW
-    Pool input:  BPTHW
-    Output:      BCTHW
+    Input:       BCHW or BCTHW
+    Pool input:  BCHW or BPTHW
+    Output:      BCHW or BCTHW
 
     Torchscript: Trace generalizes across B, T, H, W
     """
 
-    def __init__(self, in_channels, pool_channels, *args, **kwargs):
+    def __init__(self, in_channels, pool_channels, has_time_dimension, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.in_channels = in_channels
         self.pool_channels = pool_channels
+        self.has_time_dimension = has_time_dimension
 
-        self.bn_pool = torch.nn.BatchNorm3d(pool_channels)
-        self.pool = GlobalPool1dTime2d(pool_channels)
+        if has_time_dimension:
+            self.bn_pool = torch.nn.BatchNorm3d(pool_channels)
+        else:
+            self.bn_pool = torch.nn.BatchNorm2d(pool_channels)
+        self.pool = GlobalPool2d(pool_channels, has_time_dimension)
         self.fc_pool = torch.nn.Linear(self.pool.out_channels, in_channels)
 
     def forward(self, input, pool_input):
@@ -158,8 +178,13 @@ class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
             assert(pool_input.shape[1] == self.pool_channels)
         bias = self.bn_pool(pool_input)
         bias = self.pool(bias)
-        bias = bias.squeeze(dim=(3,4)).permute((0, 2, 1))
-        bias = self.fc_pool(bias).permute((0, 2, 1)).unsqueeze(dim=-1).unsqueeze(dim=-1)
+        bias = bias.squeeze(dim=(-1,-2))
+        if self.has_time_dimension:
+            bias = bias.permute((0, 2, 1))
+        bias = self.fc_pool(bias)
+        if self.has_time_dimension:
+            bias = bias.permute((0, 2, 1))
+        bias = bias.unsqueeze(dim=-1).unsqueeze(dim=-1)
         return input + bias
 
 if __name__ == "__main__":
@@ -170,7 +195,7 @@ if __name__ == "__main__":
     pool1 = torch.rand(1, P, 3, 4, 5)
     input2 = torch.rand(7, C, 9, 10, 11)
     pool2 = torch.rand(7, P, 9, 10, 11)
-    model = GlobalPoolBiasStructure1dTime2d(C, P)
+    model = GlobalPoolBiasStructure2d(C, P, has_time_dimension=True)
     output = model(input2, pool2)
     traced_output = torch.jit.trace(model, (input1, pool1))(input2, pool2)
     assert torch.allclose(traced_output, output)
@@ -193,7 +218,7 @@ class PreActivationResBlock(torch.nn.Module):
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
-            self.bias_structure = GlobalPoolBiasStructure1dTime2d(channels - pool_channels, pool_channels)
+            self.bias_structure = GlobalPoolBiasStructure2d(channels - pool_channels, pool_channels, has_time_dimension=True)
             post_pool_channels = channels - pool_channels
         else:
             self.pool_channels = None
@@ -360,7 +385,7 @@ class PolicyHead(torch.nn.Module):
 
         self.conv_in = torch.nn.Conv2d(trunk_channels, head_channels, 1)
         self.conv_pool = torch.nn.Conv2d(trunk_channels, head_channels, 1)
-        self.bias_structure = GlobalPoolBiasStructure2d(head_channels, head_channels)
+        self.bias_structure = GlobalPoolBiasStructure2d(head_channels, head_channels, has_time_dimension=False)
 
         self.bn_out = torch.nn.BatchNorm2d(self.head_channels)
         self.relu_out = torch.nn.ReLU()
