@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 
+# https://ppwwyyxx.com/blog/2022/TorchScript-Tracing-vs-Scripting/
+
 import torch
 
-N_INSTRUCTIONS = 9 # r, R, p, P, +, -, >, <, no-op
+N_INSTRUCTIONS = 11
 
-class Conv2dHex(torch.nn.Conv2d):
+class Conv1dTime2dHex(torch.nn.Conv3d):
     """
-    Input:  BCHW
-    Output: BCHW
+    Input:  BCTHW
+    Output: BCTHW
+
+    Torchscript: Trace generalizes across shape
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
+        assert(len(kernel_size) == 3)
+        super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
         self.hex_mask = torch.ones_like(self.weight)
-        min_kernel_size_dim_ = min(*self.kernel_size)
-        assert(min_kernel_size_dim_ % 2 == 1)
-        for i in range(min_kernel_size_dim_ // 2 + 1):
-            for j in range(min_kernel_size_dim_ // 2 - i):
+        min_hex_kernel_size_dim_ = min(kernel_size[-1], kernel_size[-2])
+        assert(min_hex_kernel_size_dim_ % 2 == 1)
+        for i in range(min_hex_kernel_size_dim_ // 2 + 1):
+            for j in range(min_hex_kernel_size_dim_ // 2 - i):
                 self.hex_mask[:, :, i, -1-j] = 0.
                 self.hex_mask[:, :, -1-i, j] = 0.
 
@@ -25,10 +30,12 @@ class Conv2dHex(torch.nn.Conv2d):
             input, self.weight * self.hex_mask, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
 
-class GlobalPool2d(torch.nn.Module):
+class GlobalPool1dTime2d(torch.nn.Module):
     """
-    Input:  BCHW
-    Output: BX11 (X=2*C)
+    Input:  BCTHW
+    Output: BXT11 (X=2*C)
+
+    Torchscript: Trace generalizes but not across shape
     """
 
     def __init__(self, in_channels, *args, **kwargs):
@@ -39,16 +46,17 @@ class GlobalPool2d(torch.nn.Module):
     def forward(self, input):
         B = input.shape[0]
         C = input.shape[1]
+        T = input.shape[2]
         assert(C == self.in_channels)
-        max = torch.max(input.view(B, C, -1), dim=2).view(B, C, 1, 1)
-        mean = torch.mean(input, dim=(2, 3), keepdim=True)
+        max = torch.max(input.view(B, C, T, -1), dim=3).view(B, C, T, 1, 1)
+        mean = torch.mean(input, dim=(3, 4), keepdim=True)
         return torch.cat((max, mean), dim=1)
 
-class GlobalPoolBiasStructure2d(torch.nn.Module):
+class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
     """
-    Input:       BCHW
-    Pool input:  BPHW
-    Output:      BCHW
+    Input:       BCTHW
+    Pool input:  BPTHW
+    Output:      BCTHW
     """
 
     def __init__(self, in_channels, pool_channels, *args, **kwargs):
@@ -57,8 +65,8 @@ class GlobalPoolBiasStructure2d(torch.nn.Module):
         self.in_channels = in_channels
         self.pool_channels = pool_channels
 
-        self.bn_pool = torch.nn.BatchNorm2d(pool_channels)
-        self.pool = GlobalPool2d(pool_channels)
+        self.bn_pool = torch.nn.BatchNorm3d(pool_channels)
+        self.pool = GlobalPool1DTime2d(pool_channels)
         self.fc_pool = torch.nn.Linear(self.pool.out_channels, in_channels)
 
     def forward(self, input, pool_input):
@@ -68,31 +76,31 @@ class GlobalPoolBiasStructure2d(torch.nn.Module):
         bias = self.pool(bias)
         bias = bias.view(-1, self.fc_pool.in_features)
         bias = self.fc_pool(bias)
-        bias = bias.view(-1, self.fc_pool.out_features, 1, 1)
+        bias = bias.view(-1, self.fc_pool.out_features, 1, 1, 1)
         input += bias
         return input
 
 class PreActivationResBlock(torch.nn.Module):
     """
-    Input:       BCHW
-    Output:      BCHW
+    Input:       BCTHW
+    Output:      BCTHW
     """
 
     def __init__(self, channels, pool_channels=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.channels = channels
-        self.bn1 = torch.nn.BatchNorm2d(channels)
+        self.bn1 = torch.nn.BatchNorm3d(channels)
         self.relu1 = torch.nn.ReLU()
-        self.conv1 = Conv2dHex(channels, channels, 3)
+        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3))
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
-            self.bias_structure = GlobalPoolBiasStructure2d(channels - pool_channels, pool_channels)
+            self.bias_structure = GlobalPoolBiasStructure1dTime2d(channels - pool_channels, pool_channels)
 
-        self.bn2 = torch.nn.BatchNorm2d(channels)
+        self.bn2 = torch.nn.BatchNorm3d(channels)
         self.relu2 = torch.nn.ReLU()
-        self.conv2 = Conv2dHex(channels, channels, 3)
+        self.conv2 = Conv1dTime2dHex(channels, channels, (1, 3, 3))
 
     def forward(self, input):
         input = self.bn1(input)
@@ -113,8 +121,8 @@ class Trunk(torch.nn.Module):
         self.channels = channels
         self.pool_channels = pool_channels
 
-        self.input_conv1 = torch.nn.Conv2d(input_features, channels, 1)
-        self.input_conv7 = Conv2dHex(channels, channels, 7)
+        self.input_conv1 = torch.nn.Conv3d(input_features, channels, (1, 1, 1))
+        self.input_conv7 = Conv1dTime2dHex(channels, channels, (1, 7, 7))
         self.global_fc = torch.nn.Linear(global_features, channels)
 
         self.resblocks = torch.nn.Sequential()
