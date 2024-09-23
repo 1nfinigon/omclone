@@ -6,88 +6,78 @@ import torch
 
 N_INSTR_TYPES = 11
 
-class Conv2dHex(torch.nn.Conv2d):
+class Conv2dHex(torch.nn.Module):
     """
-    Input:  BIHW
-    Output: BOHW
+    Input:  BIHW or BITHW
+    Output: BOHW or BOTHW
 
     Torchscript: Trace generalizes across B, H, W
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
-        assert(len(kernel_size) == 2)
-        super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
-        self.hex_mask = torch.ones_like(self.weight, requires_grad=False)
+    def __init__(self, in_channels, out_channels, kernel_size, has_time_dimension, stride=1, padding=0, dilation=1, groups=1, *args, **kwargs):
+        assert(type(has_time_dimension) == bool)
+        super().__init__(*args, **kwargs)
+
+        self.has_time_dimension = has_time_dimension
+
+        if has_time_dimension:
+            assert(len(kernel_size) == 3)
+            m = torch.nn.Conv3d
+        else:
+            assert(len(kernel_size) == 2)
+            m = torch.nn.Conv2d
+        self.conv = m(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, *args, **kwargs)
+
+        self.hex_mask = torch.ones_like(self.conv.weight, requires_grad=False)
         min_hex_kernel_size_dim_ = min(kernel_size[-1], kernel_size[-2])
         assert(min_hex_kernel_size_dim_ % 2 == 1)
         for i in range(min_hex_kernel_size_dim_ // 2 + 1):
             for j in range(min_hex_kernel_size_dim_ // 2 - i):
-                self.hex_mask[:, :, i, -1-j] = 0.
-                self.hex_mask[:, :, -1-i, j] = 0.
+                if has_time_dimension:
+                    self.hex_mask[:, :, :, i, -1-j] = 0.
+                    self.hex_mask[:, :, :, -1-i, j] = 0.
+                else:
+                    self.hex_mask[:, :, i, -1-j] = 0.
+                    self.hex_mask[:, :, -1-i, j] = 0.
 
     def forward(self, input):
-        return torch.nn.functional.conv2d(
-            input, self.weight * self.hex_mask, self.bias, self.stride,
-            self.padding, self.dilation, self.groups)
+        if self.has_time_dimension:
+            f = torch.nn.functional.conv3d
+        else:
+            f = torch.nn.functional.conv2d
+        return f(
+            input, self.conv.weight * self.hex_mask, self.conv.bias, self.conv.stride,
+            self.conv.padding, self.conv.dilation, self.conv.groups)
 
 if __name__ == "__main__":
     # test trace generalizability
     C = 2
     input1 = torch.rand(1,C,4,5)
     input2 = torch.rand(6,C,9,10)
-    model = Conv2dHex(C, C, (3, 3))
+    model = Conv2dHex(C, C, (3, 3), has_time_dimension=False)
     assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+
+    C = 2
+    input1 = torch.rand(1,C,3,4,5)
+    input2 = torch.rand(6,C,8,9,10)
+    model = Conv2dHex(C, C, (1, 3, 3), has_time_dimension=True)
+    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+
 
 if __name__ == "__main__":
     # test gradient correctness
     C = 1
     input = torch.ones(1, C, 3, 3, requires_grad=True)
-    model = Conv2dHex(C, C, (3, 3), padding='same')
+    model = Conv2dHex(C, C, (3, 3), has_time_dimension=False, padding='same')
     output = model(input)
     assert(output.size() == (1, 1, 3, 3))
     output_centre = output[0, 0, 1, 1]
     output_centre.backward(inputs=[input])
     assert(input.grad.count_nonzero() == 7)
 
-class Conv1dTime2dHex(torch.nn.Conv3d):
-    """
-    Input:  BITHW
-    Output: BOTHW
-
-    Torchscript: Trace generalizes across B, T, H, W
-    """
-
-    # NOTE: this is pretty much just a copy-paste of `Conv2dHex`
-
-    def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
-        assert(len(kernel_size) == 3)
-        super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
-        self.hex_mask = torch.ones_like(self.weight, requires_grad=False)
-        min_hex_kernel_size_dim_ = min(kernel_size[-1], kernel_size[-2])
-        assert(min_hex_kernel_size_dim_ % 2 == 1)
-        for i in range(min_hex_kernel_size_dim_ // 2 + 1):
-            for j in range(min_hex_kernel_size_dim_ // 2 - i):
-                self.hex_mask[:, :, :, i, -1-j] = 0.
-                self.hex_mask[:, :, :, -1-i, j] = 0.
-
-    def forward(self, input):
-        return torch.nn.functional.conv3d(
-            input, self.weight * self.hex_mask, self.bias, self.stride,
-            self.padding, self.dilation, self.groups)
-
-if __name__ == "__main__":
-    # test trace generalizability
-    C = 2
-    input1 = torch.rand(1,C,3,4,5)
-    input2 = torch.rand(6,C,8,9,10)
-    model = Conv1dTime2dHex(C, C, (1, 3, 3))
-    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
-
-if __name__ == "__main__":
-    # test gradient correctness
     C = 1
     input = torch.ones(1, C, 1, 3, 3, requires_grad=True)
-    model = Conv1dTime2dHex(C, C, (1, 3, 3), padding='same')
+    model = Conv2dHex(C, C, (1, 3, 3), has_time_dimension=True, padding='same')
     output = model(input)
     assert(output.size() == (1, 1, 1, 3, 3))
     output_centre = output[0, 0, 0, 1, 1]
@@ -199,7 +189,7 @@ class PreActivationResBlock(torch.nn.Module):
         self.channels = channels
         self.bn1 = torch.nn.BatchNorm3d(channels)
         self.relu1 = torch.nn.ReLU()
-        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
+        self.conv1 = Conv2dHex(channels, channels, (1, 3, 3), has_time_dimension=True, padding='same')
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
@@ -212,7 +202,7 @@ class PreActivationResBlock(torch.nn.Module):
 
         self.bn2 = torch.nn.BatchNorm3d(post_pool_channels)
         self.relu2 = torch.nn.ReLU()
-        self.conv2 = Conv1dTime2dHex(post_pool_channels, channels, (1, 3, 3), padding='same')
+        self.conv2 = Conv2dHex(post_pool_channels, channels, (1, 3, 3), has_time_dimension=True, padding='same')
 
     def forward(self, input):
         res = input
@@ -264,8 +254,8 @@ class InputEmbedder(torch.nn.Module):
                  channels, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.spatial_conv = Conv2dHex(spatial_features, channels, (7, 7), padding='same')
-        self.spatiotemporal_conv = Conv1dTime2dHex(spatiotemporal_features, channels, (1, 7, 7), padding='same')
+        self.spatial_conv = Conv2dHex(spatial_features, channels, (7, 7), has_time_dimension=False, padding='same')
+        self.spatiotemporal_conv = Conv2dHex(spatiotemporal_features, channels, (1, 7, 7), has_time_dimension=True, padding='same')
         self.temporal_fc = torch.nn.Linear(temporal_features, channels)
 
     def forward(self, spatial_input, spatiotemporal_input, temporal_input):
