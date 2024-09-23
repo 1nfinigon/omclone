@@ -648,10 +648,12 @@ mod model {
         fn load() -> eyre::Result<Self> {
             let device = tch::Device::cuda_if_available();
             let module = tch::CModule::load(MODEL_FILENAME)?;
-            Ok(Self{ module, device })
+            Ok(Self { module, device })
         }
 
         fn forward(&self, features: &Features) -> eyre::Result<Evaluation> {
+            use tch::IndexOp;
+
             // TODO: all this copying is very slow
             let options = (tch::Kind::Float, self.device);
 
@@ -662,9 +664,9 @@ mod model {
             let t = constants::N_HISTORY_CYCLES;
             let g = feature_offsets::Temporal::SIZE;
 
-            let mut spatial_input = Vec::with_capacity(s*h*w);
-            let mut spatiotemporal_input = Vec::with_capacity(x*t*h*w);
-            let mut temporal_input = Vec::with_capacity(g*t);
+            let mut spatial_input = Vec::with_capacity(s * h * w);
+            let mut spatiotemporal_input = Vec::with_capacity(x * t * h * w);
+            let mut temporal_input = Vec::with_capacity(g * t);
 
             for i_s in 0..s {
                 for i_h in 0..h {
@@ -690,9 +692,12 @@ mod model {
                 }
             }
 
-            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?;
-            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?;
-            let temporal_input = tch::Tensor::f_from_slice(&temporal_input[..])?;
+            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
+                .f_view([1, s as i64, h as i64, w as i64])?;
+            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
+                .f_view([1, x as i64, t as i64, h as i64, w as i64])?;
+            let temporal_input =
+                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, g as i64, t as i64])?;
 
             let input = tch::IValue::Tuple(vec![
                 tch::IValue::Tensor(spatial_input),
@@ -702,9 +707,35 @@ mod model {
 
             let output = self.module.forward_is(&[input])?;
 
-            let (policy, value): (tch::Tensor, tch::Tensor) = output.try_into()?;
+            let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
+            let mut policy = [[[0f32; N_INSTR_TYPES]; N_WIDTH]; N_HEIGHT];
 
-            unimplemented!()
+            assert_eq!(
+                policy_tensor.size4()?,
+                (1, N_INSTR_TYPES as i64, h as i64, w as i64)
+            );
+            for i_instr in 0..N_INSTR_TYPES {
+                for i_h in 0..h {
+                    for i_w in 0..w {
+                        policy[i_h][i_w][i_instr] = policy_tensor.f_double_value(&[
+                            0,
+                            i_instr as i64,
+                            i_h as i64,
+                            i_w as i64,
+                        ])? as f32;
+                    }
+                }
+            }
+
+            assert_eq!(value_tensor.size2()?, (1, 2));
+            let win = value_tensor.f_double_value(&[0, 0])? as f32;
+            let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
+
+            Ok(Evaluation {
+                policy,
+                win,
+                loss_by_cycles,
+            })
         }
     }
 }

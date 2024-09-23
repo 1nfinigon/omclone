@@ -4,6 +4,7 @@
 
 import torch
 import numpy as np
+import os
 
 N_INSTR_TYPES = 11
 
@@ -401,7 +402,7 @@ class PolicyHead(torch.nn.Module):
         input = self.bn_out(input)
         input = self.relu_out(input)
         input = self.conv_out(input)
-        return input
+        return input.softmax(dim=1)
 
 if __name__ == "__main__":
     # test trace generalizability
@@ -453,7 +454,7 @@ class ValueHead(torch.nn.Module):
         input = self.fc_pre(input)
         input = self.relu(input)
         input = self.fc_post(input)
-        return input
+        return input.softmax(dim=1)
 
 class ModelV1(torch.nn.Module):
     def __init__(self,
@@ -538,6 +539,6 @@ temporal = torch.rand((2, TEMPORAL_FEATURES, 1), dtype=dtype)
 the_model.eval()
 traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal))
 
-FILENAME = 'model.pt'
-traced_model.save(FILENAME)
-print("Saved model to {}".format(FILENAME))
+filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
+print("Saved model to {}".format(filename))
+#traced_model.save(filename)
