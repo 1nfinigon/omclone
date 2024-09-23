@@ -7,13 +7,58 @@ import torch
 N_INSTRUCTIONS = 11
 N_HISTORY_CYCLES = 20
 
-class Conv1dTime2dHex(torch.nn.Conv3d):
+class Conv2dHex(torch.nn.Conv2d):
     """
-    Input:  BCTHW
-    Output: BCTHW
+    Input:  BIHW
+    Output: BOHW
 
     Torchscript: Trace generalizes across shape
     """
+
+    def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
+        assert(len(kernel_size) == 2)
+        super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
+        self.hex_mask = torch.ones_like(self.weight, requires_grad=False)
+        min_hex_kernel_size_dim_ = min(kernel_size[-1], kernel_size[-2])
+        assert(min_hex_kernel_size_dim_ % 2 == 1)
+        for i in range(min_hex_kernel_size_dim_ // 2 + 1):
+            for j in range(min_hex_kernel_size_dim_ // 2 - i):
+                self.hex_mask[:, :, i, -1-j] = 0.
+                self.hex_mask[:, :, -1-i, j] = 0.
+
+    def forward(self, input):
+        return torch.nn.functional.conv2d(
+            input, self.weight * self.hex_mask, self.bias, self.stride,
+            self.padding, self.dilation, self.groups)
+
+if __name__ == "__main__":
+    # test trace generalizability
+    C = 2
+    input1 = torch.rand(1,C,4,5)
+    input2 = torch.rand(6,C,9,10)
+    model = Conv2dHex(C, C, (3, 3))
+    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+
+if __name__ == "__main__":
+    # test gradient correctness
+    C = 1
+    input = torch.ones(1, C, 3, 3, requires_grad=True)
+    model = Conv2dHex(C, C, (3, 3), padding='same')
+    output = model(input)
+    assert(output.size() == (1, 1, 3, 3))
+    output_centre = output[0, 0, 1, 1]
+    output_centre.backward(inputs=[input])
+    assert(input.grad.count_nonzero() == 7)
+
+class Conv1dTime2dHex(torch.nn.Conv3d):
+    """
+    Input:  BITHW
+    Output: BOTHW
+
+    Torchscript: Trace generalizes across shape
+    """
+
+    # NOTE: this is pretty much just a copy-paste of `Conv2dHex`
 
     def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
         assert(len(kernel_size) == 3)
@@ -147,13 +192,16 @@ class PreActivationResBlock(torch.nn.Module):
     Output:      BCTHW
     """
 
-    def __init__(self, channels, pool_channels=None, *args, **kwargs):
+    def __init__(self, channels, conv1_type="space3x3", pool_channels=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.channels = channels
         self.bn1 = torch.nn.BatchNorm3d(channels)
         self.relu1 = torch.nn.ReLU()
-        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
+        if conv1_type == "space3x3":
+            self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
+        elif conv1_type == "time":
+            self.conv1 = torch.nn.Conv3d(channels, channels, (N_HISTORY_CYCLES, 1, 1))
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
@@ -198,8 +246,74 @@ if __name__ == "__main__":
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
 
+class InputEmbedder(torch.nn.Module):
+    """
+    Spatial:        BSHW   (S = # spatial features)
+    Spatiotemporal: BXTHW  (X = # spatiotemporal features)
+    Temporal:       BGT    (G = # temporal features)
+    Output:         BCTHW  (C = # channels)
+
+    Here's how the embedding works:
+
+    BSHW  --7x7--> BCHW -> BC1HW
+    BXTHW -1x7x7-> BCTHW
+    BGT -> BTG -FC-> BTC -> BCT -> BCT11
+    """
+
+    def __init__(self, spatial_features, spatiotemporal_features, temporal_features,
+                 channels, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.spatial_conv = Conv2dHex(spatial_features, channels, (7, 7), padding='same')
+        self.spatiotemporal_conv = Conv1dTime2dHex(spatiotemporal_features, channels, (1, 7, 7), padding='same')
+        self.temporal_fc = torch.nn.Linear(temporal_features, channels)
+
+    def forward(self, spatial_input, spatiotemporal_input, temporal_input):
+        spatial = self.spatial_conv(spatial_input).unsqueeze(dim=2)
+        spatiotemporal = self.spatiotemporal_conv(spatiotemporal_input)
+        temporal = self.temporal_fc(temporal_input.permute((0, 2, 1))).permute((0, 2, 1)).unsqueeze(dim=-1).unsqueeze(dim=-1)
+        return spatial + spatiotemporal + temporal
+
+if __name__ == "__main__":
+    # test trace generalizability
+    S = 2
+    X = 3
+    G = 4
+    C = 5
+
+    B = 1
+    H = 6
+    W = 7
+    T = 8
+    spatial1 = torch.rand(B, S, H, W)
+    spatiotemporal1 = torch.rand(B, X, T, H, W)
+    temporal1 = torch.rand(B, G, T)
+
+    B = 11
+    H = 16
+    W = 17
+    T = 18
+    spatial2 = torch.rand(B, S, H, W)
+    spatiotemporal2 = torch.rand(B, X, T, H, W)
+    temporal2 = torch.rand(B, G, T)
+
+    model = InputEmbedder(S, X, G, C)
+    output = model(spatial2, spatiotemporal2, temporal2)
+    traced_output = torch.jit.trace(model, (spatial1, spatiotemporal1, temporal1))(spatial2, spatiotemporal2, temporal2)
+    assert torch.allclose(traced_output, output)
+
 class Trunk(torch.nn.Module):
-    def __init__(self, input_features, global_features, layers, pool_layers, channels, pool_channels, *args, **kwargs):
+    """
+    Spatial:        BSHW
+    Spatiotemporal: BXTHW
+    Temporal:       BGT
+    Output:         BCTHW
+    """
+
+    def __init__(self, spatial_features, spatiotemporal_features, temporal_features,
+                 layers,
+                 channels, pool_channels,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.channels = channels
@@ -210,15 +324,15 @@ class Trunk(torch.nn.Module):
         self.global_fc = torch.nn.Linear(global_features, channels)
 
         self.resblocks = torch.nn.Sequential()
-        is_pool_layer = [False for i in range(layers)]
-        for pl in range(pool_layers):
-            is_pool_layer[int(float(pl + 1) * float(layers) / float(pool_layers + 1))] = True
-        assert(sum(is_pool_layer) == pool_layers)
-        for is_pool_layer in is_pool_layer:
-            if is_pool_layer:
+        for layer_spec in layers:
+            if layer_spec == "respool":
                 layer = PreActivationResBlock(channels, pool_channels)
-            else:
+            elif layer_spec == "res":
                 layer = PreActivationResBlock(channels)
+            elif layer_spec == "restime":
+                layer = PreActivationResBlock(channels, conv1_type="time")
+            else:
+                raise RuntimeError("unknown layer_spec " + layer_spec)
             self.resblocks.append(layer)
 
     def forward(self, input_features, global_features):
