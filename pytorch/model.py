@@ -5,6 +5,7 @@
 import torch
 
 N_INSTRUCTIONS = 11
+N_HISTORY_CYCLES = 20
 
 class Conv1dTime2dHex(torch.nn.Conv3d):
     """
@@ -17,18 +18,37 @@ class Conv1dTime2dHex(torch.nn.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
         assert(len(kernel_size) == 3)
         super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
-        self.hex_mask = torch.ones_like(self.weight)
+        self.hex_mask = torch.ones_like(self.weight, requires_grad=False)
         min_hex_kernel_size_dim_ = min(kernel_size[-1], kernel_size[-2])
         assert(min_hex_kernel_size_dim_ % 2 == 1)
         for i in range(min_hex_kernel_size_dim_ // 2 + 1):
             for j in range(min_hex_kernel_size_dim_ // 2 - i):
-                self.hex_mask[:, :, i, -1-j] = 0.
-                self.hex_mask[:, :, -1-i, j] = 0.
+                self.hex_mask[:, :, :, i, -1-j] = 0.
+                self.hex_mask[:, :, :, -1-i, j] = 0.
 
     def forward(self, input):
-        return torch.nn.functional.conv2d(
+        return torch.nn.functional.conv3d(
             input, self.weight * self.hex_mask, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
+
+if __name__ == "__main__":
+    # test trace generalizability
+    C = 2
+    input1 = torch.rand(1,C,3,4,5)
+    input2 = torch.rand(6,C,8,9,10)
+    model = Conv1dTime2dHex(C, C, (1, 3, 3))
+    assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
+
+if __name__ == "__main__":
+    # test gradient correctness
+    C = 1
+    input = torch.ones(1, C, 1, 3, 3, requires_grad=True)
+    model = Conv1dTime2dHex(C, C, (1, 3, 3), padding='same')
+    output = model(input)
+    assert(output.size() == (1, 1, 1, 3, 3))
+    output_centre = output[0, 0, 0, 1, 1]
+    output_centre.backward(inputs=[input])
+    assert(input.grad.count_nonzero() == 7)
 
 class GlobalPool1dTime2d(torch.nn.Module):
     """
@@ -92,7 +112,7 @@ class PreActivationResBlock(torch.nn.Module):
         self.channels = channels
         self.bn1 = torch.nn.BatchNorm3d(channels)
         self.relu1 = torch.nn.ReLU()
-        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3))
+        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
@@ -100,7 +120,7 @@ class PreActivationResBlock(torch.nn.Module):
 
         self.bn2 = torch.nn.BatchNorm3d(channels)
         self.relu2 = torch.nn.ReLU()
-        self.conv2 = Conv1dTime2dHex(channels, channels, (1, 3, 3))
+        self.conv2 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
 
     def forward(self, input):
         input = self.bn1(input)
@@ -122,7 +142,7 @@ class Trunk(torch.nn.Module):
         self.pool_channels = pool_channels
 
         self.input_conv1 = torch.nn.Conv3d(input_features, channels, (1, 1, 1))
-        self.input_conv7 = Conv1dTime2dHex(channels, channels, (1, 7, 7))
+        self.input_conv7 = Conv1dTime2dHex(channels, channels, (1, 7, 7), padding='same')
         self.global_fc = torch.nn.Linear(global_features, channels)
 
         self.resblocks = torch.nn.Sequential()
