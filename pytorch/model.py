@@ -4,15 +4,14 @@
 
 import torch
 
-N_INSTRUCTIONS = 11
-N_HISTORY_CYCLES = 20
+N_INSTR_TYPES = 11
 
 class Conv2dHex(torch.nn.Conv2d):
     """
     Input:  BIHW
     Output: BOHW
 
-    Torchscript: Trace generalizes across shape
+    Torchscript: Trace generalizes across B, H, W
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, *args, **kwargs):
@@ -55,7 +54,7 @@ class Conv1dTime2dHex(torch.nn.Conv3d):
     Input:  BITHW
     Output: BOTHW
 
-    Torchscript: Trace generalizes across shape
+    Torchscript: Trace generalizes across B, T, H, W
     """
 
     # NOTE: this is pretty much just a copy-paste of `Conv2dHex`
@@ -100,7 +99,7 @@ class GlobalPool1dTime2d(torch.nn.Module):
     Input:  BCTHW
     Output: BXT11 (X=2*C)
 
-    Torchscript: Trace generalizes but not across shape
+    Torchscript: Trace generalizes across H, W
     """
 
     def __init__(self, in_channels, *args, **kwargs):
@@ -122,7 +121,7 @@ if __name__ == "__main__":
     # test trace generalizability
     C = 2
     input1 = torch.rand(1,C,3,4,5)
-    input2 = torch.rand(1,C,3,4,5)
+    input2 = torch.rand(1,C,3,14,15)
     model = GlobalPool1dTime2d(C)
     assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
 
@@ -150,7 +149,7 @@ class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
     Pool input:  BPTHW
     Output:      BCTHW
 
-    Torchscript: Trace generalizes across shape
+    Torchscript: Trace generalizes across B, T, H, W
     """
 
     def __init__(self, in_channels, pool_channels, *args, **kwargs):
@@ -169,7 +168,7 @@ class GlobalPoolBiasStructure1dTime2d(torch.nn.Module):
             assert(pool_input.shape[1] == self.pool_channels)
         bias = self.bn_pool(pool_input)
         bias = self.pool(bias)
-        bias = bias.squeeze(dim=4).squeeze(dim=3).permute((0, 2, 1))
+        bias = bias.squeeze(dim=(3,4)).permute((0, 2, 1))
         bias = self.fc_pool(bias).permute((0, 2, 1)).unsqueeze(dim=-1).unsqueeze(dim=-1)
         return input + bias
 
@@ -190,18 +189,17 @@ class PreActivationResBlock(torch.nn.Module):
     """
     Input:       BCTHW
     Output:      BCTHW
+
+    Torchscript: Trace generalizes across B, T, H, W
     """
 
-    def __init__(self, channels, conv1_type="space3x3", pool_channels=None, *args, **kwargs):
+    def __init__(self, channels, pool_channels=None, time_size=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.channels = channels
         self.bn1 = torch.nn.BatchNorm3d(channels)
         self.relu1 = torch.nn.ReLU()
-        if conv1_type == "space3x3":
-            self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
-        elif conv1_type == "time":
-            self.conv1 = torch.nn.Conv3d(channels, channels, (N_HISTORY_CYCLES, 1, 1))
+        self.conv1 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
 
         if pool_channels is not None:
             self.pool_channels = pool_channels
@@ -253,6 +251,8 @@ class InputEmbedder(torch.nn.Module):
     Temporal:       BGT    (G = # temporal features)
     Output:         BCTHW  (C = # channels)
 
+    Torchscript: Trace generalizes across B, T, H, W
+
     Here's how the embedding works:
 
     BSHW  --7x7--> BCHW -> BC1HW
@@ -299,52 +299,69 @@ if __name__ == "__main__":
 
     model = InputEmbedder(S, X, G, C)
     output = model(spatial2, spatiotemporal2, temporal2)
+    assert(output.size() == (B, C, T, H, W))
     traced_output = torch.jit.trace(model, (spatial1, spatiotemporal1, temporal1))(spatial2, spatiotemporal2, temporal2)
     assert torch.allclose(traced_output, output)
 
 class Trunk(torch.nn.Module):
     """
-    Spatial:        BSHW
-    Spatiotemporal: BXTHW
-    Temporal:       BGT
-    Output:         BCTHW
+    Input:  BCTHW
+    Output: BCHW
+
+    Torchscript: Trace generalizes across B, H, W
     """
 
-    def __init__(self, spatial_features, spatiotemporal_features, temporal_features,
-                 layers,
-                 channels, pool_channels,
-                 *args, **kwargs):
+    def __init__(self, channels, pool_channels, time_size, layers, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.channels = channels
-        self.pool_channels = pool_channels
-
-        self.input_conv1 = torch.nn.Conv3d(input_features, channels, (1, 1, 1))
-        self.input_conv7 = Conv1dTime2dHex(channels, channels, (1, 7, 7), padding='same')
-        self.global_fc = torch.nn.Linear(global_features, channels)
+        self.time_size = time_size
 
         self.resblocks = torch.nn.Sequential()
         for layer_spec in layers:
             if layer_spec == "respool":
-                layer = PreActivationResBlock(channels, pool_channels)
+                layer = PreActivationResBlock(channels, pool_channels=pool_channels)
             elif layer_spec == "res":
                 layer = PreActivationResBlock(channels)
-            elif layer_spec == "restime":
-                layer = PreActivationResBlock(channels, conv1_type="time")
+            elif layer_spec == "convtime":
+                layer = torch.nn.Conv3d(channels, channels, (time_size, 1, 1))
             else:
                 raise RuntimeError("unknown layer_spec " + layer_spec)
             self.resblocks.append(layer)
 
-    def forward(self, input_features, global_features):
-        input_features = self.input_conv1(input_features)
-        input_features = self.input_conv7(input_features)
-        global_features = self.global_fc(global_features)
-        global_features = global_features.view(-1, self.channels, 1, 1)
-        input = input_features + global_features
+    def forward(self, input):
+        if not torch.jit.is_tracing():
+            assert(input.size()[2] == self.time_size)
         input = self.resblocks(input)
-        return input
+        if not torch.jit.is_tracing():
+            assert(input.size()[2] == 1)
+        return input.squeeze(dim=2)
+
+if __name__ == "__main__":
+    # test trace generalizability
+    B = 1
+    C = 2
+    T = 3
+    H = 4
+    W = 5
+    input1 = torch.rand(B, C, T, H, W)
+
+    B = 11
+    H = 14
+    W = 14
+    input2 = torch.rand(B, C, T, H, W)
+
+    model = Trunk(C, C // 2, T, ["res", "respool", "res", "convtime", "res", "respool", "res"])
+    output = model(input2)
+    assert(output.size() == (B, C, H, W))
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
 
 class PolicyHead(torch.nn.Module):
+    """
+    Input:  BCHW
+    Output: BNHW (N = N_INSTR_TYPES)
+    """
+
     def __init__(self, trunk_channels, head_channels, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -357,7 +374,7 @@ class PolicyHead(torch.nn.Module):
 
         self.bn_out = torch.nn.BatchNorm2d(self.head_channels)
         self.relu_out = torch.nn.ReLU()
-        self.conv_out = torch.nn.Conv2d(head_channels, 1, N_INSTRUCTIONS)
+        self.conv_out = torch.nn.Conv2d(head_channels, N_INSTR_TYPES, 1)
 
     def forward(self, input):
         pool_input = self.conv_pool(input)
@@ -385,7 +402,7 @@ class ValueHead(torch.nn.Module):
     def forward(self, input):
         input = self.conv_in(input)
         input = self.global_pool(input)
-        input = input.squeeze(dims=(2, 3))
+        input = input.squeeze(dim=(3, 4))
         input = self.fc_pre(input)
         input = self.relu(input)
         input = self.fc_post(input)
