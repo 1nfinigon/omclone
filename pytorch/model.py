@@ -158,10 +158,15 @@ class PreActivationResBlock(torch.nn.Module):
         if pool_channels is not None:
             self.pool_channels = pool_channels
             self.bias_structure = GlobalPoolBiasStructure1dTime2d(channels - pool_channels, pool_channels)
+            post_pool_channels = channels - pool_channels
+        else:
+            self.pool_channels = None
+            self.bias_structure = None
+            post_pool_channels = channels
 
-        self.bn2 = torch.nn.BatchNorm3d(channels)
+        self.bn2 = torch.nn.BatchNorm3d(post_pool_channels)
         self.relu2 = torch.nn.ReLU()
-        self.conv2 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
+        self.conv2 = Conv1dTime2dHex(post_pool_channels, channels, (1, 3, 3), padding='same')
 
     def forward(self, input):
         res = input
@@ -175,6 +180,23 @@ class PreActivationResBlock(torch.nn.Module):
         res = self.relu2(res)
         res = self.conv2(res)
         return input + res
+
+if __name__ == "__main__":
+    # test trace generalizability
+    C = 8
+    input1 = torch.rand(1, C, 3, 4, 5)
+    input2 = torch.rand(7, C, 9, 10, 11)
+
+    model = PreActivationResBlock(C)
+    output = model(input2)
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
+
+    P = 2
+    model = PreActivationResBlock(C, pool_channels=P)
+    output = model(input2)
+    traced_output = torch.jit.trace(model, input1)(input2)
+    assert torch.allclose(traced_output, output)
 
 class Trunk(torch.nn.Module):
     def __init__(self, input_features, global_features, layers, pool_layers, channels, pool_channels, *args, **kwargs):
