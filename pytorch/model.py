@@ -452,6 +452,18 @@ class ValueHead(torch.nn.Module):
         input = self.fc_post(input)
         return input
 
+class Heads(torch.nn.Module):
+    def __init__(self, trunk_channels, policy_head_channels, value_head_channels, value_channels, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.policy_head = PolicyHead(trunk_channels, policy_head_channels, *args, **kwargs)
+        self.value_head = ValueHead(trunk_channels, value_head_channels, value_channels, *args, **kwargs)
+
+    def forward(self, input):
+        policy = self.policy_head(input)
+        value = self.value_head(input)
+        (policy, value)
+
 if __name__ == "__main__":
     # test trace generalizability
     B = 1
@@ -470,3 +482,31 @@ if __name__ == "__main__":
     assert(output.size() == (B, 3))
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
+
+
+
+the_model = torch.nn.Sequential()
+CHANNELS = 16
+HEAD_CHANNELS = 16
+VALUE_CHANNELS = 8
+the_model.append(InputEmbedder(spatial_features=143,
+                               spatiotemporal_features=72,
+                               temporal_features=1,
+                               channels=CHANNELS))
+the_model.append(Trunk(channels=CHANNELS,
+                       pool_channels=C // 2,
+                       time_size=T,
+                       layers=[
+                           "res",
+                           "respool",
+                           "res",
+                           "convtime",
+                           "res",
+                           "respool",
+                           "res"
+                       ]))
+the_model.append(Heads(trunk_channels=CHANNELS,
+                       policy_head_channels=HEAD_CHANNELS,
+                       value_head_channels=HEAD_CHANNELS,
+                       value_channels=VALUE_CHANNELS))
+print(the_model)
