@@ -150,16 +150,17 @@ class PreActivationResBlock(torch.nn.Module):
         self.conv2 = Conv1dTime2dHex(channels, channels, (1, 3, 3), padding='same')
 
     def forward(self, input):
-        input = self.bn1(input)
-        input = self.relu1(input)
-        input = self.conv1(input)
+        res = input
+        res = self.bn1(res)
+        res = self.relu1(res)
+        res = self.conv1(res)
         if self.bias_structure is not None:
-            pool_input, input = torch.split(input, [self.pool_channels, self.channels - self.pool_channels], dim=1)
-            input = self.bias_structure(input, pool_input)
-        input = self.bn2(input)
-        input = self.relu2(input)
-        input = self.conv2(input)
-        return input
+            pool_input, res = torch.split(res, [self.pool_channels, self.channels - self.pool_channels], dim=1)
+            res = self.bias_structure(res, pool_input)
+        res = self.bn2(res)
+        res = self.relu2(res)
+        res = self.conv2(res)
+        return input + res
 
 class Trunk(torch.nn.Module):
     def __init__(self, input_features, global_features, layers, pool_layers, channels, pool_channels, *args, **kwargs):
