@@ -305,6 +305,14 @@ pub mod features {
     use super::feature_offsets::*;
     use super::*;
 
+    pub fn normalize_position(pos: sim::Pos) -> Option<(usize, usize)> {
+        if 0 <= pos.x && (pos.x as usize) < N_WIDTH && 0 <= pos.y && (pos.y as usize) < N_HEIGHT {
+            Some((pos.x as usize, pos.y as usize))
+        } else {
+            None
+        }
+    }
+
     #[derive(Clone)]
     pub struct Features {
         pub spatial: [[[f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
@@ -322,17 +330,8 @@ pub mod features {
             }
         }
 
-        fn normalize_position(pos: sim::Pos) -> Option<(usize, usize)> {
-            if 0 <= pos.x && (pos.x as usize) < N_WIDTH && 0 <= pos.y && (pos.y as usize) < N_HEIGHT
-            {
-                Some((pos.x as usize, pos.y as usize))
-            } else {
-                None
-            }
-        }
-
         fn get_spatial_mut(&mut self, pos: sim::Pos) -> Option<&mut [f32; Spatial::SIZE]> {
-            Self::normalize_position(pos).map(|(x, y)| &mut self.spatial[y][x])
+            normalize_position(pos).map(|(x, y)| &mut self.spatial[y][x])
         }
 
         fn get_spatiotemporal_mut(
@@ -340,7 +339,7 @@ pub mod features {
             time: usize,
             pos: sim::Pos,
         ) -> Option<&mut [f32; Spatiotemporal::SIZE]> {
-            Self::normalize_position(pos).map(|(x, y)| &mut self.spatiotemporal[time][y][x])
+            normalize_position(pos).map(|(x, y)| &mut self.spatiotemporal[time][y][x])
         }
 
         /// Helper function for setting features relating to an Atom.
@@ -619,25 +618,25 @@ pub mod features {
 
 pub use features::Features;
 
-mod model {
+pub mod model {
     use super::*;
     use eyre;
     use tch;
 
     const MODEL_FILENAME: &'static str = "pytorch/model.pt";
 
-    struct Model {
+    pub struct Model {
         module: tch::CModule,
         device: tch::Device,
     }
 
-    struct Evaluation {
+    pub struct Evaluation {
         /// Softmaxed from policy head
-        policy: [[[f32; N_INSTR_TYPES]; N_WIDTH]; N_HEIGHT],
+        pub policy: [f32; N_INSTR_TYPES],
 
         /// Softmaxed outcome prediction from value head
-        win: f32,
-        loss_by_cycles: f32,
+        pub win: f32,
+        pub loss_by_cycles: f32,
         //loss_by_area: f32,
 
         //cycles_left: f32, -- think about making this N(0, 1) in the raw output. Maybe interpret this as scaled relative to the given cycle limit?
@@ -645,86 +644,81 @@ mod model {
     }
 
     impl Model {
-        fn load() -> eyre::Result<Self> {
+        pub fn load() -> eyre::Result<Self> {
             let device = tch::Device::cuda_if_available();
             let module = tch::CModule::load(MODEL_FILENAME)?;
             Ok(Self { module, device })
         }
 
-        fn forward(&self, features: &Features) -> eyre::Result<Evaluation> {
+        pub fn forward(&self, features: &Features, x: usize, y: usize) -> eyre::Result<Evaluation> {
             use tch::IndexOp;
 
             // TODO: all this copying is very slow
             let options = (tch::Kind::Float, self.device);
 
-            let s = feature_offsets::Spatial::SIZE;
-            let h = constants::N_HEIGHT;
-            let w = constants::N_WIDTH;
-            let x = feature_offsets::Spatiotemporal::SIZE;
-            let t = constants::N_HISTORY_CYCLES;
-            let g = feature_offsets::Temporal::SIZE;
+            const S: usize = feature_offsets::Spatial::SIZE;
+            const H: usize = constants::N_HEIGHT;
+            const W: usize = constants::N_WIDTH;
+            const X: usize = feature_offsets::Spatiotemporal::SIZE;
+            const T: usize = constants::N_HISTORY_CYCLES;
+            const G: usize = feature_offsets::Temporal::SIZE;
 
-            let mut spatial_input = Vec::with_capacity(s * h * w);
-            let mut spatiotemporal_input = Vec::with_capacity(x * t * h * w);
-            let mut temporal_input = Vec::with_capacity(g * t);
+            assert!(x < W);
+            assert!(y < H);
 
-            for i_s in 0..s {
-                for i_h in 0..h {
-                    for i_w in 0..w {
+            let mut spatial_input = Vec::with_capacity(S * H * W);
+            let mut spatiotemporal_input = Vec::with_capacity(X * T * H * W);
+            let mut temporal_input = Vec::with_capacity(G * T);
+
+            for i_s in 0..S {
+                for i_h in 0..H {
+                    for i_w in 0..W {
                         spatial_input.push(features.spatial[i_h][i_w][i_s]);
                     }
                 }
             }
 
-            for i_x in 0..x {
-                for i_t in 0..t {
-                    for i_h in 0..h {
-                        for i_w in 0..w {
+            for i_x in 0..X {
+                for i_t in 0..T {
+                    for i_h in 0..H {
+                        for i_w in 0..W {
                             spatiotemporal_input.push(features.spatiotemporal[i_t][i_h][i_w][i_x]);
                         }
                     }
                 }
             }
 
-            for i_g in 0..g {
-                for i_t in 0..t {
+            for i_g in 0..G {
+                for i_t in 0..T {
                     temporal_input.push(features.temporal[i_t][i_g]);
                 }
             }
 
             let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
-                .f_view([1, s as i64, h as i64, w as i64])?;
+                .f_view([1, S as i64, H as i64, W as i64])?;
             let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
-                .f_view([1, x as i64, t as i64, h as i64, w as i64])?;
+                .f_view([1, X as i64, T as i64, H as i64, W as i64])?;
             let temporal_input =
-                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, g as i64, t as i64])?;
+                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, G as i64, T as i64])?;
 
-            let input = tch::IValue::Tuple(vec![
+            let input = [
                 tch::IValue::Tensor(spatial_input),
                 tch::IValue::Tensor(spatiotemporal_input),
                 tch::IValue::Tensor(temporal_input),
-            ]);
+            ];
 
-            let output = self.module.forward_is(&[input])?;
+            let output = self.module.forward_is(&input)?;
 
             let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
-            let mut policy = [[[0f32; N_INSTR_TYPES]; N_WIDTH]; N_HEIGHT];
+            let mut policy = [0f32; N_INSTR_TYPES];
 
             assert_eq!(
                 policy_tensor.size4()?,
-                (1, N_INSTR_TYPES as i64, h as i64, w as i64)
+                (1, N_INSTR_TYPES as i64, H as i64, W as i64)
             );
             for i_instr in 0..N_INSTR_TYPES {
-                for i_h in 0..h {
-                    for i_w in 0..w {
-                        policy[i_h][i_w][i_instr] = policy_tensor.f_double_value(&[
-                            0,
-                            i_instr as i64,
-                            i_h as i64,
-                            i_w as i64,
-                        ])? as f32;
-                    }
-                }
+                policy[i_instr] =
+                    policy_tensor.f_double_value(&[0, i_instr as i64, y as i64, x as i64])? as f32;
             }
 
             assert_eq!(value_tensor.size2()?, (1, 2));
@@ -739,3 +733,6 @@ mod model {
         }
     }
 }
+
+pub use model::Evaluation;
+pub use model::Model;

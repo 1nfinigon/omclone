@@ -1,7 +1,9 @@
+use crate::nn;
+use crate::nn::constants::N_INSTR_TYPES;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
-use crate::Result;
+use eyre::{OptionExt, Result};
 use rand::prelude::*;
 use std::borrow::BorrowMut;
 use std::collections::{hash_map, HashMap};
@@ -12,16 +14,30 @@ struct ChildId(u32);
 
 struct RealNode {
     children: BTreeMap<ChildId, NodeId>,
+
+    /// raw NN utility (for non-leaf nodes), or final evaluation (for leaf
+    /// nodes)
+    /// = U-value
+    utility: f32,
+
+    /// = P-values
+    policy: [f32; N_INSTR_TYPES],
+
+    /// = N
     visits: u32,
-    wins: f32,
+
+    /// = Q-value * N
+    value_sum: f32,
 }
 
 impl RealNode {
     fn new() -> Self {
         Self {
             children: BTreeMap::new(),
+            utility: 0.,
+            policy: [0.; N_INSTR_TYPES],
             visits: 0,
-            wins: 0.,
+            value_sum: 0.,
         }
     }
 }
@@ -44,61 +60,18 @@ pub struct TreeSearch {
     real_nodes: Vec<RealNode>,
     sum_depth: usize,
     max_depth: u32,
-}
-
-pub trait ResultPredictor<RngT: Rng>: Send + Sync {
-    fn predict<'a>(
-        &'a self,
-        state: State,
-        rng: &mut RngT,
-        update_cb: Box<dyn FnMut(&BasicInstr) + 'a>,
-    ) -> f32;
-}
-
-pub struct PlayoutResultPredictor;
-
-impl<RngT: Rng> ResultPredictor<RngT> for PlayoutResultPredictor {
-    fn predict<'a>(
-        &'a self,
-        mut state: State,
-        rng: &mut RngT,
-        mut update_cb: Box<dyn FnMut(&BasicInstr) + 'a>,
-    ) -> f32 {
-        loop {
-            match state.next_updates() {
-                Err(final_eval) => {
-                    return final_eval;
-                }
-                Ok(next_updates) => {
-                    let next_update_idx = rng.gen_range(0..next_updates.len());
-                    let next_update = next_updates.get(next_update_idx).unwrap();
-                    update_cb(next_update);
-                    state.update(*next_update);
-                }
-            }
-        }
-    }
-}
-
-impl<RngT: Rng> ResultPredictor<RngT> for Box<dyn ResultPredictor<RngT>> {
-    fn predict<'a>(
-        &'a self,
-        state: State,
-        rng: &mut RngT,
-        update_cb: Box<dyn FnMut(&BasicInstr) + 'a>,
-    ) -> f32 {
-        (**self).predict(state, rng, update_cb)
-    }
+    model: nn::Model,
 }
 
 impl TreeSearch {
-    pub fn new(root: State) -> Self {
+    pub fn new(root: State, model: nn::Model) -> Self {
         Self {
             root,
             nodes: vec![Node::Unexpanded],
             real_nodes: vec![],
             sum_depth: 0,
             max_depth: 0,
+            model,
         }
     }
 
@@ -137,50 +110,48 @@ impl TreeSearch {
             .to_owned()
     }
 
-    fn uct(&self, parent: &RealNode, child: &Node) -> NonNan {
-        match child {
+    fn puct(&self, parent_id: RealNodeId, child_id: ChildId) -> NonNan {
+        let parent = self.real_node(parent_id);
+        let child = self.get_child(parent_id, child_id);
+        let policy = parent.policy[child_id.0 as usize];
+        let (child_value, child_visits) = match child {
             Node::Real(real_child_idx) => {
                 let child = self.real_node(*real_child_idx);
-                if child.visits == 0 {
-                    NonNan::new(f32::INFINITY).unwrap()
+                let child_visits = child.visits as f32;
+                let child_value = if child.visits == 0 {
+                    child.utility
                 } else {
-                    let exploit = child.wins / (child.visits as f32);
-                    let explore = ((parent.visits as f32).ln() / (child.visits as f32)).sqrt();
-                    NonNan::new(exploit + 2.4 * explore).unwrap()
-                }
+                    child.value_sum / child_visits
+                };
+                (child_value, child_visits)
             }
-            Node::Terminal(win) => NonNan::new(*win).unwrap(),
-            Node::Unexpanded => NonNan::new(f32::INFINITY).unwrap(),
-        }
+            Node::Terminal(win) => (*win, f32::INFINITY),
+            Node::Unexpanded => {
+                // TODO: current heuristic: assume same utility as parent. no
+                // idea if this heuristic is okay or not.
+                (parent.utility, 0.)
+            }
+        };
+        let prior = policy * (parent.visits as f32).sqrt() / (1. + child_visits);
+        NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
-    pub fn search_once<RngT: Rng, ResultPredictorT: ResultPredictor<RngT>>(
-        &mut self,
-        rng: &mut RngT,
-        result_predictor: &ResultPredictorT,
-    ) -> Result<()> {
-        self.search_once_with_cb(rng, |_| (), result_predictor)
+    pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT) -> Result<()> {
+        self.search_once_with_cb(rng, |_| ())
     }
 
-    pub fn search_once_with_cb<
-        RngT: Rng,
-        F: FnMut(&BasicInstr),
-        ResultPredictorT: ResultPredictor<RngT>,
-    >(
+    pub fn search_once_with_cb<RngT: Rng, F: FnMut(&BasicInstr)>(
         &mut self,
         rng: &mut RngT,
         mut update_cb: F,
-        result_predictor: &ResultPredictorT,
     ) -> Result<()> {
         let mut state = self.root.clone();
         let mut node_idx = NodeId(0);
-        let mut path = BTreeSet::new();
-        let mut path_count = 0;
+        let mut path = Vec::new();
 
-        let win = loop {
-            path.insert(node_idx);
-            path_count += 1;
-            if path_count >= 500 {
+        let leaf_utility = loop {
+            path.push(node_idx);
+            if path.len() >= 500 {
                 // assume deadlocked
                 break 0.;
             }
@@ -192,13 +163,10 @@ impl TreeSearch {
                 &Node::Real(real_node_idx) => {
                     let next_updates = state.next_updates().ok().unwrap();
 
-                    // pick a child based on UCT
+                    // pick a child based on PUCT
                     let child_id = (0..next_updates.len().try_into().unwrap())
                         .map(ChildId)
-                        .max_by_key(|&child_id| {
-                            let child = self.get_child(real_node_idx, child_id);
-                            self.uct(self.real_node(real_node_idx), child)
-                        })
+                        .max_by_key(|&child_id| self.puct(real_node_idx, child_id))
                         .unwrap();
 
                     // move to child, update the state
@@ -218,7 +186,18 @@ impl TreeSearch {
 
                         *self.node_mut(node_idx) = Node::Real(real_node_id);
 
-                        break result_predictor.predict(state, rng, Box::new(update_cb));
+                        let next_arm_index = state.instr_buffer.len();
+                        let next_arm_pos = state.world.arms[next_arm_index].pos;
+                        let (x, y) = nn::features::normalize_position(next_arm_pos)
+                            .ok_or_eyre("arm out of nn bounds")?;
+
+                        let eval = self.model.forward(&*state.nn_features, x, y)?;
+
+                        let real_node = self.real_nodes.last_mut().unwrap();
+                        real_node.policy = eval.policy;
+                        real_node.utility = eval.win;
+
+                        break eval.win;
                     }
                 }
             }
@@ -226,11 +205,11 @@ impl TreeSearch {
 
         // backpropagate
         let mut this_depth = 0u32;
-        for &node_idx in path.iter() {
+        for &node_idx in path.iter().rev() {
             if let Node::Real(real_node_idx) = self.nodes[node_idx.0 as usize] {
                 let real_node = self.real_node_mut(real_node_idx);
                 real_node.visits += 1;
-                real_node.wins += win;
+                real_node.value_sum += leaf_utility;
             }
 
             this_depth += 1;
@@ -260,7 +239,7 @@ impl TreeSearch {
         match self.node(NodeId(0)) {
             Node::Real(real_node_idx) => {
                 let node = self.real_node(*real_node_idx);
-                node.wins / node.visits as f32
+                node.value_sum / node.visits as f32
             }
             _ => panic!("Need tree to be expanded at least once to get win rate"),
         }
@@ -282,7 +261,7 @@ impl TreeSearch {
                             let child = self.real_node(*real_child_id);
                             (
                                 update,
-                                NonNan::new(child.wins / child.visits as f32).unwrap(),
+                                NonNan::new(child.value_sum / child.visits as f32).unwrap(),
                                 child.visits,
                             )
                         }

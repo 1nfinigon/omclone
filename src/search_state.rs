@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct State {
     pub errored: bool,
-    pub world: Arc<World>,
+    pub world: Box<World>,
     pub instr_buffer: Vec<BasicInstr>,
     pub nn_features: Box<nn::Features>,
 }
@@ -18,7 +18,7 @@ impl State {
         nn_features.init_all_temporal(&world);
         Self {
             errored: false,
-            world: Arc::new(world),
+            world: Box::new(world),
             instr_buffer: Vec::with_capacity(n_arms),
             nn_features,
         }
@@ -43,7 +43,7 @@ impl State {
                 Ok(()) => {
                     self.nn_features.shift_temporal();
                     self.nn_features.set_temporal_except_instr(0, &new_world);
-                    self.world = Arc::new(new_world);
+                    self.world = Box::new(new_world);
                 }
                 Err(_) => {
                     self.errored = true;

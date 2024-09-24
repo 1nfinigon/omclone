@@ -19,11 +19,17 @@ fn main() -> Result<()> {
     install()?;
 
     println!(
-        "{} spatial features, {} spatiotemporal features",
+        "{} spatial features\n{} spatiotemporal features\n{} temporal features",
         nn::feature_offsets::Spatial::SIZE,
-        nn::feature_offsets::Spatiotemporal::SIZE
+        nn::feature_offsets::Spatiotemporal::SIZE,
+        nn::feature_offsets::Temporal::SIZE,
     );
-    println!("{:?} total input size", std::mem::size_of::<nn::Features>());
+    println!(
+        "{:?} input tensor size",
+        std::mem::size_of::<nn::Features>()
+    );
+
+    let model = nn::Model::load()?;
 
     let (puzzle, solution) = utils::get_default_puzzle_solution()?;
     let mut init = parser::puzzle_prep(&puzzle, &solution)?;
@@ -41,16 +47,11 @@ fn main() -> Result<()> {
     }
 
     let search_state = search_state::State::new(world.world);
-    println!(
-        "{:?} temporal size",
-        std::mem::size_of_val(&search_state.nn_features.temporal)
-            + std::mem::size_of_val(&search_state.nn_features.spatiotemporal)
-    );
-    let mut tree_search = search::TreeSearch::new(search_state);
+    let mut tree_search = search::TreeSearch::new(search_state, model);
     let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
 
     for i in 0..10000 {
-        tree_search.search_once(&mut rng, &search::PlayoutResultPredictor)?;
+        tree_search.search_once(&mut rng)?;
     }
 
     Ok(())
