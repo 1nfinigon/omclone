@@ -179,7 +179,8 @@ impl TreeSearch {
                         let real_node = self.real_node(real_node_idx);
                         let first_play_urgency_reduction = if is_root {
                             assert!(path.len() == 1);
-                            // root has no first play urgency reduction
+                            // root has no first play urgency reduction if
+                            // Dirichlet noise is disabled
                             // TODO: dirichlet noise
                             0.
                         } else {
@@ -193,6 +194,7 @@ impl TreeSearch {
                                 })
                                 .map(|(_, p)| p)
                                 .sum::<f32>()
+                                .sqrt()
                         };
                         real_node.value() - first_play_urgency_reduction
                     };
