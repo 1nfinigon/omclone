@@ -27,6 +27,8 @@ LAYERS = [
     "res"
 ]
 
+torch.manual_seed(0)
+
 the_model = model.ModelV1(
     spatial_features = SPATIAL_FEATURES,
     spatiotemporal_features = SPATIOTEMPORAL_FEATURES,
