@@ -652,7 +652,7 @@ pub mod model {
             Ok(Self { module, device })
         }
 
-        pub fn forward(&self, features: &Features, x: usize, y: usize) -> eyre::Result<Evaluation> {
+        pub fn forward(&self, features: &Features, x: usize, y: usize, is_root: bool) -> eyre::Result<Evaluation> {
             use tch::IndexOp;
 
             // TODO: all this copying is very slow
@@ -707,6 +707,7 @@ pub mod model {
                 tch::IValue::Tensor(spatial_input.copy()),
                 tch::IValue::Tensor(spatiotemporal_input.copy()),
                 tch::IValue::Tensor(temporal_input.copy()),
+                tch::IValue::Tensor(tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?),
             ];
 
             let output = self.module.forward_is(&input)?;

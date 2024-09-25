@@ -412,14 +412,14 @@ class PolicyHead(torch.nn.Module):
         self.relu_out = torch.nn.ReLU()
         self.conv_out = torch.nn.Conv2d(head_channels, N_INSTR_TYPES, 1)
 
-    def forward(self, input):
+    def forward(self, input, softmax_temperature):
         pool_input = self.conv_pool(input)
         input = self.conv_in(input)
         input = self.bias_structure(input, pool_input)
         input = self.bn_out(input)
         input = self.relu_out(input)
         input = self.conv_out(input)
-        return input.softmax(dim=1)
+        return (input / softmax_temperature).softmax(dim=1)
 
 def _test():
     # test trace generalizability
@@ -435,10 +435,12 @@ def _test():
     W = 15
     input2 = torch.rand(B, C, H, W)
 
+    softmax_temperature = torch.Tensor([1])
+
     model = PolicyHead(C, N)
-    output = model(input2)
+    output = model(input2, softmax_temperature)
     assert(output.size() == (B, N_INSTR_TYPES, H, W))
-    traced_output = torch.jit.trace(model, input1)(input2)
+    traced_output = torch.jit.trace(model, (input1, softmax_temperature))(input2, softmax_temperature)
     assert torch.allclose(traced_output, output)
 
 _TESTS.append(_test)
@@ -450,8 +452,11 @@ def _test():
     W = 2
     N = 2
     input = torch.rand(B, C, H, W)
+
+    softmax_temperature = torch.Tensor([1.03])
+
     model = PolicyHead(C, N)
-    output = model(input)
+    output = model(input, softmax_temperature)
     assert((output > 0.).all())
     for b in range(B):
         for y in range(H):
@@ -519,10 +524,14 @@ class ModelV1(torch.nn.Module):
         self.value_head = ValueHead(
             trunk_channels, value_head_channels, value_channels, *args, **kwargs)
 
-    def forward(self, spatial_input, spatiotemporal_input, temporal_input):
+    def forward(self,
+                spatial_input,
+                spatiotemporal_input,
+                temporal_input,
+                policy_softmax_temperature):
         channels = self.input_embedder(spatial_input, spatiotemporal_input, temporal_input)
         channels = self.trunk(channels)
-        policy = self.policy_head(channels)
+        policy = self.policy_head(channels, policy_softmax_temperature)
         value = self.value_head(channels)
         return (policy, value)
 

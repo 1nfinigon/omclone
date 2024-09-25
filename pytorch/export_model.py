@@ -49,9 +49,10 @@ dtype = torch.float
 spatial = torch.rand((2, SPATIAL_FEATURES, 1, 1), dtype=dtype)
 spatiotemporal = torch.rand((2, SPATIOTEMPORAL_FEATURES, N_HISTORY_CYCLES, 1, 1), dtype=dtype)
 temporal = torch.rand((2, TEMPORAL_FEATURES, 1), dtype=dtype)
+policy_softmax_temperature = torch.Tensor([1])
 
 the_model.eval()
-traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal))
+traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal, policy_softmax_temperature))
 
 filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
 print("Saved model to {}".format(filename))
