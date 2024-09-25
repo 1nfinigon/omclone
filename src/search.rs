@@ -49,22 +49,55 @@ impl RealNode {
     }
 }
 
+struct TerminalNode {
+    value: f32,
+    visits: u32,
+}
+
+impl TerminalNode {
+    fn new(value: f32) -> Self {
+        Self { value, visits: 0 }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct NodeId(u32);
 
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct RealNodeId(u32);
-
 enum Node {
     Unexpanded,
-    Real(RealNodeId),
-    Terminal(f32),
+    Real(RealNode),
+    Terminal(TerminalNode),
+}
+
+impl Node {
+    fn visits(&self) -> u32 {
+        match self {
+            Node::Unexpanded => 0,
+            Node::Real(real_node) => real_node.visits,
+            Node::Terminal(terminal_node) => terminal_node.visits,
+        }
+    }
+
+    fn incr_visits(&mut self) {
+        match self {
+            Node::Unexpanded => panic!("can't incr unexpanded node"),
+            Node::Real(real_node) => real_node.visits += 1,
+            Node::Terminal(terminal_node) => terminal_node.visits += 1,
+        }
+    }
+
+    fn value(&self) -> Option<f32> {
+        match self {
+            Node::Real(real_node) => Some(real_node.value()),
+            Node::Terminal(terminal_node) => Some(terminal_node.value),
+            Node::Unexpanded => None,
+        }
+    }
 }
 
 pub struct TreeSearch {
     root: State,
     nodes: Vec<Node>,
-    real_nodes: Vec<RealNode>,
     sum_depth: usize,
     max_depth: u32,
     model: nn::Model,
@@ -76,7 +109,6 @@ impl TreeSearch {
         Self {
             root,
             nodes: vec![Node::Unexpanded],
-            real_nodes: vec![],
             sum_depth: 0,
             max_depth: 0,
             model,
@@ -92,30 +124,6 @@ impl TreeSearch {
         &mut self.nodes[node_idx.0 as usize]
     }
 
-    fn real_node(&self, real_node_idx: RealNodeId) -> &RealNode {
-        &self.real_nodes[real_node_idx.0 as usize]
-    }
-
-    fn real_node_mut(&mut self, real_node_idx: RealNodeId) -> &mut RealNode {
-        &mut self.real_nodes[real_node_idx.0 as usize]
-    }
-
-    fn visits_f32(&self, node: &Node) -> f32 {
-        match node {
-            Node::Unexpanded => 0.,
-            Node::Real(real_node_idx) => self.real_node(*real_node_idx).visits as f32,
-            Node::Terminal(_) => f32::INFINITY,
-        }
-    }
-
-    fn value(&self, node: &Node) -> Option<f32> {
-        match node {
-            Node::Real(real_node_idx) => Some(self.real_node(*real_node_idx).value()),
-            Node::Terminal(win) => Some(*win),
-            Node::Unexpanded => None,
-        }
-    }
-
     fn get_child(&self, real_node: &RealNode, child_id: ChildId) -> &Node {
         real_node
             .children
@@ -123,33 +131,41 @@ impl TreeSearch {
             .map_or(&Node::Unexpanded, |&node_id| self.node(node_id))
     }
 
-    fn get_or_add_child(&mut self, real_node_idx: RealNodeId, child_id: ChildId) -> NodeId {
-        self.real_nodes[real_node_idx.0 as usize]
-            .children
-            .entry(child_id)
-            .or_insert_with(|| {
-                let node_id = NodeId(self.nodes.len().try_into().unwrap());
-                self.nodes.push(Node::Unexpanded);
-                node_id
-            })
-            .to_owned()
+    fn get_or_add_child(&mut self, node_idx: NodeId, child_id: ChildId) -> NodeId {
+        let nodes_len = self.nodes.len();
+        match &mut self.nodes[node_idx.0 as usize] {
+            Node::Real(real_node) => {
+                let mut needs_pushing = false;
+                let child_node_id = real_node
+                    .children
+                    .entry(child_id)
+                    .or_insert_with(|| {
+                        let node_id = NodeId(nodes_len.try_into().unwrap());
+                        needs_pushing = true;
+                        node_id
+                    })
+                    .to_owned();
+                if needs_pushing {
+                    self.nodes.push(Node::Unexpanded);
+                }
+                child_node_id
+            }
+            _ => panic!("get_or_add_child called for a non-real node"),
+        }
     }
 
     /// Returns None if the child is unexpanded; in this case the heuristic for
     /// unexpanded nodes should be used.
     fn puct(
         &self,
-        parent_id: RealNodeId,
+        parent: &RealNode,
         child_id: ChildId,
         default_value_for_unexpanded_child: f32,
     ) -> NonNan {
-        let parent = self.real_node(parent_id);
         let child = self.get_child(parent, child_id);
         let policy = parent.policy[child_id.0 as usize];
-        let child_value = self
-            .value(child)
-            .unwrap_or(default_value_for_unexpanded_child);
-        let prior = policy * (parent.visits as f32).sqrt() / (1. + self.visits_f32(child));
+        let child_value = child.value().unwrap_or(default_value_for_unexpanded_child);
+        let prior = policy * (parent.visits as f32).sqrt() / (1. + child.visits() as f32);
         NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
@@ -176,14 +192,13 @@ impl TreeSearch {
             let is_root = node_idx == NodeId(0);
 
             match self.node(node_idx) {
-                Node::Terminal(win) => {
-                    break *win;
+                Node::Terminal(terminal_node) => {
+                    break terminal_node.value;
                 }
-                &Node::Real(real_node_idx) => {
+                Node::Real(real_node) => {
                     let next_updates = state.next_updates().ok().unwrap();
 
                     let default_value_for_unexpanded_child = {
-                        let real_node = self.real_node(real_node_idx);
                         let first_play_urgency_reduction = if is_root {
                             assert!(path.len() == 1);
                             // root has no first play urgency reduction if
@@ -196,8 +211,7 @@ impl TreeSearch {
                                 .iter()
                                 .enumerate()
                                 .filter(|(i, p)| {
-                                    self.visits_f32(self.get_child(real_node, ChildId(*i as u32)))
-                                        > 0.
+                                    self.get_child(real_node, ChildId(*i as u32)).visits() > 0
                                 })
                                 .map(|(_, p)| p)
                                 .sum::<f32>()
@@ -210,12 +224,12 @@ impl TreeSearch {
                     let child_id = (0..next_updates.len().try_into().unwrap())
                         .map(ChildId)
                         .max_by_key(|&child_id| {
-                            self.puct(real_node_idx, child_id, default_value_for_unexpanded_child)
+                            self.puct(real_node, child_id, default_value_for_unexpanded_child)
                         })
                         .unwrap();
 
                     // move to child, update the state
-                    node_idx = self.get_or_add_child(real_node_idx, child_id);
+                    node_idx = self.get_or_add_child(node_idx, child_id);
                     let update = next_updates.get(child_id.0 as usize).unwrap();
                     update_cb(update);
                     state.update(*update);
@@ -223,14 +237,9 @@ impl TreeSearch {
                 Node::Unexpanded => {
                     // expand this node
                     if let Some(win) = state.evaluate_final_state() {
-                        *self.node_mut(node_idx) = Node::Terminal(win);
+                        *self.node_mut(node_idx) = Node::Terminal(TerminalNode::new(win));
                         break win;
                     } else {
-                        let real_node_id = RealNodeId(self.real_nodes.len().try_into().unwrap());
-                        self.real_nodes.push(RealNode::new());
-
-                        *self.node_mut(node_idx) = Node::Real(real_node_id);
-
                         let next_arm_index = state.instr_buffer.len();
                         let next_arm_pos = state.world.arms[next_arm_index].pos;
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
@@ -238,7 +247,7 @@ impl TreeSearch {
 
                         let eval = self.model.forward(&*state.nn_features, x, y, is_root)?;
 
-                        let real_node = self.real_nodes.last_mut().unwrap();
+                        let mut real_node = RealNode::new();
                         real_node.policy = eval.policy;
                         if is_root {
                             // add Dirichlet noise
@@ -252,6 +261,7 @@ impl TreeSearch {
                         }
                         real_node.utility = eval.win;
 
+                        *self.node_mut(node_idx) = Node::Real(real_node);
                         break eval.win;
                     }
                 }
@@ -261,11 +271,7 @@ impl TreeSearch {
         // backpropagate
         let mut this_depth = 0u32;
         for &node_idx in path.iter().rev() {
-            if let Node::Real(real_node_idx) = self.nodes[node_idx.0 as usize] {
-                let real_node = self.real_node_mut(real_node_idx);
-                real_node.visits += 1;
-                real_node.value_sum += leaf_utility;
-            }
+            self.node_mut(node_idx).incr_visits();
 
             this_depth += 1;
         }
@@ -276,10 +282,7 @@ impl TreeSearch {
     }
 
     pub fn sum_visits(&self) -> u32 {
-        match self.node(NodeId(0)) {
-            Node::Real(real_node_idx) => self.real_node(*real_node_idx).visits,
-            Node::Unexpanded | Node::Terminal(_) => 0,
-        }
+        self.node(NodeId(0)).visits()
     }
 
     pub fn avg_depth(&self) -> f32 {
@@ -292,10 +295,7 @@ impl TreeSearch {
 
     pub fn win(&self) -> f32 {
         match self.node(NodeId(0)) {
-            Node::Real(real_node_idx) => {
-                let node = self.real_node(*real_node_idx);
-                node.value()
-            }
+            Node::Real(real_node) => real_node.value(),
             _ => panic!("Need tree to be expanded at least once to get win rate"),
         }
     }
@@ -311,7 +311,7 @@ pub struct Stats {
 impl TreeSearch {
     pub fn next_updates_with_stats(&self) -> Vec<Stats> {
         match self.node(NodeId(0)) {
-            &Node::Real(real_node_idx) => self
+            Node::Real(root_real_node) => self
                 .root
                 .next_updates()
                 .ok()
@@ -320,28 +320,11 @@ impl TreeSearch {
                 .enumerate()
                 .map(|(child_id, &instr)| {
                     let child_id = ChildId(child_id.try_into().unwrap());
-                    let root_real_node = self.real_node(real_node_idx);
-                    match self.get_child(root_real_node, child_id) {
-                        Node::Real(real_child_id) => {
-                            let child = self.real_node(*real_child_id);
-                            Stats {
-                                instr,
-                                value: child.value(),
-                                visits: child.visits,
-                            }
-                        }
-                        Node::Terminal(win) => Stats {
-                            instr,
-                            value: *win,
-                            visits:
-                            // TODO: this will soon get bad
-                            u32::MAX,
-                        },
-                        Node::Unexpanded => Stats {
-                            instr,
-                            value: root_real_node.value(),
-                            visits: 0,
-                        },
+                    let child = self.get_child(root_real_node, child_id);
+                    Stats {
+                        instr,
+                        value: child.value().unwrap_or(root_real_node.value()),
+                        visits: child.visits(),
                     }
                 })
                 .collect(),
