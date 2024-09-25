@@ -2285,11 +2285,17 @@ impl WorldWithTapes {
         Ok(self_)
     }
 
-    fn get_instructions(&self) -> Vec<BasicInstr> {
+    /// Get the instructions for the given timestep.
+    pub fn get_instructions_at(&self, timestep: u64) -> Vec<BasicInstr> {
         self.tapes
             .iter()
-            .map(|tape| tape.get(self.world.timestep as usize, self.repeat_length))
+            .map(|tape| tape.get(timestep as usize, self.repeat_length))
             .collect()
+    }
+
+    /// Get the instructions for the current timestep.
+    pub fn get_instructions(&self) -> Vec<BasicInstr> {
+        self.get_instructions_at(self.world.timestep)
     }
 
     pub fn run_step(

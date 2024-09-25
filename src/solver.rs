@@ -39,35 +39,46 @@ fn main() -> Result<()> {
         nn::constants::N_WIDTH as i32 / 2,
         nn::constants::N_HEIGHT as i32 / 2,
     ));
-    let mut world = sim::WorldWithTapes::setup_sim(&init)?;
+    let world = sim::WorldWithTapes::setup_sim(&init)?;
 
-    let mut motion = sim::WorldStepInfo::new();
-    let mut float_world = sim::FloatWorld::new();
-    for _ in 0..120 {
-        world.run_step(true, &mut motion, &mut float_world)?;
+    let mut search_state = search_state::State::new(world.world.clone());
+    let mut search_history = search_history::History::new();
+
+    let n_premoves = solution.stats.unwrap().cycles - 3;
+    println!("making {} premoves", n_premoves);
+
+    for _ in 0..n_premoves {
+        assert!(search_state.instr_buffer.is_empty());
+        let instructions = world.get_instructions_at(search_state.world.timestep);
+        for (i, &instr) in instructions.iter().enumerate() {
+            search_state.update(instr);
+            search_history.append_from_optimal_solution(instr);
+        }
     }
-
-    let search_state = search_state::State::new(world.world);
 
     //
-
     let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
 
-    let search_history = search_history::History::new();
+    loop {
+        if let Some(result) = search_state.evaluate_final_state() {
+            println!("done; result = {}", result);
+            break;
+        }
 
-    let mut tree_search = search::TreeSearch::new(search_state.clone(), model);
+        let mut tree_search = search::TreeSearch::new(search_state.clone());
 
-    for i in 0..1000 {
-        tree_search.search_once(&mut rng)?;
+        for _ in 0..100 {
+            tree_search.search_once(&mut rng, &model)?;
+        }
+
+        let stats = tree_search.next_updates_with_stats();
+
+        println!("{:?}", stats);
+
+        let instr = stats.best_update();
+        search_state.update(instr);
+        search_history.append_mcts(&stats);
     }
-
-    let next_updates_with_stats = tree_search.next_updates_with_stats();
-
-    println!("{:?}", next_updates_with_stats);
-    println!("avg depth = {}", tree_search.avg_depth());
-    println!("max depth = {}", tree_search.max_depth());
-
-    let instr = next_updates_with_stats.best_update();
 
     Ok(())
 }

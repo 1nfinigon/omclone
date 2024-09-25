@@ -60,7 +60,6 @@ impl State {
                 // TODO: don't hardcode this.
                 Some(0.)
             } else if self.world.is_complete() {
-                println!("DONE");
                 // TODO: take into account score (cost, cycles, area).
                 Some(1.)
             } else {

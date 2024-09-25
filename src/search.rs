@@ -100,18 +100,16 @@ pub struct TreeSearch {
     nodes: Vec<Node>,
     sum_depth: usize,
     max_depth: u32,
-    model: nn::Model,
     dirichlet_distr: rand_distr::Dirichlet<f32>,
 }
 
 impl TreeSearch {
-    pub fn new(root: State, model: nn::Model) -> Self {
+    pub fn new(root: State) -> Self {
         Self {
             root,
             nodes: vec![Node::Unexpanded],
             sum_depth: 0,
             max_depth: 0,
-            model,
             dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
         }
     }
@@ -169,15 +167,7 @@ impl TreeSearch {
         NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
-    pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT) -> Result<()> {
-        self.search_once_with_cb(rng, |_| ())
-    }
-
-    pub fn search_once_with_cb<RngT: Rng, F: FnMut(&BasicInstr)>(
-        &mut self,
-        rng: &mut RngT,
-        mut update_cb: F,
-    ) -> Result<()> {
+    pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
         let mut state = self.root.clone();
         let mut node_idx = NodeId(0);
         let mut path = Vec::new();
@@ -231,7 +221,6 @@ impl TreeSearch {
                     // move to child, update the state
                     node_idx = self.get_or_add_child(node_idx, child_id);
                     let update = next_updates.get(child_id.0 as usize).unwrap();
-                    update_cb(update);
                     state.update(*update);
                 }
                 Node::Unexpanded => {
@@ -245,7 +234,7 @@ impl TreeSearch {
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
                             .ok_or_eyre("arm out of nn bounds")?;
 
-                        let eval = self.model.forward(&*state.nn_features, x, y, is_root)?;
+                        let eval = model.forward(&*state.nn_features, x, y, is_root)?;
 
                         let mut real_node = RealNode::new();
                         real_node.policy = eval.policy;
@@ -272,6 +261,9 @@ impl TreeSearch {
         let mut this_depth = 0u32;
         for &node_idx in path.iter().rev() {
             self.node_mut(node_idx).incr_visits();
+            if let Node::Real(real_node) = self.node_mut(node_idx) {
+                real_node.value_sum += leaf_utility;
+            }
 
             this_depth += 1;
         }
@@ -304,16 +296,22 @@ impl TreeSearch {
 #[derive(Debug)]
 pub struct UpdateWithStats {
     pub instr: BasicInstr,
+    pub is_terminal: bool,
     pub value: NonNan,
     pub visits: u32,
 }
 
 #[derive(Debug)]
-pub struct NextUpdatesWithStats(pub Vec<UpdateWithStats>);
+pub struct NextUpdatesWithStats {
+    pub root_value: f32,
+    pub updates_with_stats: Vec<UpdateWithStats>,
+    pub avg_depth: f32,
+    pub max_depth: u32,
+}
 
 impl NextUpdatesWithStats {
     pub fn best_update(&self) -> BasicInstr {
-        self.0
+        self.updates_with_stats
             .iter()
             .max_by_key(|s| (s.visits, s.value))
             .map(|s| s.instr)
@@ -337,13 +335,19 @@ impl TreeSearch {
                         let child = self.get_child(root_real_node, child_id);
                         UpdateWithStats {
                             instr,
+                            is_terminal: matches!(child, Node::Terminal(_)),
                             value: NonNan::new(child.value().unwrap_or(root_real_node.value()))
                                 .unwrap(),
                             visits: child.visits(),
                         }
                     })
                     .collect();
-                NextUpdatesWithStats(updates_with_stats)
+                NextUpdatesWithStats {
+                    root_value: root_real_node.value(),
+                    updates_with_stats,
+                    avg_depth: self.avg_depth(),
+                    max_depth: self.max_depth(),
+                }
             }
             _ => panic!("Need tree to be expanded at least once to get updates"),
         }
