@@ -68,6 +68,7 @@ pub struct TreeSearch {
     sum_depth: usize,
     max_depth: u32,
     model: nn::Model,
+    dirichlet_distr: rand_distr::Dirichlet<f32>,
 }
 
 impl TreeSearch {
@@ -79,6 +80,7 @@ impl TreeSearch {
             sum_depth: 0,
             max_depth: 0,
             model,
+            dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
         }
     }
 
@@ -164,6 +166,8 @@ impl TreeSearch {
                 break 0.;
             }
 
+            let is_root = node_idx == NodeId(0);
+
             match self.node(node_idx) {
                 Node::Terminal(win) => {
                     break *win;
@@ -173,7 +177,7 @@ impl TreeSearch {
 
                     let default_puct_for_unexpanded_child = {
                         let real_node = self.real_node(real_node_idx);
-                        let first_play_urgency_reduction = if node_idx == NodeId(0) {
+                        let first_play_urgency_reduction = if is_root {
                             assert!(path.len() == 1);
                             // root has no first play urgency reduction
                             // TODO: dirichlet noise
@@ -224,10 +228,20 @@ impl TreeSearch {
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
                             .ok_or_eyre("arm out of nn bounds")?;
 
-                        let eval = self.model.forward(&*state.nn_features, x, y, node_idx == NodeId(0))?;
+                        let eval = self.model.forward(&*state.nn_features, x, y, is_root)?;
 
                         let real_node = self.real_nodes.last_mut().unwrap();
                         real_node.policy = eval.policy;
+                        if is_root {
+                            // add Dirichlet noise
+                            // TODO: for this problem, we should stretch out the
+                            // Dirichlet noise to more than just the root.
+                            let noise = self.dirichlet_distr.sample(rng);
+                            for (policy, noise) in real_node.policy.iter_mut().zip(noise) {
+                                const EPS: f32 = 0.25;
+                                *policy = (1. - EPS) * *policy + EPS * noise;
+                            }
+                        }
                         real_node.utility = eval.win;
 
                         break eval.win;
