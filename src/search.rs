@@ -302,32 +302,49 @@ impl TreeSearch {
 }
 
 #[derive(Debug)]
-pub struct Stats {
+pub struct UpdateWithStats {
     pub instr: BasicInstr,
-    pub value: f32,
+    pub value: NonNan,
     pub visits: u32,
 }
 
+#[derive(Debug)]
+pub struct NextUpdatesWithStats(pub Vec<UpdateWithStats>);
+
+impl NextUpdatesWithStats {
+    pub fn best_update(&self) -> BasicInstr {
+        self.0
+            .iter()
+            .max_by_key(|s| (s.visits, s.value))
+            .map(|s| s.instr)
+            .unwrap()
+    }
+}
+
 impl TreeSearch {
-    pub fn next_updates_with_stats(&self) -> Vec<Stats> {
+    pub fn next_updates_with_stats(&self) -> NextUpdatesWithStats {
         match self.node(NodeId(0)) {
-            Node::Real(root_real_node) => self
-                .root
-                .next_updates()
-                .ok()
-                .unwrap()
-                .iter()
-                .enumerate()
-                .map(|(child_id, &instr)| {
-                    let child_id = ChildId(child_id.try_into().unwrap());
-                    let child = self.get_child(root_real_node, child_id);
-                    Stats {
-                        instr,
-                        value: child.value().unwrap_or(root_real_node.value()),
-                        visits: child.visits(),
-                    }
-                })
-                .collect(),
+            Node::Real(root_real_node) => {
+                let updates_with_stats = self
+                    .root
+                    .next_updates()
+                    .ok()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(child_id, &instr)| {
+                        let child_id = ChildId(child_id.try_into().unwrap());
+                        let child = self.get_child(root_real_node, child_id);
+                        UpdateWithStats {
+                            instr,
+                            value: NonNan::new(child.value().unwrap_or(root_real_node.value()))
+                                .unwrap(),
+                            visits: child.visits(),
+                        }
+                    })
+                    .collect();
+                NextUpdatesWithStats(updates_with_stats)
+            }
             _ => panic!("Need tree to be expanded at least once to get updates"),
         }
     }

@@ -2,6 +2,7 @@ mod nn;
 mod nonnan;
 mod parser;
 mod search;
+mod search_history;
 mod search_state;
 mod sim;
 mod utils;
@@ -47,17 +48,26 @@ fn main() -> Result<()> {
     }
 
     let search_state = search_state::State::new(world.world);
-    let mut tree_search = search::TreeSearch::new(search_state, model);
+
+    //
+
     let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+
+    let search_history = search_history::History::new();
+
+    let mut tree_search = search::TreeSearch::new(search_state.clone(), model);
 
     for i in 0..1000 {
         tree_search.search_once(&mut rng)?;
     }
 
-    let next_updates = tree_search.next_updates_with_stats();
-    println!("{:?}", next_updates);
+    let next_updates_with_stats = tree_search.next_updates_with_stats();
+
+    println!("{:?}", next_updates_with_stats);
     println!("avg depth = {}", tree_search.avg_depth());
     println!("max depth = {}", tree_search.max_depth());
+
+    let instr = next_updates_with_stats.best_update();
 
     Ok(())
 }
