@@ -80,7 +80,7 @@ impl BasicInstr {
 #[test]
 fn basic_instr_len() {
     assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_none());
-    assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_some());
+    assert!(BasicInstr::from_u8((BasicInstr::N_TYPES - 1).try_into().unwrap()).is_some());
 }
 
 impl BasicInstr {
