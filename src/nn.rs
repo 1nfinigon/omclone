@@ -712,6 +712,7 @@ pub mod model {
             let output = self.module.forward_is(&input)?;
 
             let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
+            /*
             tch::Tensor::write_npz(
                 &[
                     ("si", &spatial_input),
@@ -722,6 +723,7 @@ pub mod model {
                 ],
                 "/tmp/t.pt",
             )?;
+            */
             let mut policy = [0f32; BasicInstr::N_TYPES];
 
             assert_eq!(
