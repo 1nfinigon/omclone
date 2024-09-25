@@ -56,6 +56,8 @@ fn main() -> Result<()> {
 
     let next_updates = tree_search.next_updates_with_stats();
     println!("{:?}", next_updates);
+    println!("avg depth = {}", tree_search.avg_depth());
+    println!("max depth = {}", tree_search.max_depth());
 
     Ok(())
 }

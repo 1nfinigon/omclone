@@ -95,7 +95,7 @@ class GlobalPool2d(torch.nn.Module):
     Input:  BCHW or BCTHW
     Output: BX11 or BXT11 (X=2*C)
 
-    Torchscript: Trace generalizes across H, W
+    Torchscript: Trace generalizes across B, T, H, W
     """
 
     def __init__(self, in_channels, has_time_dimension, *args, **kwargs):
@@ -105,15 +105,13 @@ class GlobalPool2d(torch.nn.Module):
         self.out_channels = 2 * self.in_channels
 
     def forward(self, input):
-        B = input.shape[0]
         C = input.shape[1]
         if not torch.jit.is_tracing():
             assert(C == self.in_channels)
         if self.has_time_dimension:
-            T = input.shape[2]
-            max = torch.max(input.view(B, C, T, -1), dim=-1).values.view(B, C, T, 1, 1)
+            max = torch.max(input.flatten(start_dim=3), dim=-1).values.unsqueeze(-1).unsqueeze(-1)
         else:
-            max = torch.max(input.view(B, C, -1), dim=-1).values.view(B, C, 1, 1)
+            max = torch.max(input.flatten(start_dim=2), dim=-1).values.unsqueeze(-1).unsqueeze(-1)
         mean = torch.mean(input, dim=(-1, -2), keepdim=True)
         return torch.cat((max, mean), dim=1)
 
@@ -121,19 +119,19 @@ def _test():
     # test trace generalizability
     C = 2
     input1 = torch.rand(1,C,3,4,5)
-    input2 = torch.rand(1,C,3,14,15)
+    input2 = torch.rand(11,C,13,14,15)
     model = GlobalPool2d(C, has_time_dimension=True)
     output = model(input2)
-    assert(output.size() == (1,2*C,3,1,1))
+    assert(output.size() == (11,2*C,13,1,1))
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
 
     C = 2
     input1 = torch.rand(1,C,4,5)
-    input2 = torch.rand(1,C,14,15)
+    input2 = torch.rand(11,C,14,15)
     model = GlobalPool2d(C, has_time_dimension=False)
     output = model(input2)
-    assert(output.size() == (1,2*C,1,1))
+    assert(output.size() == (11,2*C,1,1))
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
 
@@ -419,6 +417,10 @@ class PolicyHead(torch.nn.Module):
         input = self.bn_out(input)
         input = self.relu_out(input)
         input = self.conv_out(input)
+
+        ## testing: artificially boost one of the instructions
+        # input[:, 3] += 100.
+
         return (input / softmax_temperature).softmax(dim=1)
 
 def _test():
@@ -488,13 +490,19 @@ class ValueHead(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         self.fc_post = torch.nn.Linear(value_channels, self.OUTPUTS)
 
-    def forward(self, input):
+    def forward(self, input, spatiotemporal_input):
         input = self.conv_in(input)
         input = self.global_pool(input)
         input = input.squeeze(dim=(-1, -2))
         input = self.fc_pre(input)
         input = self.relu(input)
         input = self.fc_post(input)
+
+        ## testing: artificially boost one of the instructions if the input has instruction 3
+        ## > println!("{}", nn::feature_offsets::Spatiotemporal::OFFSETS.arm_base_instr.get_onehot_offset(3));
+        ## > => 22
+        #input[:, 0] += 100. * spatiotemporal_input.select(2, 0).select(1, 22).flatten(start_dim=1).sum()
+
         return input.softmax(dim=1)
 
 class ModelV1(torch.nn.Module):
@@ -532,7 +540,7 @@ class ModelV1(torch.nn.Module):
         channels = self.input_embedder(spatial_input, spatiotemporal_input, temporal_input)
         channels = self.trunk(channels)
         policy = self.policy_head(channels, policy_softmax_temperature)
-        value = self.value_head(channels)
+        value = self.value_head(channels, spatiotemporal_input)
         return (policy, value)
 
 def run_tests():
