@@ -137,11 +137,18 @@ impl TreeSearch {
 
     /// Returns None if the child is unexpanded; in this case the heuristic for
     /// unexpanded nodes should be used.
-    fn puct(&self, parent_id: RealNodeId, child_id: ChildId, default_value_for_unexpanded_child: f32) -> NonNan {
+    fn puct(
+        &self,
+        parent_id: RealNodeId,
+        child_id: ChildId,
+        default_value_for_unexpanded_child: f32,
+    ) -> NonNan {
         let parent = self.real_node(parent_id);
         let child = self.get_child(parent, child_id);
         let policy = parent.policy[child_id.0 as usize];
-        let child_value = self.value(child).unwrap_or(default_value_for_unexpanded_child);
+        let child_value = self
+            .value(child)
+            .unwrap_or(default_value_for_unexpanded_child);
         let prior = policy * (parent.visits as f32).sqrt() / (1. + self.visits_f32(child));
         NonNan::new(child_value + 1.4 * prior).unwrap()
     }
@@ -294,8 +301,15 @@ impl TreeSearch {
     }
 }
 
+#[derive(Debug)]
+pub struct Stats {
+    pub instr: BasicInstr,
+    pub value: f32,
+    pub visits: u32,
+}
+
 impl TreeSearch {
-    pub fn next_updates_with_stats(&self) -> Vec<(BasicInstr, NonNan, u32)> {
+    pub fn next_updates_with_stats(&self) -> Vec<Stats> {
         match self.node(NodeId(0)) {
             &Node::Real(real_node_idx) => self
                 .root
@@ -304,15 +318,30 @@ impl TreeSearch {
                 .unwrap()
                 .iter()
                 .enumerate()
-                .map(|(child_id, &update)| {
+                .map(|(child_id, &instr)| {
                     let child_id = ChildId(child_id.try_into().unwrap());
-                    match self.get_child(self.real_node(real_node_idx), child_id) {
+                    let root_real_node = self.real_node(real_node_idx);
+                    match self.get_child(root_real_node, child_id) {
                         Node::Real(real_child_id) => {
                             let child = self.real_node(*real_child_id);
-                            (update, NonNan::new(child.value()).unwrap(), child.visits)
+                            Stats {
+                                instr,
+                                value: child.value(),
+                                visits: child.visits,
+                            }
                         }
-                        Node::Terminal(win) => (update, NonNan::new(*win).unwrap(), u32::MAX),
-                        Node::Unexpanded => (update, NonNan::new(0.).unwrap(), 0),
+                        Node::Terminal(win) => Stats {
+                            instr,
+                            value: *win,
+                            visits:
+                            // TODO: this will soon get bad
+                            u32::MAX,
+                        },
+                        Node::Unexpanded => Stats {
+                            instr,
+                            value: root_real_node.value(),
+                            visits: 0,
+                        },
                     }
                 })
                 .collect(),
