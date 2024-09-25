@@ -39,6 +39,14 @@ impl RealNode {
             value_sum: 0.,
         }
     }
+
+    fn value(&self) -> f32 {
+        if self.visits == 0 {
+            self.utility
+        } else {
+            self.value_sum / (self.visits as f32)
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -90,8 +98,24 @@ impl TreeSearch {
         &mut self.real_nodes[real_node_idx.0 as usize]
     }
 
-    fn get_child(&self, real_node_idx: RealNodeId, child_id: ChildId) -> &Node {
-        self.real_node(real_node_idx)
+    fn visits_f32(&self, node: &Node) -> f32 {
+        match node {
+            Node::Unexpanded => 0.,
+            Node::Real(real_node_idx) => self.real_node(*real_node_idx).visits as f32,
+            Node::Terminal(_) => f32::INFINITY,
+        }
+    }
+
+    fn value(&self, node: &Node) -> Option<f32> {
+        match node {
+            Node::Real(real_node_idx) => Some(self.real_node(*real_node_idx).value()),
+            Node::Terminal(win) => Some(*win),
+            Node::Unexpanded => None,
+        }
+    }
+
+    fn get_child(&self, real_node: &RealNode, child_id: ChildId) -> &Node {
+        real_node
             .children
             .get(&child_id)
             .map_or(&Node::Unexpanded, |&node_id| self.node(node_id))
@@ -109,30 +133,15 @@ impl TreeSearch {
             .to_owned()
     }
 
-    fn puct(&self, parent_id: RealNodeId, child_id: ChildId) -> NonNan {
+    /// Returns None if the child is unexpanded; in this case the heuristic for
+    /// unexpanded nodes should be used.
+    fn puct(&self, parent_id: RealNodeId, child_id: ChildId) -> Option<NonNan> {
         let parent = self.real_node(parent_id);
-        let child = self.get_child(parent_id, child_id);
+        let child = self.get_child(parent, child_id);
         let policy = parent.policy[child_id.0 as usize];
-        let (child_value, child_visits) = match child {
-            Node::Real(real_child_idx) => {
-                let child = self.real_node(*real_child_idx);
-                let child_visits = child.visits as f32;
-                let child_value = if child.visits == 0 {
-                    child.utility
-                } else {
-                    child.value_sum / child_visits
-                };
-                (child_value, child_visits)
-            }
-            Node::Terminal(win) => (*win, f32::INFINITY),
-            Node::Unexpanded => {
-                // TODO: current heuristic: assume same utility as parent. no
-                // idea if this heuristic is okay or not.
-                (1., 0.)
-            }
-        };
-        let prior = policy * (parent.visits as f32).sqrt() / (1. + child_visits);
-        NonNan::new(child_value + 1.4 * prior).unwrap()
+        let child_value = self.value(child)?;
+        let prior = policy * (parent.visits as f32).sqrt() / (1. + self.visits_f32(child));
+        Some(NonNan::new(child_value + 1.4 * prior).unwrap())
     }
 
     pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT) -> Result<()> {
@@ -162,10 +171,35 @@ impl TreeSearch {
                 &Node::Real(real_node_idx) => {
                     let next_updates = state.next_updates().ok().unwrap();
 
+                    let default_puct_for_unexpanded_child = {
+                        let real_node = self.real_node(real_node_idx);
+                        let first_play_urgency_reduction = if node_idx == NodeId(0) {
+                            assert!(path.len() == 1);
+                            // root has no first play urgency reduction
+                            // TODO: dirichlet noise
+                            0.
+                        } else {
+                            0.2 * real_node
+                                .policy
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, p)| {
+                                    self.visits_f32(self.get_child(real_node, ChildId(*i as u32)))
+                                        > 0.
+                                })
+                                .map(|(_, p)| p)
+                                .sum::<f32>()
+                        };
+                        real_node.value() - first_play_urgency_reduction
+                    };
+
                     // pick a child based on PUCT
                     let child_id = (0..next_updates.len().try_into().unwrap())
                         .map(ChildId)
-                        .max_by_key(|&child_id| self.puct(real_node_idx, child_id))
+                        .max_by_key(|&child_id| {
+                            self.puct(real_node_idx, child_id)
+                                .unwrap_or(NonNan::new(default_puct_for_unexpanded_child).unwrap())
+                        })
                         .unwrap();
 
                     // move to child, update the state
@@ -238,7 +272,7 @@ impl TreeSearch {
         match self.node(NodeId(0)) {
             Node::Real(real_node_idx) => {
                 let node = self.real_node(*real_node_idx);
-                node.value_sum / node.visits as f32
+                node.value()
             }
             _ => panic!("Need tree to be expanded at least once to get win rate"),
         }
@@ -257,14 +291,10 @@ impl TreeSearch {
                 .enumerate()
                 .map(|(child_id, &update)| {
                     let child_id = ChildId(child_id.try_into().unwrap());
-                    match self.get_child(real_node_idx, child_id) {
+                    match self.get_child(self.real_node(real_node_idx), child_id) {
                         Node::Real(real_child_id) => {
                             let child = self.real_node(*real_child_id);
-                            (
-                                update,
-                                NonNan::new(child.value_sum / child.visits as f32).unwrap(),
-                                child.visits,
-                            )
+                            (update, NonNan::new(child.value()).unwrap(), child.visits)
                         }
                         Node::Terminal(win) => (update, NonNan::new(*win).unwrap(), u32::MAX),
                         Node::Unexpanded => (update, NonNan::new(0.).unwrap(), 0),

@@ -226,7 +226,7 @@ pub mod feature_offsets {
         pub arm_in_orientation: [Binary; N_ORIENTATIONS],
         pub arm_in_orientation_and_holding_atom: [Binary; N_ORIENTATIONS],
         /// What instruction is this arm about to execute this timestep
-        pub arm_base_instr: OneHot<{BasicInstr::N_TYPES}>,
+        pub arm_base_instr: OneHot<{ BasicInstr::N_TYPES }>,
 
         /// Information about the atom that is in this space
         pub atom_type: OneHot<N_ATOM_TYPES>,
