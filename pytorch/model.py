@@ -4,9 +4,10 @@
 
 import torch
 import numpy as np
-import os
 
 N_INSTR_TYPES = 11
+
+_TESTS = []
 
 class Conv2dHex(torch.nn.Module):
     """
@@ -51,7 +52,7 @@ class Conv2dHex(torch.nn.Module):
             input, self.conv.weight * self.hex_mask, self.conv.bias, self.conv.stride,
             self.conv.padding, self.conv.dilation, self.conv.groups)
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     C = 2
     input1 = torch.rand(1,C,4,5)
@@ -65,8 +66,9 @@ if __name__ == "__main__":
     model = Conv2dHex(C, C, (1, 3, 3), has_time_dimension=True)
     assert torch.allclose(torch.jit.trace(model, input1)(input2), model(input2))
 
+_TESTS.append(_test)
 
-if __name__ == "__main__":
+def _test():
     # test gradient correctness
     C = 1
     input = torch.ones(1, C, 3, 3, requires_grad=True)
@@ -85,6 +87,8 @@ if __name__ == "__main__":
     output_centre = output[0, 0, 0, 1, 1]
     output_centre.backward(inputs=[input])
     assert(input.grad.count_nonzero() == 7)
+
+_TESTS.append(_test)
 
 class GlobalPool2d(torch.nn.Module):
     """
@@ -113,7 +117,7 @@ class GlobalPool2d(torch.nn.Module):
         mean = torch.mean(input, dim=(-1, -2), keepdim=True)
         return torch.cat((max, mean), dim=1)
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     C = 2
     input1 = torch.rand(1,C,3,4,5)
@@ -133,8 +137,11 @@ if __name__ == "__main__":
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
 
-if __name__ == "__main__":
+_TESTS.append(_test)
+
+def _test():
     # test correctness
+    C = 2
     def gen_wh(n):
         return [[n, n-1], [n-2, n-3]]
     c0t0 = gen_wh(4)
@@ -150,6 +157,8 @@ if __name__ == "__main__":
     c1t1max, c1t1mean = [[108]], [[106.5]]
     expected_output = torch.tensor([[[c0t0max, c0t1max], [c1t0max, c1t1max], [c0t0mean, c0t1mean], [c1t0mean, c1t1mean]]], dtype=torch.float)
     assert(torch.allclose(output, expected_output))
+
+_TESTS.append(_test)
 
 class GlobalPoolBiasStructure2d(torch.nn.Module):
     """
@@ -189,7 +198,7 @@ class GlobalPoolBiasStructure2d(torch.nn.Module):
         bias = bias.unsqueeze(dim=-1).unsqueeze(dim=-1)
         return input + bias
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     C = 2
     P = 6
@@ -201,6 +210,8 @@ if __name__ == "__main__":
     output = model(input2, pool2)
     traced_output = torch.jit.trace(model, (input1, pool1))(input2, pool2)
     assert torch.allclose(traced_output, output)
+
+_TESTS.append(_test)
 
 class PreActivationResBlock(torch.nn.Module):
     """
@@ -244,7 +255,7 @@ class PreActivationResBlock(torch.nn.Module):
         res = self.conv2(res)
         return input + res
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     C = 8
     input1 = torch.rand(1, C, 3, 4, 5)
@@ -260,6 +271,8 @@ if __name__ == "__main__":
     output = model(input2)
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
+
+_TESTS.append(_test)
 
 class InputEmbedder(torch.nn.Module):
     """
@@ -291,7 +304,7 @@ class InputEmbedder(torch.nn.Module):
         temporal = self.temporal_fc(temporal_input.permute((0, 2, 1))).permute((0, 2, 1)).unsqueeze(dim=-1).unsqueeze(dim=-1)
         return spatial + spatiotemporal + temporal
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     S = 2
     X = 3
@@ -319,6 +332,8 @@ if __name__ == "__main__":
     assert(output.size() == (B, C, T, H, W))
     traced_output = torch.jit.trace(model, (spatial1, spatiotemporal1, temporal1))(spatial2, spatiotemporal2, temporal2)
     assert torch.allclose(traced_output, output)
+
+_TESTS.append(_test)
 
 class Trunk(torch.nn.Module):
     """
@@ -353,7 +368,7 @@ class Trunk(torch.nn.Module):
             assert(input.size()[2] == 1)
         return input.squeeze(dim=2)
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     B = 1
     C = 2
@@ -372,6 +387,8 @@ if __name__ == "__main__":
     assert(output.size() == (B, C, H, W))
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
+
+_TESTS.append(_test)
 
 class PolicyHead(torch.nn.Module):
     """
@@ -404,7 +421,7 @@ class PolicyHead(torch.nn.Module):
         input = self.conv_out(input)
         return input.softmax(dim=1)
 
-if __name__ == "__main__":
+def _test():
     # test trace generalizability
     B = 1
     C = 6
@@ -423,6 +440,25 @@ if __name__ == "__main__":
     assert(output.size() == (B, N_INSTR_TYPES, H, W))
     traced_output = torch.jit.trace(model, input1)(input2)
     assert torch.allclose(traced_output, output)
+
+_TESTS.append(_test)
+
+def _test():
+    B = 2
+    C = 2
+    H = 2
+    W = 2
+    N = 2
+    input = torch.rand(B, C, H, W)
+    model = PolicyHead(C, N)
+    output = model(input)
+    assert((output > 0.).all())
+    for b in range(B):
+        for y in range(H):
+            for x in range(W):
+                assert(torch.allclose(output[b, :, y, x].sum(), torch.Tensor([1.])))
+
+_TESTS.append(_test)
 
 class ValueHead(torch.nn.Module):
     """
@@ -490,55 +526,6 @@ class ModelV1(torch.nn.Module):
         value = self.value_head(channels)
         return (policy, value)
 
-
-
-
-# constants from nn.rs
-SPATIAL_FEATURES = 143
-SPATIOTEMPORAL_FEATURES = 72
-TEMPORAL_FEATURES = 1
-N_HISTORY_CYCLES = 20
-
-# tunable constants
-CHANNELS = 16
-HEAD_CHANNELS = 16
-VALUE_CHANNELS = 8
-LAYERS = [
-    "res",
-    "respool",
-    "res",
-    "convtime",
-    "res",
-    "respool",
-    "res"
-]
-
-the_model = ModelV1(
-    spatial_features = SPATIAL_FEATURES,
-    spatiotemporal_features = SPATIOTEMPORAL_FEATURES,
-    temporal_features = TEMPORAL_FEATURES,
-    time_size = N_HISTORY_CYCLES,
-    trunk_channels = CHANNELS,
-    pool_channels = CHANNELS // 2,
-    trunk_layers = LAYERS,
-    policy_head_channels = HEAD_CHANNELS,
-    value_head_channels = HEAD_CHANNELS,
-    value_channels = VALUE_CHANNELS)
-
-model_parameters = filter(lambda p: p.requires_grad, the_model.parameters())
-params = sum([np.prod(p.size()) for p in model_parameters])
-print("Model has {} trainable parameters".format(params))
-
-# construct a sample input, for tracing
-
-dtype = torch.float
-spatial = torch.rand((2, SPATIAL_FEATURES, 1, 1), dtype=dtype)
-spatiotemporal = torch.rand((2, SPATIOTEMPORAL_FEATURES, N_HISTORY_CYCLES, 1, 1), dtype=dtype)
-temporal = torch.rand((2, TEMPORAL_FEATURES, 1), dtype=dtype)
-
-the_model.eval()
-traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal))
-
-filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
-print("Saved model to {}".format(filename))
-#traced_model.save(filename)
+def run_tests():
+    for test in _TESTS:
+        test()
