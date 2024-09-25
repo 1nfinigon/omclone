@@ -30,7 +30,6 @@ pub mod constants {
 
     pub const N_BOND_TYPES: usize = 4;
     pub const N_ATOM_TYPES: usize = 17;
-    pub const N_INSTR_TYPES: usize = 11;
 }
 
 use constants::*;
@@ -38,6 +37,7 @@ use constants::*;
 pub mod feature_offsets {
     use super::constants::*;
     use crate::sim;
+    use crate::sim::BasicInstr;
     use num_traits::ToPrimitive;
 
     #[derive(Copy, Clone, Debug)]
@@ -226,7 +226,7 @@ pub mod feature_offsets {
         pub arm_in_orientation: [Binary; N_ORIENTATIONS],
         pub arm_in_orientation_and_holding_atom: [Binary; N_ORIENTATIONS],
         /// What instruction is this arm about to execute this timestep
-        pub arm_base_instr: OneHot<N_INSTR_TYPES>,
+        pub arm_base_instr: OneHot<{BasicInstr::N_TYPES}>,
 
         /// Information about the atom that is in this space
         pub atom_type: OneHot<N_ATOM_TYPES>,
@@ -620,6 +620,7 @@ pub use features::Features;
 
 pub mod model {
     use super::*;
+    use crate::sim::BasicInstr;
     use eyre;
     use tch;
 
@@ -632,7 +633,7 @@ pub mod model {
 
     pub struct Evaluation {
         /// Softmaxed from policy head
-        pub policy: [f32; N_INSTR_TYPES],
+        pub policy: [f32; BasicInstr::N_TYPES],
 
         /// Softmaxed outcome prediction from value head
         pub win: f32,
@@ -710,13 +711,13 @@ pub mod model {
             let output = self.module.forward_is(&input)?;
 
             let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
-            let mut policy = [0f32; N_INSTR_TYPES];
+            let mut policy = [0f32; BasicInstr::N_TYPES];
 
             assert_eq!(
                 policy_tensor.size4()?,
-                (1, N_INSTR_TYPES as i64, H as i64, W as i64)
+                (1, BasicInstr::N_TYPES as i64, H as i64, W as i64)
             );
-            for i_instr in 0..N_INSTR_TYPES {
+            for i_instr in 0..BasicInstr::N_TYPES {
                 policy[i_instr] =
                     policy_tensor.f_double_value(&[0, i_instr as i64, y as i64, x as i64])? as f32;
             }

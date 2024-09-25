@@ -50,9 +50,12 @@ fn main() -> Result<()> {
     let mut tree_search = search::TreeSearch::new(search_state, model);
     let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
 
-    for i in 0..10000 {
+    for i in 0..1000 {
         tree_search.search_once(&mut rng)?;
     }
+
+    let next_updates = tree_search.next_updates_with_stats();
+    println!("{:?}", next_updates);
 
     Ok(())
 }

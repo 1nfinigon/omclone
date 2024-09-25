@@ -68,7 +68,7 @@ pub enum BasicInstr {
 }
 
 impl BasicInstr {
-    pub const LEN_AS_U8: u8 = 11;
+    pub const N_TYPES: usize = 11;
     pub fn to_u8(&self) -> u8 {
         <Self as num_traits::ToPrimitive>::to_u8(self).unwrap()
     }
@@ -79,8 +79,8 @@ impl BasicInstr {
 
 #[test]
 fn basic_instr_len() {
-    assert!(BasicInstr::from_u8(BasicInstr::LEN_AS_U8).is_none());
-    assert!(BasicInstr::from_u8(BasicInstr::LEN_AS_U8 - 1).is_some());
+    assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_none());
+    assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_some());
 }
 
 impl BasicInstr {

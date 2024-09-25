@@ -1,5 +1,4 @@
 use crate::nn;
-use crate::nn::constants::N_INSTR_TYPES;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
@@ -21,7 +20,7 @@ struct RealNode {
     utility: f32,
 
     /// = P-values
-    policy: [f32; N_INSTR_TYPES],
+    policy: [f32; BasicInstr::N_TYPES],
 
     /// = N
     visits: u32,
@@ -35,7 +34,7 @@ impl RealNode {
         Self {
             children: BTreeMap::new(),
             utility: 0.,
-            policy: [0.; N_INSTR_TYPES],
+            policy: [0.; BasicInstr::N_TYPES],
             visits: 0,
             value_sum: 0.,
         }
@@ -129,7 +128,7 @@ impl TreeSearch {
             Node::Unexpanded => {
                 // TODO: current heuristic: assume same utility as parent. no
                 // idea if this heuristic is okay or not.
-                (parent.utility, 0.)
+                (1., 0.)
             }
         };
         let prior = policy * (parent.visits as f32).sqrt() / (1. + child_visits);
@@ -244,7 +243,9 @@ impl TreeSearch {
             _ => panic!("Need tree to be expanded at least once to get win rate"),
         }
     }
+}
 
+impl TreeSearch {
     pub fn next_updates_with_stats(&self) -> Vec<(BasicInstr, NonNan, u32)> {
         match self.node(NodeId(0)) {
             &Node::Real(real_node_idx) => self
