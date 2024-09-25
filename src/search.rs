@@ -8,7 +8,7 @@ use std::borrow::BorrowMut;
 use std::collections::{hash_map, HashMap};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ChildId(u32);
 
 struct RealNode {
@@ -49,10 +49,10 @@ impl RealNode {
     }
 }
 
-#[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct NodeId(u32);
 
-#[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct RealNodeId(u32);
 
 enum Node {
@@ -137,13 +137,13 @@ impl TreeSearch {
 
     /// Returns None if the child is unexpanded; in this case the heuristic for
     /// unexpanded nodes should be used.
-    fn puct(&self, parent_id: RealNodeId, child_id: ChildId) -> Option<NonNan> {
+    fn puct(&self, parent_id: RealNodeId, child_id: ChildId, default_value_for_unexpanded_child: f32) -> NonNan {
         let parent = self.real_node(parent_id);
         let child = self.get_child(parent, child_id);
         let policy = parent.policy[child_id.0 as usize];
-        let child_value = self.value(child)?;
+        let child_value = self.value(child).unwrap_or(default_value_for_unexpanded_child);
         let prior = policy * (parent.visits as f32).sqrt() / (1. + self.visits_f32(child));
-        Some(NonNan::new(child_value + 1.4 * prior).unwrap())
+        NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
     pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT) -> Result<()> {
@@ -175,7 +175,7 @@ impl TreeSearch {
                 &Node::Real(real_node_idx) => {
                     let next_updates = state.next_updates().ok().unwrap();
 
-                    let default_puct_for_unexpanded_child = {
+                    let default_value_for_unexpanded_child = {
                         let real_node = self.real_node(real_node_idx);
                         let first_play_urgency_reduction = if is_root {
                             assert!(path.len() == 1);
@@ -203,8 +203,7 @@ impl TreeSearch {
                     let child_id = (0..next_updates.len().try_into().unwrap())
                         .map(ChildId)
                         .max_by_key(|&child_id| {
-                            self.puct(real_node_idx, child_id)
-                                .unwrap_or(NonNan::new(default_puct_for_unexpanded_child).unwrap())
+                            self.puct(real_node_idx, child_id, default_value_for_unexpanded_child)
                         })
                         .unwrap();
 
