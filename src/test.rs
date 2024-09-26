@@ -1,11 +1,22 @@
 use crate::parser::*;
 use crate::sim::*;
 use crate::utils::*;
-use std::{collections::HashMap, fs, fs::File, io::BufReader, path::{Path, PathBuf}};
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 const CHECK_AREA: bool = false;
 
-fn check_solution(stats: &mut (usize, usize), fpath: &Path, sol: &FullSolution, puzzle_map: &PuzzleMap) {
-    let puzzle = puzzle_map.get(&sol.puzzle_name).expect("at this point solution should have been paired up with a puzzle in puzzle_map already");
+fn check_solution(
+    stats: &mut (usize, usize),
+    fpath: &Path,
+    sol: &FullSolution,
+    puzzle_map: &PuzzleMap,
+) {
+    let puzzle = puzzle_map.get(&sol.puzzle_name).expect(
+        "at this point solution should have been paired up with a puzzle in puzzle_map already",
+    );
     let init = match puzzle_prep(&puzzle, &sol) {
         Err(e) => {
             println!("Failed to prepare {:?}: {}", fpath, e);
@@ -62,22 +73,9 @@ fn check_all() {
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
     let mut cb = |fpath: PathBuf, solution| {
-        check_solution(
-            &mut stats,
-            &fpath,
-            &solution,
-            &puzzle_map,
-        );
+        check_solution(&mut stats, &fpath, &solution, &puzzle_map);
     };
-    read_solution_recurse(
-        &mut cb,
-        &puzzle_map,
-        "test/solution",
-    );
-    read_solution_recurse(
-        &mut cb,
-        &puzzle_map,
-        "test/om-leaderboard-master",
-    );
+    read_solution_recurse(&mut cb, &puzzle_map, "test/solution");
+    read_solution_recurse(&mut cb, &puzzle_map, "test/om-leaderboard-master");
     println!("final score = {}/{}", stats.0, stats.1);
 }

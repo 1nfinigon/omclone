@@ -1,6 +1,10 @@
 use crate::parser;
 use crate::sim::*;
-use std::{collections::HashMap, fs, fs::File, io::BufReader, path::{Path, PathBuf}};
+use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::Result;
@@ -75,7 +79,6 @@ pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
         }
     }
 }
-
 
 pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str) {
     const DEFAULT_PATHS: &str = include_str!("default_paths.txt");
