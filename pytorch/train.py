@@ -52,6 +52,8 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 print('Model has {} trainable parameters'.format(sum(p.numel() for p in model.parameters())))
 
+policy_softmax_temperature = torch.tensor([1.0], device=device)
+
 def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
@@ -69,7 +71,7 @@ def train_one_epoch(epoch_index, tb_writer):
         optimizer.zero_grad(set_to_none=True)
 
         # Make predictions for this batch
-        model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, torch.tensor([1.0]))
+        model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
 
         # Compute the loss and its gradients
         loss = loss_fn(model, pos, model_value_outputs, model_policy_outputs,
@@ -120,7 +122,7 @@ for epoch in range(EPOCHS):
             policy_outputs        = data['policy_output']
             pos                   = data['pos']
 
-            model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, torch.tensor([1.0]))
+            model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
             loss = loss_fn(model, pos, model_value_outputs, model_policy_outputs,
                         value_outputs, policy_outputs)
             running_vloss += loss
