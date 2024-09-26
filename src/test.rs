@@ -24,10 +24,12 @@ fn check_solution(
         }
         Ok(s) => s,
     };
+    /*
     if init.has_overlap() {
         //println!("skipping due to overlap");
         return;
     }
+    */
     let mut world = match WorldWithTapes::setup_sim(&init) {
         Err(e) => {
             println!("Failed to setup {:?}: {}", fpath, e);

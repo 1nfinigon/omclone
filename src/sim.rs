@@ -707,8 +707,10 @@ impl InitialWorld {
         }
         for arm in self.arms.iter() {
             for n in 0..=arm.len {
-                if !area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot)) && n == 0 {
-                    has_overlap = true;
+                for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
+                    if !area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot + r)) && n == 0 {
+                        has_overlap = true;
+                    }
                 }
             }
         }
@@ -1242,7 +1244,7 @@ impl World {
                 if !arm.grabbing && arm_type != VanBerlo {
                     arm.grabbing = true;
                     for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
-                        let grab_pos = arm.pos + (rot_to_pos(arm.rot + r) * arm.len);
+                        let grab_pos = arm.pos + (rot_dist_to_pos(arm.len, arm.rot + r));
                         let null_key = AtomKey::null();
                         let mut current = self.atoms.locs.get(&grab_pos).unwrap_or(&null_key);
                         if current != &null_key {
