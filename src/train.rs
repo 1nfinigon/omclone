@@ -80,7 +80,7 @@ fn process_one_solution(
 
     let mut tensors = Vec::new();
 
-    for history_item in history_file.history.0.iter() {
+    for (move_idx, history_item) in history_file.history.0.iter().enumerate() {
         let arm_index = search_state.next_arm_index();
         let instr =
             world.tapes[arm_index].get(search_state.world.timestep as usize, world.repeat_length);
@@ -119,6 +119,9 @@ fn process_one_solution(
             }
         }
 
+        if search_state.errored {
+            return Err(eyre!("at move {}, search state had errored", move_idx));
+        }
         search_state.update(instr);
     }
 
