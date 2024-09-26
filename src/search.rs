@@ -242,6 +242,7 @@ impl TreeSearch {
                             // add Dirichlet noise
                             // TODO: for this problem, we should stretch out the
                             // Dirichlet noise to more than just the root.
+                            // TODO: filter to only valid moves
                             let noise = self.dirichlet_distr.sample(rng);
                             for (policy, noise) in real_node.policy.iter_mut().zip(noise) {
                                 const EPS: f32 = 0.25;

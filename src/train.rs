@@ -91,31 +91,32 @@ fn process_one_solution(
         match history_item.kind {
             search_history::Kind::FromOptimalSolution => {
                 // include 10% of these
-                if rng.gen_bool(0.1) {
-                    // mock up a policy of solely picking the right answer, 90% of the time
+                if rng.gen_bool(if instr == BasicInstr::Empty { 0.01 } else { 0.1 }) {
+                    // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
                     // it certainly gets us more data quicker though.
-                    let mut visits = [1f32; sim::BasicInstr::N_TYPES];
-                    visits[instr.to_usize().unwrap()] = 9.;
+                    let mut visits = [1f32; BasicInstr::N_TYPES];
+                    visits[instr.to_usize().unwrap()] = 4.;
                     tensors.push((search_state.nn_features.clone(), visits, (x, y)));
                 }
             }
             search_history::Kind::MCTS => {
-                // include 100% of these < 200 playouts, and 100% of these
+                // include 90% of these < 200 playouts, and 100% of these
                 // >= 200 playouts
                 let n_playouts: u32 = history_item.playouts.iter().sum();
-                let _ = n_playouts;
-                let visits: Vec<_> = history_item
-                    .playouts
-                    .iter()
-                    .copied()
-                    .map(|p| p as f32)
-                    .collect();
-                tensors.push((
-                    search_state.nn_features.clone(),
-                    visits.try_into().unwrap(),
-                    (x, y),
-                ));
+                if rng.gen_bool(if n_playouts < 200 { 0.9 } else { 1.0 }) {
+                    let visits: Vec<_> = history_item
+                        .playouts
+                        .iter()
+                        .copied()
+                        .map(|p| p as f32)
+                        .collect();
+                    tensors.push((
+                        search_state.nn_features.clone(),
+                        visits.try_into().unwrap(),
+                        (x, y),
+                    ));
+                }
             }
         }
 
