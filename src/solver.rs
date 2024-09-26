@@ -215,8 +215,8 @@ fn main() -> Result<()> {
     let mut cb = |fpath: PathBuf| {
         seed_solution_paths.push(fpath);
     };
-    utils::read_unverified_solution_recurse(&mut cb, "test/solution");
-    utils::read_unverified_solution_recurse(&mut cb, "test/om-leaderboard-master");
+    utils::read_file_suffix_recurse(&mut cb, ".solution", "test/solution");
+    utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 

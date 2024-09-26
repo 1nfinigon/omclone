@@ -48,18 +48,19 @@ pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Pat
     }
 }
 
-pub fn read_unverified_solution_recurse<F: FnMut(PathBuf)>(
+pub fn read_file_suffix_recurse<F: FnMut(PathBuf)>(
     cb: &mut F,
+    suffix: &str,
     directory: impl AsRef<Path>,
 ) {
     for f in fs::read_dir(directory).unwrap() {
         if let Ok(f) = f {
             let ftype = f.file_type().unwrap();
             if ftype.is_dir() {
-                read_unverified_solution_recurse(cb, &f.path());
+                read_file_suffix_recurse(cb, suffix, &f.path());
             } else if ftype.is_file() {
                 let fname = f.file_name().into_string().unwrap();
-                if fname.ends_with(".solution") {
+                if fname.ends_with(suffix) {
                     cb(f.path());
                 }
             }
@@ -92,12 +93,13 @@ pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
     puzzle_map: &PuzzleMap,
     directory: impl AsRef<Path>,
 ) {
-    read_unverified_solution_recurse(
+    read_file_suffix_recurse(
         &mut |fpath: PathBuf| {
             if let Some(sol) = verify_solution(&fpath, puzzle_map) {
                 cb(fpath, sol)
             }
         },
+        ".solution",
         directory,
     )
 }
