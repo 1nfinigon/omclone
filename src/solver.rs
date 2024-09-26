@@ -9,8 +9,9 @@ mod test;
 mod utils;
 
 use rand::prelude::*;
-use std::path::PathBuf;
-use std::{fs::File, io::BufWriter};
+use std::fs::File;
+use std::io::BufWriter;
+use std::path::{Path, PathBuf};
 use uuid;
 
 #[cfg(feature = "color_eyre")]
@@ -19,13 +20,26 @@ use color_eyre::{eyre::Result, install};
 use simple_eyre::{eyre::Result, install};
 
 fn solve_one_puzzle_seeded(
+    puzzle_fpath: &Path,
     seed_puzzle: &parser::FullPuzzle,
+    solution_fpath: &Path,
     seed_solution: &parser::FullSolution,
     model: &nn::Model,
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
-    assert!(!seed_init.has_overlap());
+
+    match test::check_solution(&seed_solution, seed_puzzle, true) {
+        test::CheckResult::Ok => (),
+        _ => {
+            return Ok(());
+        }
+    }
+
+    println!(
+        "====== starting {:?}, seeding with {:?}",
+        puzzle_fpath, solution_fpath
+    );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
     if let Some((min, max)) = seed_init.bounding_box() {
@@ -210,18 +224,14 @@ fn main() -> Result<()> {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
 
-            match test::check_solution(&seed_solution, seed_puzzle, true) {
-                test::CheckResult::Ok => (),
-                _ => {
-                    continue;
-                }
-            }
-
-            println!(
-                "====== starting {:?}, seeding with {:?}",
-                puzzle_fpath, solution_fpath
-            );
-            solve_one_puzzle_seeded(seed_puzzle, &seed_solution, &model, rng)?;
+            solve_one_puzzle_seeded(
+                puzzle_fpath,
+                seed_puzzle,
+                solution_fpath,
+                &seed_solution,
+                &model,
+                rng,
+            )?;
         }
     }
 
