@@ -20,9 +20,9 @@ use color_eyre::{eyre::Result, install};
 use simple_eyre::{eyre::Result, install};
 
 fn solve_one_puzzle_seeded(
-    puzzle_fpath: &Path,
+    puzzle_fpath: impl AsRef<Path>,
     seed_puzzle: &parser::FullPuzzle,
-    solution_fpath: &Path,
+    solution_fpath: impl AsRef<Path>,
     seed_solution: &parser::FullSolution,
     model: &nn::Model,
     rng: &mut impl Rng,
@@ -38,7 +38,7 @@ fn solve_one_puzzle_seeded(
 
     println!(
         "====== starting {:?}, seeding with {:?}",
-        puzzle_fpath, solution_fpath
+        puzzle_fpath.as_ref(), solution_fpath.as_ref()
     );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
@@ -67,7 +67,7 @@ fn solve_one_puzzle_seeded(
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
+        seed_world.world.timestep + (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
@@ -205,7 +205,7 @@ fn main() -> Result<()> {
     let rng = &mut rng;
 
     //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
-    //solve_one_puzzle_seeded(&seed_puzzle, &seed_solution, &model, &mut rng)?;
+    //solve_one_puzzle_seeded(&"", &seed_puzzle, &"", &seed_solution, &model, rng)?;
 
     println!("loading seed puzzles");
     let mut puzzle_map = utils::PuzzleMap::new();
