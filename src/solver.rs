@@ -61,19 +61,20 @@ fn solve_one_puzzle_seeded(
 
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
+    let first_timestep = seed_world.world.timestep;
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
     let n_moves_to_search = rng.gen_range(1..=8); // how many moves to leave behind for MCTS to find
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        seed_world.world.timestep + (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
+        first_timestep + (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
     for _ in 0..seed_world.tapes.len() {
         tapes.push(sim::Tape {
-            first: search_state.world.timestep as usize,
+            first: first_timestep as usize,
             instructions: Vec::new(),
         });
     }
@@ -142,6 +143,20 @@ fn solve_one_puzzle_seeded(
             .into_uuid()
             .to_string()
     };
+    let solution_stats = if result_is_success {
+        Some(sim::SolutionStats {
+            cycles: (search_state.world.timestep - first_timestep)
+                .try_into()
+                .unwrap(),
+            cost: search_state.world.cost,
+            area: search_state.world.area_touched.len().try_into().unwrap(),
+            instructions: sim::compute_tape_instruction_count(&tapes)
+                .try_into()
+                .unwrap(),
+        })
+    } else {
+        None
+    };
     let out_world = {
         let repeat_length = sim::compute_tape_repeat_length(&tapes);
         sim::WorldWithTapes {
@@ -154,11 +169,7 @@ fn solve_one_puzzle_seeded(
         &out_world,
         seed_solution.puzzle_name.clone(),
         solution_name.clone(),
-        if result_is_success {
-            Some(out_world.get_stats())
-        } else {
-            None
-        },
+        solution_stats,
     );
     let out_history = search_history::HistoryFile {
         solution_name: solution_name.clone(),

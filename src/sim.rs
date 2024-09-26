@@ -258,6 +258,18 @@ pub fn compute_tape_repeat_length<T>(tapes: &Vec<Tape<T>>) -> usize {
         .unwrap_or(0)
 }
 
+pub fn compute_tape_instruction_count(tapes: &Vec<Tape<BasicInstr>>) -> usize {
+    tapes
+        .iter()
+        .map(|tape| {
+            tape.instructions
+                .iter()
+                .filter(|&&a| a != BasicInstr::Empty)
+                .count()
+        })
+        .sum()
+}
+
 impl<InstrT: Copy + From<BasicInstr>> Tape<InstrT> {
     pub fn get(&self, timestep: usize, loop_len: usize) -> InstrT {
         use BasicInstr::Empty;
@@ -2372,25 +2384,15 @@ impl WorldWithTapes {
             .fold(u64::MAX, std::cmp::min)
     }
 
-    fn instruction_count(&self) -> usize {
-        self.tapes
-            .iter()
-            .map(|tape| {
-                tape.instructions
-                    .iter()
-                    .filter(|&&a| a != BasicInstr::Empty)
-                    .count()
-            })
-            .sum()
-    }
-
     pub fn get_stats(&self) -> SolutionStats {
         let cycles = (self.world.timestep - self.get_first_timestep())
             .try_into()
             .unwrap();
         let cost = self.world.cost;
         let area = self.world.area_touched.len().try_into().unwrap();
-        let instructions = self.instruction_count().try_into().unwrap();
+        let instructions = compute_tape_instruction_count(&self.tapes)
+            .try_into()
+            .unwrap();
         SolutionStats {
             cycles,
             cost,
