@@ -2043,13 +2043,12 @@ pub struct WorldWithTapes {
 }
 
 impl WorldWithTapes {
-    /// Modifies `original_tape` in-place to resolve Repeat and Reset instructions.
-    /// Returns the length of the tape (repetition size)
+    /// Normalizes `original_tape` to resolve Repeat and Reset instructions.
     fn normalize_instructions(
         original_arm: &Arm,
         original_tape: &Tape<Instr>,
         track_maps: &TrackMaps,
-    ) -> Result<(usize, Tape<BasicInstr>)> {
+    ) -> Result<Tape<BasicInstr>> {
         use ArmType::*;
         use Instr::*;
         let arm_type = original_arm.arm_type;
@@ -2249,12 +2248,11 @@ impl WorldWithTapes {
             };
         }
         instructions.shrink_to_fit();
-        let len = instructions.len();
         let new_tape = Tape {
             first: original_tape.first,
             instructions,
         };
-        Ok((len, new_tape))
+        Ok(new_tape)
     }
 
     /// The main initialization function. Creates the initial state of the world
@@ -2267,12 +2265,11 @@ impl WorldWithTapes {
         };
         assert_eq!(self_.world.arms.len(), init.tapes.len());
         for (arm, init_tape) in self_.world.arms.iter().zip(init.tapes.iter()) {
-            let (instr_len, tape) =
+            let tape =
                 Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
+            let instr_len = tape.instructions.len();
             self_.tapes.push(tape);
-            if self_.repeat_length < instr_len {
-                self_.repeat_length = instr_len;
-            }
+            self_.repeat_length = self_.repeat_length.max(instr_len);
         }
         self_.world.timestep = self_.get_first_timestep();
         Ok(self_)
