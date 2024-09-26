@@ -52,7 +52,11 @@ impl State {
             match result {
                 Ok(()) => {
                     self.nn_features.shift_temporal();
-                    self.nn_features.set_temporal_except_instr(0, &new_world, self.timestep_limit.saturating_sub(self.world.timestep));
+                    self.nn_features.set_temporal_except_instr(
+                        0,
+                        &new_world,
+                        self.timestep_limit.saturating_sub(self.world.timestep),
+                    );
                     self.world = Box::new(new_world);
                 }
                 Err(_) => {
