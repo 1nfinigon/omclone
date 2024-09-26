@@ -650,7 +650,7 @@ pub mod model {
     impl Model {
         pub fn load() -> eyre::Result<Self> {
             let device = tch::Device::cuda_if_available();
-            let mut module = tch::CModule::load(MODEL_FILENAME)?;
+            let mut module = tch::CModule::load_on_device(MODEL_FILENAME, device)?;
             module.f_set_eval()?;
             Ok(Self { module, device })
         }
