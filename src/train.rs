@@ -112,45 +112,24 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("shuffling {} training data points", all_tensors.len());
-    all_tensors.shuffle(rng);
-
     println!("Writing out");
-    for (idx, chunk) in all_tensors.chunks(8).enumerate() {
-        let mut spatial_inputs = Vec::new();
-        let mut spatiotemporal_inputs = Vec::new();
-        let mut temporal_inputs = Vec::new();
-        let mut value_inputs = Vec::new();
-        let mut policy_inputs = Vec::new();
-        for (features, value, policy) in chunk {
-            let (spatial_input, spatiotemporal_input, temporal_input) =
-                features.to_tensor(tch::Device::Cpu)?;
-            spatial_inputs.push(spatial_input);
-            spatiotemporal_inputs.push(spatiotemporal_input);
-            temporal_inputs.push(temporal_input);
-            value_inputs.push(tch::Tensor::f_from_slice(&[*value])?);
-            policy_inputs.push(tch::Tensor::f_from_slice(&policy[..])?);
+    for (idx, (features, value, policy)) in all_tensors.iter().enumerate() {
+        if idx % 1000 == 0 {
+            println!("Writing out: {}/{}", idx, all_tensors.len());
         }
+
+        let (spatial_input, spatiotemporal_input, temporal_input) =
+            features.to_tensor(tch::Device::Cpu)?;
+        let value_output = tch::Tensor::f_from_slice(&[*value])?;
+        let policy_output = tch::Tensor::f_from_slice(&policy[..])?;
 
         tch::Tensor::write_npz(
             &[
-                (
-                    "spatial_inputs",
-                    &tch::Tensor::f_stack(&spatial_inputs[..], 0)?,
-                ),
-                (
-                    "spatiotemporal_inputs",
-                    &tch::Tensor::f_stack(&spatiotemporal_inputs[..], 0)?,
-                ),
-                (
-                    "temporal_inputs",
-                    &tch::Tensor::f_stack(&temporal_inputs[..], 0)?,
-                ),
-                ("value_inputs", &tch::Tensor::f_stack(&value_inputs[..], 0)?),
-                (
-                    "policy_inputs",
-                    &tch::Tensor::f_stack(&policy_inputs[..], 0)?,
-                ),
+                ("spatial_input", &spatial_input),
+                ("spatiotemporal_input", &spatiotemporal_input),
+                ("temporal_input", &temporal_input),
+                ("value_output", &value_output),
+                ("policy_output", &policy_output),
             ],
             format!("test/next-training/{}.npz", idx),
         )?;

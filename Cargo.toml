@@ -30,6 +30,11 @@ required-features = ["nn"]
 path = "src/solver.rs"
 
 [[bin]]
+name="train"
+required-features = ["nn"]
+path = "src/train.rs"
+
+[[bin]]
 name="synth"
 path = "src/synth.rs"
 
