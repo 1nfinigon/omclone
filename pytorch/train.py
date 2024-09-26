@@ -41,12 +41,12 @@ model = torch.jit.load(filename, map_location=device)
 model.to(device)
 
 def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs, policy_outputs):
-    value_error = torch.nn.functional.cross_entropy(model_value_outputs, value_outputs)
+    value_error = 1.5 * torch.nn.functional.cross_entropy(model_value_outputs, value_outputs)
     B = model_policy_outputs.size()[0]
     model_policy_outputs = torch.stack([model_policy_outputs[b, :, pos[b, 0], pos[b, 1]] for b in range(B)])
-    policy_error = torch.nn.functional.cross_entropy(model_policy_outputs, policy_outputs)
-    l2_penalty = sum([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad])
-    return 1.5 * value_error + policy_error + 3e-5 * l2_penalty
+    policy_error = 1.0 * torch.nn.functional.cross_entropy(model_policy_outputs, policy_outputs)
+    l2_penalty = 3e-5 * sum([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad])
+    return [value_error, policy_error, l2_penalty]
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
@@ -55,8 +55,8 @@ print('Model has {} trainable parameters'.format(sum(p.numel() for p in model.pa
 policy_softmax_temperature = torch.tensor([1.0], device=device)
 
 def train_one_epoch(epoch_index, tb_writer):
-    running_loss = 0.
-    last_loss = 0.
+    running_losses = torch.zeros([3])
+    last_losses = None
     n_iterations_since_stats_printed = 0
 
     for i, data in enumerate(training_loader):
@@ -74,25 +74,29 @@ def train_one_epoch(epoch_index, tb_writer):
         model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
 
         # Compute the loss and its gradients
-        loss = loss_fn(model, pos, model_value_outputs, model_policy_outputs,
+        losses = loss_fn(model, pos, model_value_outputs, model_policy_outputs,
                        value_outputs, policy_outputs)
+        loss = sum(losses)
         loss.backward()
 
         # Adjust learning weights
         optimizer.step()
 
         # Gather data and report
-        running_loss += loss.item()
+        running_losses += torch.tensor(losses)
         n_iterations_since_stats_printed += 1
         if i % 10 == 0:
-            last_loss = running_loss / n_iterations_since_stats_printed # loss per batch
-            print('  batch {}/{} loss: {}'.format(i + 1, len(training_loader), last_loss))
+            last_losses = running_losses / n_iterations_since_stats_printed # loss per batch
+            print('  batch {}/{}   loss: {} {}'.format(i + 1, len(training_loader), last_losses.sum().item(), last_losses))
             tb_x = epoch_index * len(training_loader) + i + 1
-            tb_writer.add_scalar('Loss/train', last_loss, tb_x)
-            running_loss = 0.
+            tb_writer.add_scalar('Value loss/train', last_losses[0].item(), tb_x)
+            tb_writer.add_scalar('Policy loss/train', last_losses[1].item(), tb_x)
+            tb_writer.add_scalar('L2 penalty/train', last_losses[2].item(), tb_x)
+            tb_writer.add_scalar('Total loss/train', last_losses.sum().item(), tb_x)
+            running_losses *= 0.
             n_iterations_since_stats_printed = 0
 
-    return last_loss
+    return last_losses.sum().item()
 
 timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 writer = tensorboard.SummaryWriter('runs/{}'.format(timestamp))
@@ -123,8 +127,8 @@ for epoch in range(EPOCHS):
             pos                   = data['pos']
 
             model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
-            loss = loss_fn(model, pos, model_value_outputs, model_policy_outputs,
-                        value_outputs, policy_outputs)
+            loss = sum(loss_fn(model, pos, model_value_outputs, model_policy_outputs,
+                        value_outputs, policy_outputs))
             running_vloss += loss
 
     avg_vloss = running_vloss / (i + 1)
