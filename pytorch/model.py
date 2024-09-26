@@ -113,6 +113,8 @@ class GlobalPool2d(torch.nn.Module):
         else:
             max = torch.max(input.flatten(start_dim=2), dim=-1).values.unsqueeze(-1).unsqueeze(-1)
         mean = torch.mean(input, dim=(-1, -2), keepdim=True)
+        # TODO: mean but only in area that has been used. (this above mean is not board-size-agnostic.)
+        # TODO: stdev
         return torch.cat((max, mean), dim=1)
 
 def _test():
