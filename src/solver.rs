@@ -73,7 +73,7 @@ fn solve_one_puzzle_seeded(
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
     for _ in 0..seed_world.tapes.len() {
         tapes.push(sim::Tape {
-            first: 0,
+            first: search_state.world.timestep as usize,
             instructions: Vec::new(),
         });
     }
