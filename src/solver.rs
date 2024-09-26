@@ -33,6 +33,7 @@ fn main() -> Result<()> {
     );
 
     let model = nn::Model::load()?;
+    let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
 
     let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
@@ -43,7 +44,11 @@ fn main() -> Result<()> {
     ));
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
-    let mut search_state = search_state::State::new(seed_world.world.clone());
+    let n_cycles = seed_solution.stats.unwrap().cycles as u64;
+    let n_cycles_to_search = rng.gen_range(1..=4); // how many moves to leave behind for MCTS to find
+
+    let mut search_state =
+        search_state::State::new(seed_world.world.clone(), n_cycles + n_cycles_to_search);
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
     for _ in 0..seed_world.tapes.len() {
@@ -55,7 +60,7 @@ fn main() -> Result<()> {
 
     // make some pre-moves from the seed solution
 
-    let n_premoves = seed_solution.stats.unwrap().cycles - 3;
+    let n_premoves = n_cycles.saturating_sub(n_cycles_to_search);
     println!("making {} premoves", n_premoves);
 
     for _ in 0..n_premoves {
@@ -71,8 +76,6 @@ fn main() -> Result<()> {
 
     // search for a solution
 
-    let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
-
     let result_is_success = loop {
         if let Some(result) = search_state.evaluate_final_state() {
             println!("done; result = {}", result);
@@ -81,15 +84,22 @@ fn main() -> Result<()> {
 
         let mut tree_search = search::TreeSearch::new(search_state.clone());
 
-        for _ in 0..100 {
+        let playouts = if rng.gen_bool(0.75) { 100 } else { 500 };
+
+        for _ in 0..playouts {
             tree_search.search_once(&mut rng, &model)?;
         }
 
         let stats = tree_search.next_updates_with_stats();
 
-        println!("{:?}", stats);
+        //println!("{:?}", stats);
 
         let instr = stats.best_update();
+        println!(
+            "after searching {} playouts (value = {:.6}, depth = {}/{:.1}): {:?}",
+            playouts, stats.root_value, stats.avg_depth, stats.max_depth, instr
+        );
+
         tapes[search_state.next_arm_index()]
             .instructions
             .push(instr);

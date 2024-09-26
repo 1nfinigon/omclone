@@ -4,20 +4,26 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct State {
+    /// `true` if a previous update caused a crash -- in this case none of the
+    /// other fields apart from this one will have been updated. Hence, always
+    /// check this field first!!
     pub errored: bool,
+
+    pub cycle_limit: u64,
     pub world: Box<World>,
     pub instr_buffer: Vec<BasicInstr>,
     pub nn_features: Box<nn::Features>,
 }
 
 impl State {
-    pub fn new(world: World) -> Self {
+    pub fn new(world: World, cycle_limit: u64) -> Self {
         let n_arms = world.arms.len();
         let mut nn_features = Box::new(nn::Features::new());
         nn_features.set_nontemporal(&world);
         nn_features.init_all_temporal(&world);
         Self {
             errored: false,
+            cycle_limit,
             world: Box::new(world),
             instr_buffer: Vec::with_capacity(n_arms),
             nn_features,
@@ -60,12 +66,11 @@ impl State {
         if self.errored {
             Some(0.)
         } else if self.instr_buffer.is_empty() {
-            if self.world.timestep > 1000 {
-                // TODO: don't hardcode this.
-                Some(0.)
-            } else if self.world.is_complete() {
+            if self.world.is_complete() {
                 // TODO: take into account score (cost, cycles, area).
                 Some(1.)
+            } else if self.world.timestep >= self.cycle_limit {
+                Some(0.)
             } else {
                 None
             }
