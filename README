@@ -13,6 +13,12 @@ $ cargo run --features color_eyre,nn --bin solver
 -   Actions for a single arm at a time (in order)
 -   Simple MCTS without graph search
 
+# Observations
+
+-   When training on samples derived from MCTS where we start the search from
+    a-few-moves-from-the-end, the network very quickly overspecializes to spam
+    "Drop"
+
 # Future work
 
 -   Train a timesteps-left head on existing solutions
