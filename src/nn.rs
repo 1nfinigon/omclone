@@ -133,9 +133,9 @@ pub mod feature_offsets {
         pub glyph_dispersion: OneHot<5>,
         pub glyph_bonding: OneHot<2>,
         pub glyph_unbonding: OneHot<2>,
-        pub glyph_triplex_bond: OneHot<2>,
+        pub glyph_triplex_bond: OneHot<3>,
         pub glyph_multi_bond: OneHot<4>,
-        pub glyph_disposal: OneHot<7>,
+        pub glyph_disposal: Binary,
 
         /// Information about the track that is in this space
         //track_id: OneHot<N_TRACKS>,
@@ -448,7 +448,9 @@ pub mod features {
                                 features[glyph_multi_bond.get_onehot_offset(i)] = 1.
                             }
                             GlyphType::Disposal => {
-                                features[glyph_disposal.get_onehot_offset(i)] = 1.
+                                if i == 0 {
+                                    features[glyph_disposal.get_offset()] = 1.
+                                }
                             }
                             GlyphType::Equilibrium => (),
                             GlyphType::Track(pos_list) => {
