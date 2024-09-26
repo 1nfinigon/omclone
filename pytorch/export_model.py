@@ -8,7 +8,7 @@ import os
 model.run_tests()
 
 # constants from nn.rs
-SPATIAL_FEATURES = 140
+SPATIAL_FEATURES = 141
 SPATIOTEMPORAL_FEATURES = 72
 TEMPORAL_FEATURES = 1
 N_HISTORY_CYCLES = 20

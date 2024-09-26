@@ -11,7 +11,7 @@ pub mod constants {
     pub const N_TRACKS: usize = 6;
     pub const N_HISTORY_CYCLES: usize = 20;
     pub const N_MAX_CYCLES: usize = 500;
-    pub const N_MAX_PRODUCTS: usize = 6;
+    pub const N_MAX_PRODUCTS: usize = 7;
 
     /*
     pub const N_WIDTH: usize = 32;
@@ -487,8 +487,9 @@ pub mod features {
                                     None,
                                 );
                                 if *count_left > 0 {
-                                    features[output_count_minus_one
-                                        .get_onehot_offset((*count_left as usize) - 1)] = 1.;
+                                    features[output_count_minus_one.get_onehot_offset(
+                                        (*count_left as usize).min(N_MAX_PRODUCTS) - 1,
+                                    )] = 1.;
                                 }
                             }
                             GlyphType::OutputRepeating(_, _, _) => unimplemented!(),
