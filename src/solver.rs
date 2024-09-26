@@ -26,18 +26,35 @@ fn solve_one_puzzle_seeded(
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
     assert!(!seed_init.has_overlap());
-    seed_init.centre();
-    seed_init.move_by(sim::Pos::new(
-        nn::constants::N_WIDTH as i32 / 2,
-        nn::constants::N_HEIGHT as i32 / 2,
-    ));
+
+    // Recentre the solution so that the bounding box is centred around (w/2, h/2)
+    if let Some((min, max)) = seed_init.bounding_box() {
+        let nn_wh = sim::Pos::new(
+            nn::constants::N_WIDTH as i32,
+            nn::constants::N_HEIGHT as i32,
+        );
+        let seed_wh = max - min;
+        if seed_wh.x >= nn_wh.x || seed_wh.y >= nn_wh.y {
+            println!(
+                "skipping because solution footprint is too big: {} vs max {}",
+                seed_wh, nn_wh
+            );
+            return Ok(());
+        }
+        let delta = (nn_wh - (max + min)) / 2;
+        seed_init.move_by(delta);
+    }
+
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
-    let n_cycles = seed_solution.stats.as_ref().unwrap().cycles as u64;
-    let n_cycles_to_search = rng.gen_range(1..=4); // how many moves to leave behind for MCTS to find
+    let n_arms = seed_world.world.arms.len() as u64;
+    let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
+    let n_moves_to_search = rng.gen_range(1..=4); // how many moves to leave behind for MCTS to find
 
-    let mut search_state =
-        search_state::State::new(seed_world.world.clone(), n_cycles + n_cycles_to_search);
+    let mut search_state = search_state::State::new(
+        seed_world.world.clone(),
+        (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
+    );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
     for _ in 0..seed_world.tapes.len() {
@@ -49,18 +66,24 @@ fn solve_one_puzzle_seeded(
 
     // make some pre-moves from the seed solution
 
-    let n_premoves = n_cycles.saturating_sub(n_cycles_to_search);
-    println!("making {} premoves", n_premoves);
+    let n_premoves = n_moves.saturating_sub(n_moves_to_search);
+    println!(
+        "making {} premoves ({} cycles + {}; {} short of seed solution)",
+        n_premoves,
+        n_premoves / n_arms,
+        n_premoves % n_arms,
+        n_moves_to_search
+    );
 
     for _ in 0..n_premoves {
-        assert!(search_state.instr_buffer.is_empty());
-        let instructions = seed_world.get_instructions_at(search_state.world.timestep);
-        for (i, &instr) in instructions.iter().enumerate() {
-            assert_eq!(search_state.next_arm_index(), i);
-            tapes[i].instructions.push(instr);
-            search_state.update(instr);
-            search_history.append_from_optimal_solution(instr);
-        }
+        let arm_index = search_state.next_arm_index();
+        let instr = seed_world.tapes[arm_index].get(
+            search_state.world.timestep as usize,
+            seed_world.repeat_length,
+        );
+        tapes[arm_index].instructions.push(instr);
+        search_state.update(instr);
+        search_history.append_from_optimal_solution(instr);
     }
 
     // search for a solution
