@@ -124,6 +124,10 @@ fn main() -> Result<()> {
             None
         },
     );
+    let out_history = search_history::HistoryFile {
+        solution_name: solution_name.clone(),
+        history: search_history,
+    };
 
     // save solution and search history
 
@@ -138,7 +142,7 @@ fn main() -> Result<()> {
         PathBuf::from(format!("test/current-epoch/{}.history", solution_name));
     println!("saving history to {}", out_history_filename.display());
     let mut f_out_history = BufWriter::new(File::create_new(&out_history_filename)?);
-    search_history.write(&mut f_out_history)?;
+    out_history.write(&mut f_out_history)?;
     std::mem::drop(f_out_history);
 
     Ok(())

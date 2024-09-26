@@ -34,39 +34,6 @@ impl History {
         Self(Vec::new())
     }
 
-    pub fn read<R: Read>(r: &mut R) -> Result<Self> {
-        let version = read_u32_le(r)?;
-        match version {
-            0 => {
-                let len = read_u32_le(r)? as usize;
-                assert!(len < 100000, "unreasonable len");
-                let mut history = Vec::with_capacity(len);
-                for i in 0..len {
-                    let mut playouts = [0u32; BasicInstr::N_TYPES];
-                    let kind = Kind::from_u32(read_u32_le(r)?).unwrap();
-                    for instr in 0..BasicInstr::N_TYPES {
-                        playouts[instr] = read_u32_le(r)?;
-                    }
-                    history.push(Item { kind, playouts });
-                }
-                Ok(History(history))
-            }
-            _ => panic!("version number {} unsupported", version),
-        }
-    }
-
-    pub fn write<W: Write>(&self, w: &mut W) -> Result<()> {
-        write_u32_le(w, 0)?;
-        write_u32_le(w, self.0.len().try_into().unwrap())?;
-        for item in self.0.iter() {
-            write_u32_le(w, item.kind.to_u32().unwrap())?;
-            for &playout in item.playouts.iter() {
-                write_u32_le(w, playout)?;
-            }
-        }
-        Ok(())
-    }
-
     pub fn append_mcts(&mut self, stats: &search::NextUpdatesWithStats) {
         let playouts: Vec<u32> = stats.updates_with_stats.iter().map(|s| s.visits).collect();
         let item = Item {
@@ -84,5 +51,63 @@ impl History {
             playouts,
         };
         self.0.push(item);
+    }
+}
+
+pub struct HistoryFile {
+    pub solution_name: String,
+    pub history: History,
+}
+
+impl HistoryFile {
+    pub fn read<R: Read>(r: &mut R) -> Result<Self> {
+        let version = read_u32_le(r)?;
+        match version {
+            0 => {
+                let solution_name = {
+                    let length = read_u32_le(r)?;
+                    let mut dat = vec![0u8; length as usize];
+                    r.read_exact(&mut dat)?;
+                    String::from_utf8(dat)?
+                };
+                let len = read_u32_le(r)? as usize;
+                assert!(len < 100000, "unreasonable len");
+                let mut history = Vec::with_capacity(len);
+                for i in 0..len {
+                    let mut playouts = [0u32; BasicInstr::N_TYPES];
+                    let kind = Kind::from_u32(read_u32_le(r)?).unwrap();
+                    for instr in 0..BasicInstr::N_TYPES {
+                        playouts[instr] = read_u32_le(r)?;
+                    }
+                    history.push(Item { kind, playouts });
+                }
+                Ok(Self {
+                    solution_name,
+                    history: History(history),
+                })
+            }
+            _ => panic!("version number {} unsupported", version),
+        }
+    }
+
+    pub fn write<W: Write>(&self, w: &mut W) -> Result<()> {
+        let HistoryFile {
+            solution_name,
+            history: History(history),
+        } = self;
+        write_u32_le(w, 0)?;
+        {
+            let dat = solution_name.as_bytes();
+            write_u32_le(w, dat.len().try_into()?)?;
+            w.write_all(dat)?;
+        }
+        write_u32_le(w, history.len().try_into().unwrap())?;
+        for item in history.iter() {
+            write_u32_le(w, item.kind.to_u32().unwrap())?;
+            for &playout in item.playouts.iter() {
+                write_u32_le(w, playout)?;
+            }
+        }
+        Ok(())
     }
 }

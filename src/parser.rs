@@ -150,8 +150,9 @@ fn write_leb128(f: &mut impl Write, mut n: usize) -> Result<()> {
     }
 }
 fn write_str(f: &mut impl Write, s: &str) -> Result<()> {
-    write_leb128(f, s.len())?;
-    f.write_all(s.as_bytes())?;
+    let dat = s.as_bytes();
+    write_leb128(f, dat.len())?;
+    f.write_all(dat)?;
     Ok(())
 }
 

@@ -567,9 +567,11 @@ impl EventHandler for MyMiniquadApp {
                                         }
                                         let mut writer = BufWriter::new(&mut f);
                                         let base = &loaded.base_world;
-                                        let new_solution = parser::create_solution(base,
+                                        let new_solution = parser::create_solution(
+                                            base,
                                             loaded.solution.puzzle_name.clone(),
-                                            loaded.solution.solution_name.clone());
+                                            loaded.solution.solution_name.clone(),
+                                            None);
                                         parser::write_solution(&mut writer, &new_solution).unwrap();
                                         writer.flush().unwrap();
                                     }
