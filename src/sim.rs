@@ -294,11 +294,15 @@ impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
         output
     }
 
-    pub fn noop_clear_and_string(&mut self) -> String {
+    pub fn clear_leading_emptys(&mut self) {
         while self.instructions.get(0) == Some(&BasicInstr::Empty.into()) {
             self.first += 1;
             self.instructions.remove(0);
         }
+    }
+
+    pub fn noop_clear_and_string(&mut self) -> String {
+        self.clear_leading_emptys();
         self.to_string()
     }
 }

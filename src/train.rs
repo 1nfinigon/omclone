@@ -91,7 +91,11 @@ fn process_one_solution(
         match history_item.kind {
             search_history::Kind::FromOptimalSolution => {
                 // include 10% of these
-                if rng.gen_bool(if instr == BasicInstr::Empty { 0.01 } else { 0.1 }) {
+                if rng.gen_bool(if instr == BasicInstr::Empty {
+                    0.01
+                } else {
+                    0.1
+                }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
                     // it certainly gets us more data quicker though.

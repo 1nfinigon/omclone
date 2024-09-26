@@ -403,6 +403,9 @@ pub fn create_solution(
     let mut found_first = false;
     let loop_len = world.repeat_length;
     for (id, (arm, tape)) in world.world.arms.iter().zip(world.tapes.iter()).enumerate() {
+        let mut tape = tape.clone();
+        tape.clear_leading_emptys();
+
         let part_type = TArm(arm.arm_type);
         let pos = arm.pos;
         let arm_size = arm.len;
