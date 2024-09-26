@@ -17,25 +17,12 @@ use color_eyre::{eyre::Result, install};
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::{eyre::Result, install};
 
-fn main() -> Result<()> {
-    std::env::set_var("RUST_BACKTRACE", "full");
-    install()?;
-
-    println!(
-        "{} spatial features\n{} spatiotemporal features\n{} temporal features",
-        nn::feature_offsets::Spatial::SIZE,
-        nn::feature_offsets::Spatiotemporal::SIZE,
-        nn::feature_offsets::Temporal::SIZE,
-    );
-    println!(
-        "{:?} input tensor size",
-        std::mem::size_of::<nn::Features>()
-    );
-
-    let model = nn::Model::load()?;
-    let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
-
-    let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
+fn solve_one_puzzle_seeded(
+    seed_puzzle: &parser::FullPuzzle,
+    seed_solution: &parser::FullSolution,
+    model: &nn::Model,
+    rng: &mut impl Rng,
+) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
     seed_init.centre();
     seed_init.move_by(sim::Pos::new(
@@ -44,7 +31,7 @@ fn main() -> Result<()> {
     ));
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
-    let n_cycles = seed_solution.stats.unwrap().cycles as u64;
+    let n_cycles = seed_solution.stats.as_ref().unwrap().cycles as u64;
     let n_cycles_to_search = rng.gen_range(1..=4); // how many moves to leave behind for MCTS to find
 
     let mut search_state =
@@ -87,7 +74,7 @@ fn main() -> Result<()> {
         let playouts = if rng.gen_bool(0.75) { 100 } else { 500 };
 
         for _ in 0..playouts {
-            tree_search.search_once(&mut rng, &model)?;
+            tree_search.search_once(rng, &model)?;
         }
 
         let stats = tree_search.next_updates_with_stats();
@@ -154,6 +141,30 @@ fn main() -> Result<()> {
     let mut f_out_history = BufWriter::new(File::create_new(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
     std::mem::drop(f_out_history);
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    std::env::set_var("RUST_BACKTRACE", "full");
+    install()?;
+
+    println!(
+        "{} spatial features\n{} spatiotemporal features\n{} temporal features",
+        nn::feature_offsets::Spatial::SIZE,
+        nn::feature_offsets::Spatiotemporal::SIZE,
+        nn::feature_offsets::Temporal::SIZE,
+    );
+    println!(
+        "{:?} input tensor size",
+        std::mem::size_of::<nn::Features>()
+    );
+
+    let model = nn::Model::load()?;
+    let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+
+    let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
+    solve_one_puzzle_seeded(&seed_puzzle, &seed_solution, &model, &mut rng)?;
 
     Ok(())
 }
