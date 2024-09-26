@@ -10,7 +10,7 @@ import datetime
 import model
 from common import *
 
-BATCH_SIZE = 8
+BATCH_SIZE = 2048
 EPOCHS = 5
 
 class NPZDataset(torch.utils.data.Dataset):
