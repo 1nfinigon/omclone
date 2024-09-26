@@ -10,7 +10,7 @@ import datetime
 import model
 from common import *
 
-BATCH_SIZE = 512
+BATCH_SIZE = 128
 EPOCHS = 5
 
 class NPZDataset(torch.utils.data.Dataset):
@@ -56,12 +56,12 @@ def train_one_epoch(epoch_index, tb_writer):
     n_iterations_since_stats_printed = 0
 
     for i, data in enumerate(training_loader):
-        spatial_inputs        = data['spatial_input'].to(device)
-        spatiotemporal_inputs = data['spatiotemporal_input'].to(device)
-        temporal_inputs       = data['temporal_input'].to(device)
-        value_outputs         = data['value_output'].to(device)
-        policy_outputs        = data['policy_output'].to(device)
-        pos                   = data['pos'].to(device)
+        spatial_inputs        = data['spatial_input'].to(device, non_blocking=True)
+        spatiotemporal_inputs = data['spatiotemporal_input'].to(device, non_blocking=True)
+        temporal_inputs       = data['temporal_input'].to(device, non_blocking=True)
+        value_outputs         = data['value_output'].to(device, non_blocking=True)
+        policy_outputs        = data['policy_output'].to(device, non_blocking=True)
+        pos                   = data['pos'].to(device, non_blocking=True)
 
         # Zero your gradients for every batch!
         optimizer.zero_grad(set_to_none=True)
@@ -115,12 +115,12 @@ for epoch in range(EPOCHS):
     # Disable gradient computation and reduce memory consumption.
     with torch.no_grad():
         for i, data in enumerate(validation_loader):
-            spatial_inputs        = data['spatial_input'].to(device)
-            spatiotemporal_inputs = data['spatiotemporal_input'].to(device)
-            temporal_inputs       = data['temporal_input'].to(device)
-            value_outputs         = data['value_output'].to(device)
-            policy_outputs        = data['policy_output'].to(device)
-            pos                   = data['pos'].to(device)
+            spatial_inputs        = data['spatial_input'].to(device, non_blocking=True)
+            spatiotemporal_inputs = data['spatiotemporal_input'].to(device, non_blocking=True)
+            temporal_inputs       = data['temporal_input'].to(device, non_blocking=True)
+            value_outputs         = data['value_output'].to(device, non_blocking=True)
+            policy_outputs        = data['policy_output'].to(device, non_blocking=True)
+            pos                   = data['pos'].to(device, non_blocking=True)
 
             model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
             loss = sum(loss_fn(model, pos, model_value_outputs, model_policy_outputs,
