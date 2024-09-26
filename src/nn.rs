@@ -9,7 +9,7 @@ pub mod constants {
     pub const N_OUTPUTS: usize = 4;
     pub const N_ARMS: usize = 12;
     pub const N_TRACKS: usize = 6;
-    pub const N_HISTORY_CYCLES: usize = 20;
+    pub const N_HISTORY_CYCLES: usize = 4;
     pub const N_MAX_CYCLES: usize = 500;
     pub const N_MAX_PRODUCTS: usize = 7;
 

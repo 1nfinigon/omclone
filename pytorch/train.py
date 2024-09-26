@@ -44,7 +44,7 @@ def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs
     l2_penalty = 3e-5 * sum([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad])
     return [value_error, policy_error, l2_penalty]
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
 print('Model has {} trainable parameters'.format(sum(p.numel() for p in model.parameters())))
 

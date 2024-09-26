@@ -11,12 +11,13 @@ model.run_tests()
 SPATIAL_FEATURES = 141
 SPATIOTEMPORAL_FEATURES = 72
 TEMPORAL_FEATURES = 2
-N_HISTORY_CYCLES = 20
+N_HISTORY_CYCLES = 4
 
 # tunable constants
-CHANNELS = 16
-HEAD_CHANNELS = 16
-VALUE_CHANNELS = 8
+CHANNELS = 96
+POOL_CHANNELS = 32
+HEAD_CHANNELS = 96
+VALUE_CHANNELS = 48
 LAYERS = [
     "res",
     "respool",
@@ -35,7 +36,7 @@ the_model = model.ModelV1(
     temporal_features = TEMPORAL_FEATURES,
     time_size = N_HISTORY_CYCLES,
     trunk_channels = CHANNELS,
-    pool_channels = CHANNELS // 2,
+    pool_channels = POOL_CHANNELS,
     trunk_layers = LAYERS,
     policy_head_channels = HEAD_CHANNELS,
     value_head_channels = HEAD_CHANNELS,
