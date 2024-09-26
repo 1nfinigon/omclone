@@ -22,16 +22,40 @@ use color_eyre::install;
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::install;
 
+fn write_npz_files(
+    index: &mut usize,
+    features: Box<nn::Features>,
+    value: f32,
+    visits: [f32; BasicInstr::N_TYPES],
+    (x, y): (usize, usize),
+) -> Result<()> {
+    let (spatial_input, spatiotemporal_input, temporal_input) =
+        features.to_tensor(tch::Device::Cpu)?;
+    let value_output = tch::Tensor::f_from_slice(&[value, 1. - value])?;
+    let policy_output = tch::Tensor::f_from_slice(&visits[..])?.f_softmax(0, None)?;
+    let pos = tch::Tensor::f_from_slice(&[x as i64, y as i64])?;
+
+    tch::Tensor::write_npz(
+        &[
+            ("spatial_input", &spatial_input),
+            ("spatiotemporal_input", &spatiotemporal_input),
+            ("temporal_input", &temporal_input),
+            ("value_output", &value_output),
+            ("policy_output", &policy_output),
+            ("pos", &pos),
+        ],
+        format!("test/next-training/{}.npz", *index),
+    )?;
+
+    *index += 1;
+    Ok(())
+}
+
 fn process_one_solution(
     fpath: impl AsRef<Path>,
     rng: &mut impl Rng,
     puzzle_map: &utils::PuzzleMap,
-    all_tensors: &mut Vec<(
-        Box<nn::Features>,
-        f32,
-        [f32; BasicInstr::N_TYPES],
-        (usize, usize),
-    )>,
+    file_index: &mut usize,
 ) -> Result<()> {
     let solution = parser::parse_solution(&mut BufReader::new(File::open(fpath.as_ref())?))?;
 
@@ -106,9 +130,10 @@ fn process_one_solution(
         ));
     };
 
-    for (input, visits, pos) in tensors {
-        all_tensors.push((input, final_result, visits, pos));
+    for (features, visits, pos) in tensors {
+        write_npz_files(file_index, features, final_result, visits, pos)?;
     }
+
     Ok(())
 }
 
@@ -126,16 +151,21 @@ fn main() -> Result<()> {
     utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
 
     println!("loading current-epoch solutions");
-    let mut all_tensors = Vec::new();
     let mut solution_paths = Vec::new();
     let mut cb = |fpath: PathBuf| {
         solution_paths.push(fpath);
     };
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/current-epoch");
 
+    let mut file_index = 0;
     for (i, fpath) in solution_paths.iter().enumerate() {
-        println!("{}/{}", i, solution_paths.len());
-        let result = process_one_solution(fpath, rng, &puzzle_map, &mut all_tensors);
+        println!(
+            "{}/{} ({} files written)",
+            i,
+            solution_paths.len(),
+            file_index
+        );
+        let result = process_one_solution(fpath, rng, &puzzle_map, &mut file_index);
         match result {
             Ok(()) => (),
             Err(e) => {
@@ -143,31 +173,6 @@ fn main() -> Result<()> {
                 println!("ignoring error for {:?}: {}", fpath, e)
             }
         }
-    }
-
-    println!("Writing out");
-    for (idx, (features, value, visits, (x, y))) in all_tensors.iter().enumerate() {
-        if idx % 1000 == 0 {
-            println!("Writing out: {}/{}", idx, all_tensors.len());
-        }
-
-        let (spatial_input, spatiotemporal_input, temporal_input) =
-            features.to_tensor(tch::Device::Cpu)?;
-        let value_output = tch::Tensor::f_from_slice(&[*value, 1. - *value])?;
-        let policy_output = tch::Tensor::f_from_slice(&visits[..])?.f_softmax(0, None)?;
-        let pos = tch::Tensor::f_from_slice(&[*x as i64, *y as i64])?;
-
-        tch::Tensor::write_npz(
-            &[
-                ("spatial_input", &spatial_input),
-                ("spatiotemporal_input", &spatiotemporal_input),
-                ("temporal_input", &temporal_input),
-                ("value_output", &value_output),
-                ("policy_output", &policy_output),
-                ("pos", &pos),
-            ],
-            format!("test/next-training/{}.npz", idx),
-        )?;
     }
 
     Ok(())
