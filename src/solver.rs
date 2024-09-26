@@ -7,7 +7,7 @@ mod search_state;
 mod sim;
 mod utils;
 
-use rand::{Rng, SeedableRng};
+use rand::prelude::*;
 use std::path::PathBuf;
 use std::{fs::File, io::BufWriter};
 use uuid;
@@ -24,6 +24,10 @@ fn solve_one_puzzle_seeded(
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
+    if seed_init.has_overlap() {
+        println!("(skipping due to overlap)");
+        return Ok(());
+    }
     seed_init.centre();
     seed_init.move_by(sim::Pos::new(
         nn::constants::N_WIDTH as i32 / 2,
@@ -162,9 +166,29 @@ fn main() -> Result<()> {
 
     let model = nn::Model::load()?;
     let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+    let rng = &mut rng;
 
-    let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
-    solve_one_puzzle_seeded(&seed_puzzle, &seed_solution, &model, &mut rng)?;
+    //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
+    //solve_one_puzzle_seeded(&seed_puzzle, &seed_solution, &model, &mut rng)?;
+
+    println!("loading seed puzzles");
+    let mut puzzle_map = utils::PuzzleMap::new();
+    utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
+    println!("loading seed solutions");
+    let mut seed_solutions = Vec::new();
+    let mut cb = |fpath: PathBuf, solution| {
+        seed_solutions.push((fpath, solution));
+    };
+    utils::read_solution_recurse(&mut cb, &puzzle_map, "test/solution");
+    utils::read_solution_recurse(&mut cb, &puzzle_map, "test/om-leaderboard-master");
+    println!("shuffling seed solutions");
+    seed_solutions.shuffle(rng);
+
+    for (fpath, seed_solution) in seed_solutions.iter() {
+        println!("====== starting {:?}", fpath);
+        let seed_puzzle = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
+        solve_one_puzzle_seeded(seed_puzzle, seed_solution, &model, rng)?;
+    }
 
     Ok(())
 }
