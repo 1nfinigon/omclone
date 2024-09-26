@@ -1291,11 +1291,14 @@ impl World {
                     }
                 } else {
                     if !self.track_maps.minus.contains_key(&arm.pos) {
-                        return Err(sim_error_pos(&"Forward on arm that's not on a track", arm.pos));
+                        return Err(sim_error_pos(
+                            &"Forward on arm that's not on a track",
+                            arm.pos,
+                        ));
                     }
                     STILL
                 }
-            },
+            }
             Back => {
                 if let Some(&x) = self.track_maps.minus.get(&arm.pos) {
                     if x == Pos::zeros() {
@@ -1309,7 +1312,7 @@ impl World {
                     }
                     STILL
                 }
-            },
+            }
             Empty => STILL,
         };
         let rotation_store = arm.rot;

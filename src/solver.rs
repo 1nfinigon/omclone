@@ -49,7 +49,7 @@ fn solve_one_puzzle_seeded(
 
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
-    let n_moves_to_search = rng.gen_range(1..=4); // how many moves to leave behind for MCTS to find
+    let n_moves_to_search = rng.gen_range(1..=8); // how many moves to leave behind for MCTS to find
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
@@ -156,14 +156,14 @@ fn solve_one_puzzle_seeded(
     let out_solution_filename =
         PathBuf::from(format!("test/current-epoch/{}.solution", solution_name));
     println!("saving solution to {:?}", out_solution_filename);
-    let mut f_out_solution = BufWriter::new(File::create_new(&out_solution_filename)?);
+    let mut f_out_solution = BufWriter::new(File::create(&out_solution_filename)?);
     parser::write_solution(&mut f_out_solution, &out_solution)?;
     std::mem::drop(f_out_solution);
 
     let out_history_filename =
         PathBuf::from(format!("test/current-epoch/{}.history", solution_name));
     println!("saving history to {:?}", out_history_filename);
-    let mut f_out_history = BufWriter::new(File::create_new(&out_history_filename)?);
+    let mut f_out_history = BufWriter::new(File::create(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
     std::mem::drop(f_out_history);
 
@@ -186,7 +186,8 @@ fn main() -> Result<()> {
     );
 
     let model = nn::Model::load()?;
-    let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+    //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+    let mut rng = rand::thread_rng();
     let rng = &mut rng;
 
     //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;

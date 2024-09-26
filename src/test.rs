@@ -74,7 +74,9 @@ fn check_all() {
             println!("{}: {:?} / {:?}: {}", kind, puzzle_fpath, fpath, details);
         };
         match check_solution(&solution, &puzzle, false) {
-            CheckResult::Skipped(s) => { return; },
+            CheckResult::Skipped(s) => {
+                return;
+            }
             CheckResult::FailedPrep(e) => {
                 print_err("Failed during prep", &e);
                 return;
