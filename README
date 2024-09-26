@@ -31,7 +31,8 @@ $ cargo run --features color_eyre,nn --bin solver
 -   use symmetries to generate more data
 -   network/code for generating layouts
 -   weight and neuron activation visualization
--   mean/stdev/activation-proportion per layer / per history
+    -   mean/stdev/activation-proportion per layer / per history
+    -   max abs gradient
 -   find/monitor dead neurons
 -   better logging, saving intermediate layer outputs / residuals
 -   keep more notes/observations for experiments, be more scientific about this
