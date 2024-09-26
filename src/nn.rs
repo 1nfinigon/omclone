@@ -134,7 +134,7 @@ pub mod feature_offsets {
         pub glyph_bonding: OneHot<2>,
         pub glyph_unbonding: OneHot<2>,
         pub glyph_triplex_bond: OneHot<2>,
-        pub glyph_multi_bond: OneHot<2>,
+        pub glyph_multi_bond: OneHot<4>,
         pub glyph_disposal: OneHot<7>,
 
         /// Information about the track that is in this space
