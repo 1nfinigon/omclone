@@ -8,36 +8,39 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 const CHECK_AREA: bool = false;
 
-fn check_solution(
-    stats: &mut (usize, usize),
-    fpath: &Path,
-    sol: &FullSolution,
-    puzzle_map: &PuzzleMap,
-) {
+#[derive(Debug)]
+pub enum CheckResult {
+    Skipped,
+    Ok,
+    FailedSetup,
+    FailedSim,
+    FailedStatMismatch,
+}
+
+pub fn check_solution(fpath: &Path, sol: &FullSolution, puzzle_map: &PuzzleMap) -> CheckResult {
     let (_puzzle_fpath, puzzle) = puzzle_map.get(&sol.puzzle_name).expect(
         "at this point solution should have been paired up with a puzzle in puzzle_map already",
     );
     let init = match puzzle_prep(&puzzle, &sol) {
         Err(e) => {
             println!("Failed to prepare {:?}: {}", fpath, e);
-            return;
+            return CheckResult::FailedSetup;
         }
         Ok(s) => s,
     };
     /*
     if init.has_overlap() {
         //println!("skipping due to overlap");
-        return;
+        return CheckResult::Skipped;
     }
     */
     let mut world = match WorldWithTapes::setup_sim(&init) {
         Err(e) => {
             println!("Failed to setup {:?}: {}", fpath, e);
-            return;
+            return CheckResult::FailedSetup;
         }
         Ok(s) => s,
     };
-    stats.1 += 1;
     let mut float_world = FloatWorld::new();
     let mut motions = WorldStepInfo::new();
     while !world.world.is_complete() && world.world.timestep < 500_000 {
@@ -47,7 +50,7 @@ fn check_solution(
                 "Simulation error on step {} puzzle {}: {:?}: {}",
                 world.world.timestep, sol.puzzle_name, fpath, e
             );
-            return;
+            return CheckResult::FailedSim;
         }
     }
     let mut newstats = world.get_stats();
@@ -56,15 +59,13 @@ fn check_solution(
         newstats.area = oldstats.area
     };
     if &newstats == oldstats {
-        stats.0 += 1;
+        return CheckResult::Ok;
     } else {
         println!(
             "Stats don't match! {:?} and puzzle {}\n{:?} vs true {:?}",
             fpath, sol.puzzle_name, newstats, oldstats
         );
-    }
-    if stats.1 % 100 == 0 {
-        println!("Current progress: {}/{}", stats.0, stats.1);
+        return CheckResult::FailedStatMismatch;
     }
 }
 
@@ -75,7 +76,23 @@ fn check_all() {
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
     let mut cb = |fpath: PathBuf, solution| {
-        check_solution(&mut stats, &fpath, &solution, &puzzle_map);
+        match check_solution(&fpath, &solution, &puzzle_map) {
+            CheckResult::Skipped => (),
+            CheckResult::FailedSetup => (),
+            CheckResult::FailedSim => {
+                stats.1 += 1;
+            }
+            CheckResult::FailedStatMismatch => {
+                stats.1 += 1;
+            }
+            CheckResult::Ok => {
+                stats.0 += 1;
+                stats.1 += 1;
+            }
+        }
+        if stats.1 % 100 == 0 {
+            println!("Current progress: {}/{}", stats.0, stats.1);
+        }
     };
     read_solution_recurse(&mut cb, &puzzle_map, "test/solution");
     read_solution_recurse(&mut cb, &puzzle_map, "test/om-leaderboard-master");
