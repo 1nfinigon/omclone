@@ -2039,7 +2039,6 @@ impl World {
 pub struct WorldWithTapes {
     pub world: World,
     pub tapes: Vec<Tape<BasicInstr>>,
-    pub instruction_count: i32,
     pub repeat_length: usize,
 }
 
@@ -2264,18 +2263,12 @@ impl WorldWithTapes {
         let mut self_ = Self {
             world: World::setup_sim(init)?,
             tapes: Vec::new(),
-            instruction_count: 0,
             repeat_length: 0,
         };
         assert_eq!(self_.world.arms.len(), init.tapes.len());
         for (arm, init_tape) in self_.world.arms.iter().zip(init.tapes.iter()) {
             let (instr_len, tape) =
                 Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
-            self_.instruction_count += tape
-                .instructions
-                .iter()
-                .filter(|&&a| a != BasicInstr::Empty)
-                .count() as i32;
             self_.tapes.push(tape);
             if self_.repeat_length < instr_len {
                 self_.repeat_length = instr_len;
@@ -2322,11 +2315,25 @@ impl WorldWithTapes {
             .fold(u64::MAX, std::cmp::min)
     }
 
+    fn instruction_count(&self) -> usize {
+        self.tapes
+            .iter()
+            .map(|tape| {
+                tape.instructions
+                    .iter()
+                    .filter(|&&a| a != BasicInstr::Empty)
+                    .count()
+            })
+            .sum()
+    }
+
     pub fn get_stats(&self) -> SolutionStats {
-        let cycles = (self.world.timestep - self.get_first_timestep()) as i32;
+        let cycles = (self.world.timestep - self.get_first_timestep())
+            .try_into()
+            .unwrap();
         let cost = self.world.cost;
-        let area = self.world.area_touched.len() as i32;
-        let instructions = self.instruction_count;
+        let area = self.world.area_touched.len().try_into().unwrap();
+        let instructions = self.instruction_count().try_into().unwrap();
         SolutionStats {
             cycles,
             cost,
