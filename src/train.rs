@@ -28,12 +28,14 @@ fn write_npz_files(
     value: f32,
     visits: [f32; BasicInstr::N_TYPES],
     (x, y): (usize, usize),
+    loss_weights: [f32; 3],
 ) -> Result<()> {
     let (spatial_input, spatiotemporal_input, temporal_input) =
         features.to_tensor(tch::Device::Cpu)?;
     let value_output = tch::Tensor::f_from_slice(&[value, 1. - value])?;
     let policy_output = tch::Tensor::f_from_slice(&visits[..])?.f_softmax(0, None)?;
     let pos = tch::Tensor::f_from_slice(&[x as i64, y as i64])?;
+    let loss_weights = tch::Tensor::f_from_slice(&loss_weights)?;
 
     tch::Tensor::write_npz(
         &[
@@ -43,6 +45,7 @@ fn write_npz_files(
             ("value_output", &value_output),
             ("policy_output", &policy_output),
             ("pos", &pos),
+            ("loss_weights", &loss_weights),
         ],
         format!("test/next-training/{}.npz", *index),
     )?;
@@ -90,21 +93,29 @@ fn process_one_solution(
 
         match history_item.kind {
             search_history::Kind::FromOptimalSolution => {
-                // include 10% of these
+                // Basically don't use these to train the value head because
+                // the current state has no correlation with the final value
+                // from MCTS
+                let loss_weights = [0.00001, 1.0, 1.0];
+
                 if rng.gen_bool(if instr == BasicInstr::Empty {
-                    0.01
-                } else {
                     0.1
+                } else {
+                    1.0
                 }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
                     // it certainly gets us more data quicker though.
                     let mut visits = [1f32; BasicInstr::N_TYPES];
                     visits[instr.to_usize().unwrap()] = 4.;
-                    tensors.push((search_state.nn_features.clone(), visits, (x, y)));
+                    tensors.push((search_state.nn_features.clone(), visits, (x, y), loss_weights));
                 }
             }
             search_history::Kind::MCTS => {
+                // For now, basically don't use these to train the policy head
+                // because they're bad quality. (?)
+                let loss_weights = [1.0, 0.1, 1.0];
+
                 // include 90% of these < 200 playouts, and 100% of these
                 // >= 200 playouts
                 let n_playouts: u32 = history_item.playouts.iter().sum();
@@ -119,6 +130,7 @@ fn process_one_solution(
                         search_state.nn_features.clone(),
                         visits.try_into().unwrap(),
                         (x, y),
+                        loss_weights,
                     ));
                 }
             }
@@ -138,8 +150,8 @@ fn process_one_solution(
         ));
     };
 
-    for (features, visits, pos) in tensors {
-        write_npz_files(file_index, features, final_result, visits, pos)?;
+    for (features, visits, pos, loss_weights) in tensors {
+        write_npz_files(file_index, features, final_result, visits, pos, loss_weights)?;
     }
 
     Ok(())
