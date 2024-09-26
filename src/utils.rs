@@ -16,7 +16,7 @@ pub const PUZZLE_DIR: &str = "test/puzzle";
 /// A puzzle has two names: the name that is saved in the puzzle file itself, and the
 /// "fname" (filename stem). Interestingly, the string encoded in the solution
 /// file is the fname, not the puzzle name. So, we key the PuzzleMap by fname.
-pub type PuzzleMap = HashMap<String, parser::FullPuzzle>;
+pub type PuzzleMap = HashMap<String, (PathBuf, parser::FullPuzzle)>;
 
 pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Path>) {
     for f in fs::read_dir(directory).unwrap() {
@@ -36,7 +36,8 @@ pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Pat
                     }) {
                         println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
                     } else {
-                        let existing_puzzle = puzzle_map.insert(fname.to_string(), puzzle);
+                        let existing_puzzle =
+                            puzzle_map.insert(fname.to_string(), (f.path(), puzzle));
                         assert!(existing_puzzle.is_none());
                     }
                 } else {
@@ -47,37 +48,58 @@ pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Pat
     }
 }
 
-pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
+pub fn read_unverified_solution_recurse<F: FnMut(PathBuf)>(
     cb: &mut F,
-    puzzle_map: &PuzzleMap,
     directory: impl AsRef<Path>,
 ) {
     for f in fs::read_dir(directory).unwrap() {
         if let Ok(f) = f {
             let ftype = f.file_type().unwrap();
             if ftype.is_dir() {
-                read_solution_recurse(cb, puzzle_map, &f.path());
+                read_unverified_solution_recurse(cb, &f.path());
             } else if ftype.is_file() {
                 let fname = f.file_name().into_string().unwrap();
-                if let Some(fname) = fname.strip_suffix(".solution") {
-                    let f_sol = File::open(f.path()).unwrap();
-                    let sol_maybe = parser::parse_solution(&mut BufReader::new(f_sol));
-                    let sol = match sol_maybe {
-                        Err(e) => {
-                            println!("Failed to parse solution {:?}: {}", f.path(), e);
-                            continue;
-                        }
-                        Ok(s) => s,
-                    };
-                    if !puzzle_map.contains_key(&sol.puzzle_name) {
-                        /*println!("Can't find puzzle {}",sol.puzzle_name);*/
-                        continue;
-                    }
-                    cb(f.path(), sol);
+                if fname.ends_with(".solution") {
+                    cb(f.path());
                 }
             }
         }
     }
+}
+
+pub fn verify_solution(
+    fpath: impl AsRef<Path>,
+    puzzle_map: &PuzzleMap,
+) -> Option<parser::FullSolution> {
+    let f_sol = File::open(fpath.as_ref()).unwrap();
+    let sol_maybe = parser::parse_solution(&mut BufReader::new(f_sol));
+    let sol = match sol_maybe {
+        Err(e) => {
+            println!("Failed to parse solution {:?}: {}", fpath.as_ref(), e);
+            return None;
+        }
+        Ok(s) => s,
+    };
+    if !puzzle_map.contains_key(&sol.puzzle_name) {
+        /*println!("Can't find puzzle {}",sol.puzzle_name);*/
+        return None;
+    }
+    Some(sol)
+}
+
+pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
+    cb: &mut F,
+    puzzle_map: &PuzzleMap,
+    directory: impl AsRef<Path>,
+) {
+    read_unverified_solution_recurse(
+        &mut |fpath: PathBuf| {
+            if let Some(sol) = verify_solution(&fpath, puzzle_map) {
+                cb(fpath, sol)
+            }
+        },
+        directory,
+    )
 }
 
 pub fn get_default_path_strs() -> (&'static str, &'static str, &'static str) {

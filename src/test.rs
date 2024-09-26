@@ -14,7 +14,7 @@ fn check_solution(
     sol: &FullSolution,
     puzzle_map: &PuzzleMap,
 ) {
-    let puzzle = puzzle_map.get(&sol.puzzle_name).expect(
+    let (_puzzle_fpath, puzzle) = puzzle_map.get(&sol.puzzle_name).expect(
         "at this point solution should have been paired up with a puzzle in puzzle_map already",
     );
     let init = match puzzle_prep(&puzzle, &sol) {

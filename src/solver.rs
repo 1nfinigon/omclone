@@ -175,19 +175,24 @@ fn main() -> Result<()> {
     let mut puzzle_map = utils::PuzzleMap::new();
     utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
     println!("loading seed solutions");
-    let mut seed_solutions = Vec::new();
-    let mut cb = |fpath: PathBuf, solution| {
-        seed_solutions.push((fpath, solution));
+    let mut seed_solution_paths = Vec::new();
+    let mut cb = |fpath: PathBuf| {
+        seed_solution_paths.push(fpath);
     };
-    utils::read_solution_recurse(&mut cb, &puzzle_map, "test/solution");
-    utils::read_solution_recurse(&mut cb, &puzzle_map, "test/om-leaderboard-master");
+    utils::read_unverified_solution_recurse(&mut cb, "test/solution");
+    utils::read_unverified_solution_recurse(&mut cb, "test/om-leaderboard-master");
     println!("shuffling seed solutions");
-    seed_solutions.shuffle(rng);
+    seed_solution_paths.shuffle(rng);
 
-    for (fpath, seed_solution) in seed_solutions.iter() {
-        println!("====== starting {:?}", fpath);
-        let seed_puzzle = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
-        solve_one_puzzle_seeded(seed_puzzle, seed_solution, &model, rng)?;
+    for solution_fpath in seed_solution_paths.iter() {
+        if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
+            let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
+            println!(
+                "====== starting {:?}, seeding with {:?}",
+                puzzle_fpath, solution_fpath
+            );
+            solve_one_puzzle_seeded(seed_puzzle, &seed_solution, &model, rng)?;
+        }
     }
 
     Ok(())
