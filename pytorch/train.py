@@ -8,29 +8,37 @@ import os
 import datetime
 
 import model
+from common import *
 
 BATCH_SIZE = 8
 EPOCHS = 5
 
 class NPZDataset(torch.utils.data.Dataset):
-    def __init__(self, path):
+    def __init__(self, path, device):
         self.path = path
+        self.device = device
         self.files = list(Path(path).glob('*.npz'))
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, item):
-        item = np.load(str(self.files[item]))
-        return item
+        items = np.load(str(self.files[item]))
+        torch_items = dict()
+        for key, value in items.items():
+            torch_items[key] = torch.from_numpy(value).to(self.device)
+        return torch_items
 
-full_set = NPZDataset('test/next-training')
+device = device()
+
+full_set = NPZDataset('test/next-training', device=device)
 training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
-training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE)
-validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE)
+training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, pin_memory=True)
+validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, pin_memory=True)
 
 filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
-model = torch.jit.load(filename)
+model = torch.jit.load(filename, map_location=device)
+model.to(device)
 
 def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs, policy_outputs):
     value_error = torch.nn.functional.cross_entropy(model_value_outputs, value_outputs)
