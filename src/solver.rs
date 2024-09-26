@@ -143,14 +143,14 @@ fn main() -> Result<()> {
 
     let out_solution_filename =
         PathBuf::from(format!("test/current-epoch/{}.solution", solution_name));
-    println!("saving solution to {}", out_solution_filename.display());
+    println!("saving solution to {:?}", out_solution_filename);
     let mut f_out_solution = BufWriter::new(File::create_new(&out_solution_filename)?);
     parser::write_solution(&mut f_out_solution, &out_solution)?;
     std::mem::drop(f_out_solution);
 
     let out_history_filename =
         PathBuf::from(format!("test/current-epoch/{}.history", solution_name));
-    println!("saving history to {}", out_history_filename.display());
+    println!("saving history to {:?}", out_history_filename);
     let mut f_out_history = BufWriter::new(File::create_new(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
     std::mem::drop(f_out_history);
