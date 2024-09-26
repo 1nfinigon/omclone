@@ -28,6 +28,14 @@ $ cargo run --features color_eyre,nn --bin solver
     "source"
 -   Parallelise MCTS, batch NN evaluations
 -   Make net/eval/training board size agnostic
+-   use symmetries to generate more data
+-   network/code for generating layouts
+-   weight and neuron activation visualization
+-   find/monitor dead neurons
+-   better logging, saving intermediate layer outputs / residuals
+-   keep more notes/observations for experiments, be more scientific about this
+-   run same NN several times to get an idea of consistency
+-   validation set in addition to training set
 
 # idk
 
