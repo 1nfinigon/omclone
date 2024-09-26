@@ -15,6 +15,11 @@ $ cargo run --features color_eyre,nn --bin solver
 
 # Future work
 
+-   Train a timesteps-left head on existing solutions
+-   Lean on existing solutions more, but be careful mixing them in with
+    MCTS-generated solutions. They are from different domains; try having them
+    train on non-overlapping outputs, to avoid the model overspecializing on
+    "source"
 -   Parallelise MCTS, batch NN evaluations
 -   Make net/eval/training board size agnostic
 
