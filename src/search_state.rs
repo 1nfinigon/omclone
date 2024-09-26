@@ -24,6 +24,10 @@ impl State {
         }
     }
 
+    pub fn next_arm_index(&self) -> usize {
+        self.instr_buffer.len()
+    }
+
     pub fn update(&mut self, update: BasicInstr) {
         assert!(!self.errored);
         let n_arms = self.world.arms.len();

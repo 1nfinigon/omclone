@@ -251,7 +251,11 @@ pub struct Tape<InstrT> {
 }
 
 pub fn compute_tape_repeat_length<T>(tapes: &Vec<Tape<T>>) -> usize {
-    tapes.iter().map(|tape| tape.instructions.len()).max().unwrap_or(0)
+    tapes
+        .iter()
+        .map(|tape| tape.instructions.len())
+        .max()
+        .unwrap_or(0)
 }
 
 impl<InstrT: Copy + From<BasicInstr>> Tape<InstrT> {
@@ -2269,8 +2273,7 @@ impl WorldWithTapes {
         };
         assert_eq!(self_.world.arms.len(), init.tapes.len());
         for (arm, init_tape) in self_.world.arms.iter().zip(init.tapes.iter()) {
-            let tape =
-                Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
+            let tape = Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
             self_.tapes.push(tape);
         }
         self_.world.timestep = self_.get_first_timestep();

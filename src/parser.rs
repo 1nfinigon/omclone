@@ -353,8 +353,8 @@ pub fn create_solution(
     world: &WorldWithTapes,
     puzzle_name: String,
     solution_name: String,
+    stats: Option<SolutionStats>,
 ) -> FullSolution {
-    let stats = None;
     let mut solution_output = FullSolution {
         puzzle_name,
         solution_name,
