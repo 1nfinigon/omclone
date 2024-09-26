@@ -10,34 +10,34 @@ const CHECK_AREA: bool = false;
 
 #[derive(Debug)]
 pub enum CheckResult {
-    Skipped,
+    Skipped(String),
     Ok,
-    FailedSetup,
-    FailedSim,
-    FailedStatMismatch,
+    FailedPrep(String),
+    FailedSetup(String),
+    FailedSim(String),
+    FailedStatMismatch(String),
 }
 
-pub fn check_solution(fpath: &Path, sol: &FullSolution, puzzle_map: &PuzzleMap) -> CheckResult {
+pub fn check_solution(
+    sol: &FullSolution,
+    puzzle_map: &PuzzleMap,
+    skip_overlap: bool,
+) -> CheckResult {
     let (_puzzle_fpath, puzzle) = puzzle_map.get(&sol.puzzle_name).expect(
         "at this point solution should have been paired up with a puzzle in puzzle_map already",
     );
     let init = match puzzle_prep(&puzzle, &sol) {
         Err(e) => {
-            println!("Failed to prepare {:?}: {}", fpath, e);
-            return CheckResult::FailedSetup;
+            return CheckResult::FailedPrep(e.to_string());
         }
         Ok(s) => s,
     };
-    /*
-    if init.has_overlap() {
-        //println!("skipping due to overlap");
-        return CheckResult::Skipped;
+    if skip_overlap && init.has_overlap() {
+        return CheckResult::Skipped(format!("has overlap"));
     }
-    */
     let mut world = match WorldWithTapes::setup_sim(&init) {
         Err(e) => {
-            println!("Failed to setup {:?}: {}", fpath, e);
-            return CheckResult::FailedSetup;
+            return CheckResult::FailedSetup(e.to_string());
         }
         Ok(s) => s,
     };
@@ -46,11 +46,10 @@ pub fn check_solution(fpath: &Path, sol: &FullSolution, puzzle_map: &PuzzleMap) 
     while !world.world.is_complete() && world.world.timestep < 500_000 {
         let step = world.run_step(CHECK_AREA, &mut motions, &mut float_world);
         if let Err(e) = step {
-            println!(
-                "Simulation error on step {} puzzle {}: {:?}: {}",
-                world.world.timestep, sol.puzzle_name, fpath, e
-            );
-            return CheckResult::FailedSim;
+            return CheckResult::FailedSim(format!(
+                "Simulation error on step {}: {}",
+                world.world.timestep, e
+            ));
         }
     }
     let mut newstats = world.get_stats();
@@ -61,11 +60,10 @@ pub fn check_solution(fpath: &Path, sol: &FullSolution, puzzle_map: &PuzzleMap) 
     if &newstats == oldstats {
         return CheckResult::Ok;
     } else {
-        println!(
-            "Stats don't match! {:?} and puzzle {}\n{:?} vs true {:?}",
-            fpath, sol.puzzle_name, newstats, oldstats
-        );
-        return CheckResult::FailedStatMismatch;
+        return CheckResult::FailedStatMismatch(format!(
+            "Stats don't match! {:?} vs true {:?}",
+            newstats, oldstats
+        ));
     }
 }
 
@@ -76,13 +74,23 @@ fn check_all() {
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
     let mut cb = |fpath: PathBuf, solution| {
-        match check_solution(&fpath, &solution, &puzzle_map) {
-            CheckResult::Skipped => (),
-            CheckResult::FailedSetup => (),
-            CheckResult::FailedSim => {
+        let print_err = |kind: &str, details: &str| {
+            println!("{}: {:?}: {}", kind, fpath, details);
+        };
+        match check_solution(&solution, &puzzle_map, false) {
+            CheckResult::Skipped(s) => (),
+            CheckResult::FailedPrep(e) => {
+                print_err("Failed during prep", &e);
+            }
+            CheckResult::FailedSetup(e) => {
+                print_err("Failed during setup", &e);
+            }
+            CheckResult::FailedSim(e) => {
+                print_err("Simulation error", &e);
                 stats.1 += 1;
             }
-            CheckResult::FailedStatMismatch => {
+            CheckResult::FailedStatMismatch(e) => {
+                print_err("Stats do not match", &e);
                 stats.1 += 1;
             }
             CheckResult::Ok => {
