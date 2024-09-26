@@ -287,7 +287,10 @@ pub mod feature_offsets {
             let offset = 0usize;
             let (offset, cycles) = Float::assign(offset);
             let (offset, cycles_remaining) = Float::assign(offset);
-            let self_ = Self { cycles, cycles_remaining };
+            let self_ = Self {
+                cycles,
+                cycles_remaining,
+            };
             (self_, offset)
         }
 
@@ -306,6 +309,7 @@ pub mod feature_offsets {
 pub mod features {
     use super::feature_offsets::*;
     use super::*;
+    use eyre::Result;
 
     pub fn normalize_position(pos: sim::Pos) -> Option<(usize, usize)> {
         if 0 <= pos.x && (pos.x as usize) < N_WIDTH && 0 <= pos.y && (pos.y as usize) < N_HEIGHT {
@@ -504,7 +508,12 @@ pub mod features {
         /// Sets the temporal data at relative time `time` to reflect the current world.
         /// Does _not_ set `arm_base_instr`; see `set_temporal_instr` for that.
         #[deny(unused_variables)]
-        pub fn set_temporal_except_instr(&mut self, time: usize, world: &sim::World, cycles_remaining_value: u64) {
+        pub fn set_temporal_except_instr(
+            &mut self,
+            time: usize,
+            world: &sim::World,
+            cycles_remaining_value: u64,
+        ) {
             let Spatiotemporal {
                 used,
                 arm_base_length,
@@ -564,9 +573,13 @@ pub mod features {
                 }
             }
 
-            let Temporal { cycles, cycles_remaining } = Temporal::OFFSETS;
+            let Temporal {
+                cycles,
+                cycles_remaining,
+            } = Temporal::OFFSETS;
             self.temporal[time][cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
-            self.temporal[time][cycles_remaining.get_offset()] = (cycles_remaining_value as f64 / 100.).tanh() as f32;
+            self.temporal[time][cycles_remaining.get_offset()] =
+                (cycles_remaining_value as f64 / 100.).tanh() as f32;
         }
 
         /// Set all timesteps' data to this world. Used for initialization.
@@ -619,6 +632,62 @@ pub mod features {
                 }
             }
         }
+
+        pub fn to_tensor(
+            &self,
+            device: tch::Device,
+        ) -> Result<(tch::Tensor, tch::Tensor, tch::Tensor)> {
+            // TODO: all this copying is very slow
+            let options = (tch::Kind::Float, device);
+
+            const S: usize = feature_offsets::Spatial::SIZE;
+            const H: usize = constants::N_HEIGHT;
+            const W: usize = constants::N_WIDTH;
+            const X: usize = feature_offsets::Spatiotemporal::SIZE;
+            const T: usize = constants::N_HISTORY_CYCLES;
+            const G: usize = feature_offsets::Temporal::SIZE;
+
+            let mut spatial_input = Vec::with_capacity(S * H * W);
+            let mut spatiotemporal_input = Vec::with_capacity(X * T * H * W);
+            let mut temporal_input = Vec::with_capacity(G * T);
+
+            for i_s in 0..S {
+                for i_h in 0..H {
+                    for i_w in 0..W {
+                        spatial_input.push(self.spatial[i_h][i_w][i_s]);
+                    }
+                }
+            }
+
+            for i_x in 0..X {
+                for i_t in 0..T {
+                    for i_h in 0..H {
+                        for i_w in 0..W {
+                            spatiotemporal_input.push(self.spatiotemporal[i_t][i_h][i_w][i_x]);
+                        }
+                    }
+                }
+            }
+
+            for i_g in 0..G {
+                for i_t in 0..T {
+                    temporal_input.push(self.temporal[i_t][i_g]);
+                }
+            }
+
+            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
+                .f_view([1, S as i64, H as i64, W as i64])?;
+            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
+                .f_view([1, X as i64, T as i64, H as i64, W as i64])?;
+            let temporal_input =
+                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, G as i64, T as i64])?;
+
+            Ok((
+                spatial_input.f_to(device)?,
+                spatiotemporal_input.f_to(device)?,
+                temporal_input.f_to(device)?,
+            ))
+        }
     }
 }
 
@@ -667,63 +736,20 @@ pub mod model {
         ) -> eyre::Result<Evaluation> {
             use tch::IndexOp;
 
-            // TODO: all this copying is very slow
-            let options = (tch::Kind::Float, self.device);
+            assert!(x < constants::N_WIDTH);
+            assert!(y < constants::N_HEIGHT);
 
-            const S: usize = feature_offsets::Spatial::SIZE;
-            const H: usize = constants::N_HEIGHT;
-            const W: usize = constants::N_WIDTH;
-            const X: usize = feature_offsets::Spatiotemporal::SIZE;
-            const T: usize = constants::N_HISTORY_CYCLES;
-            const G: usize = feature_offsets::Temporal::SIZE;
-
-            assert!(x < W);
-            assert!(y < H);
-
-            let mut spatial_input = Vec::with_capacity(S * H * W);
-            let mut spatiotemporal_input = Vec::with_capacity(X * T * H * W);
-            let mut temporal_input = Vec::with_capacity(G * T);
-
-            for i_s in 0..S {
-                for i_h in 0..H {
-                    for i_w in 0..W {
-                        spatial_input.push(features.spatial[i_h][i_w][i_s]);
-                    }
-                }
-            }
-
-            for i_x in 0..X {
-                for i_t in 0..T {
-                    for i_h in 0..H {
-                        for i_w in 0..W {
-                            spatiotemporal_input.push(features.spatiotemporal[i_t][i_h][i_w][i_x]);
-                        }
-                    }
-                }
-            }
-
-            for i_g in 0..G {
-                for i_t in 0..T {
-                    temporal_input.push(features.temporal[i_t][i_g]);
-                }
-            }
-
-            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
-                .f_view([1, S as i64, H as i64, W as i64])?;
-            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
-                .f_view([1, X as i64, T as i64, H as i64, W as i64])?;
-            let temporal_input =
-                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, G as i64, T as i64])?;
+            let (spatial_input, spatiotemporal_input, temporal_input) =
+                features.to_tensor(self.device)?;
 
             let input = [
-                tch::IValue::Tensor(spatial_input.f_to(self.device)?),
-                tch::IValue::Tensor(spatiotemporal_input.f_to(self.device)?),
-                tch::IValue::Tensor(temporal_input.f_to(self.device)?),
-                tch::IValue::Tensor(tch::Tensor::f_from_slice(&[if is_root {
-                    1.03
-                } else {
-                    1.
-                }])?.f_to(self.device)?),
+                tch::IValue::Tensor(spatial_input),
+                tch::IValue::Tensor(spatiotemporal_input),
+                tch::IValue::Tensor(temporal_input),
+                tch::IValue::Tensor(
+                    tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
+                        .f_to(self.device)?,
+                ),
             ];
 
             let output = self.module.forward_is(&input)?;
@@ -745,7 +771,12 @@ pub mod model {
 
             assert_eq!(
                 policy_tensor.size4()?,
-                (1, BasicInstr::N_TYPES as i64, H as i64, W as i64)
+                (
+                    1,
+                    BasicInstr::N_TYPES as i64,
+                    constants::N_HEIGHT as i64,
+                    constants::N_WIDTH as i64
+                )
             );
             let mut policy_sum = 0.;
             for i_instr in 0..BasicInstr::N_TYPES {
