@@ -676,11 +676,11 @@ pub mod features {
             }
 
             let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
-                .f_view([1, S as i64, H as i64, W as i64])?;
+                .f_view([S as i64, H as i64, W as i64])?;
             let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
-                .f_view([1, X as i64, T as i64, H as i64, W as i64])?;
+                .f_view([X as i64, T as i64, H as i64, W as i64])?;
             let temporal_input =
-                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, G as i64, T as i64])?;
+                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([G as i64, T as i64])?;
 
             Ok((
                 spatial_input.f_to(device)?,
@@ -743,9 +743,9 @@ pub mod model {
                 features.to_tensor(self.device)?;
 
             let input = [
-                tch::IValue::Tensor(spatial_input),
-                tch::IValue::Tensor(spatiotemporal_input),
-                tch::IValue::Tensor(temporal_input),
+                tch::IValue::Tensor(spatial_input.unsqueeze(0)),
+                tch::IValue::Tensor(spatiotemporal_input.unsqueeze(0)),
+                tch::IValue::Tensor(temporal_input.unsqueeze(0)),
                 tch::IValue::Tensor(
                     tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
                         .f_to(self.device)?,
