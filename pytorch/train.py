@@ -10,7 +10,7 @@ import datetime
 import model
 from common import *
 
-BATCH_SIZE = 2048
+BATCH_SIZE = 512
 EPOCHS = 5
 
 class NPZDataset(torch.utils.data.Dataset):
@@ -23,18 +23,14 @@ class NPZDataset(torch.utils.data.Dataset):
         return len(self.files)
 
     def __getitem__(self, item):
-        items = np.load(str(self.files[item]))
-        torch_items = dict()
-        for key, value in items.items():
-            torch_items[key] = torch.from_numpy(value).to(self.device)
-        return torch_items
+        return np.load(str(self.files[item]))
 
 device = device()
 
 full_set = NPZDataset('test/next-training', device=device)
 training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
-training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE)
-validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE)
+training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, pin_memory=True)
+validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, pin_memory=True)
 
 filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
 model = torch.jit.load(filename, map_location=device)
@@ -60,12 +56,12 @@ def train_one_epoch(epoch_index, tb_writer):
     n_iterations_since_stats_printed = 0
 
     for i, data in enumerate(training_loader):
-        spatial_inputs        = data['spatial_input']
-        spatiotemporal_inputs = data['spatiotemporal_input']
-        temporal_inputs       = data['temporal_input']
-        value_outputs         = data['value_output']
-        policy_outputs        = data['policy_output']
-        pos                   = data['pos']
+        spatial_inputs        = data['spatial_input'].to(device)
+        spatiotemporal_inputs = data['spatiotemporal_input'].to(device)
+        temporal_inputs       = data['temporal_input'].to(device)
+        value_outputs         = data['value_output'].to(device)
+        policy_outputs        = data['policy_output'].to(device)
+        pos                   = data['pos'].to(device)
 
         # Zero your gradients for every batch!
         optimizer.zero_grad(set_to_none=True)
@@ -119,12 +115,12 @@ for epoch in range(EPOCHS):
     # Disable gradient computation and reduce memory consumption.
     with torch.no_grad():
         for i, data in enumerate(validation_loader):
-            spatial_inputs        = data['spatial_input']
-            spatiotemporal_inputs = data['spatiotemporal_input']
-            temporal_inputs       = data['temporal_input']
-            value_outputs         = data['value_output']
-            policy_outputs        = data['policy_output']
-            pos                   = data['pos']
+            spatial_inputs        = data['spatial_input'].to(device)
+            spatiotemporal_inputs = data['spatiotemporal_input'].to(device)
+            temporal_inputs       = data['temporal_input'].to(device)
+            value_outputs         = data['value_output'].to(device)
+            policy_outputs        = data['policy_output'].to(device)
+            pos                   = data['pos'].to(device)
 
             model_policy_outputs, model_value_outputs = model(spatial_inputs, spatiotemporal_inputs, temporal_inputs, policy_softmax_temperature)
             loss = sum(loss_fn(model, pos, model_value_outputs, model_policy_outputs,
