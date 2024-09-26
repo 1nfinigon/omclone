@@ -67,19 +67,21 @@ fn check_all() {
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
     let mut cb = |fpath: PathBuf, solution: FullSolution| {
-        let print_err = |kind: &str, details: &str| {
-            println!("{}: {:?}: {}", kind, fpath, details);
-        };
-        let (_puzzle_fpath, puzzle) = puzzle_map.get(&solution.puzzle_name).expect(
+        let (puzzle_fpath, puzzle) = puzzle_map.get(&solution.puzzle_name).expect(
             "at this point solution should have been paired up with a puzzle in puzzle_map already",
         );
+        let print_err = |kind: &str, details: &str| {
+            println!("{}: {:?} / {:?}: {}", kind, puzzle_fpath, fpath, details);
+        };
         match check_solution(&solution, &puzzle, false) {
-            CheckResult::Skipped(s) => (),
+            CheckResult::Skipped(s) => { return; },
             CheckResult::FailedPrep(e) => {
                 print_err("Failed during prep", &e);
+                return;
             }
             CheckResult::FailedSetup(e) => {
                 print_err("Failed during setup", &e);
+                return;
             }
             CheckResult::FailedSim(e) => {
                 print_err("Simulation error", &e);
