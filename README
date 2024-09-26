@@ -15,6 +15,10 @@ $ cargo run --features color_eyre,nn --bin solver
 
 # Future work
 
--   Parallelise MCTS, batch NN evlaluations
+-   Parallelise MCTS, batch NN evaluations
+-   Make net/eval/training board size agnostic
+
+# idk
+
 -   Does allowing action selection for any arm (rather than the next one in order)
     improve strength?
