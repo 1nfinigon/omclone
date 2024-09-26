@@ -163,6 +163,7 @@ fn solve_one_puzzle_seeded(
     let out_history = search_history::HistoryFile {
         solution_name: solution_name.clone(),
         history: search_history,
+        timestep_limit: search_state.timestep_limit.try_into().unwrap(),
     };
 
     // save solution and search history

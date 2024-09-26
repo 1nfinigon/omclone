@@ -20,7 +20,7 @@ impl State {
         let n_arms = world.arms.len();
         let mut nn_features = Box::new(nn::Features::new());
         nn_features.set_nontemporal(&world);
-        nn_features.init_all_temporal(&world);
+        nn_features.init_all_temporal(&world, timestep_limit.saturating_sub(world.timestep));
         Self {
             errored: false,
             timestep_limit,
@@ -52,7 +52,7 @@ impl State {
             match result {
                 Ok(()) => {
                     self.nn_features.shift_temporal();
-                    self.nn_features.set_temporal_except_instr(0, &new_world);
+                    self.nn_features.set_temporal_except_instr(0, &new_world, self.timestep_limit.saturating_sub(self.world.timestep));
                     self.world = Box::new(new_world);
                 }
                 Err(_) => {

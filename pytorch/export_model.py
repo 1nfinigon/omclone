@@ -10,7 +10,7 @@ model.run_tests()
 # constants from nn.rs
 SPATIAL_FEATURES = 141
 SPATIOTEMPORAL_FEATURES = 72
-TEMPORAL_FEATURES = 1
+TEMPORAL_FEATURES = 2
 N_HISTORY_CYCLES = 20
 
 # tunable constants

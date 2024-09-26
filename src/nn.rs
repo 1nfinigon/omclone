@@ -279,13 +279,15 @@ pub mod feature_offsets {
 
     pub struct Temporal {
         pub cycles: Float,
+        pub cycles_remaining: Float,
     }
 
     impl Temporal {
         const fn new_and_size() -> (Self, usize) {
             let offset = 0usize;
             let (offset, cycles) = Float::assign(offset);
-            let self_ = Self { cycles };
+            let (offset, cycles_remaining) = Float::assign(offset);
+            let self_ = Self { cycles, cycles_remaining };
             (self_, offset)
         }
 
@@ -502,7 +504,7 @@ pub mod features {
         /// Sets the temporal data at relative time `time` to reflect the current world.
         /// Does _not_ set `arm_base_instr`; see `set_temporal_instr` for that.
         #[deny(unused_variables)]
-        pub fn set_temporal_except_instr(&mut self, time: usize, world: &sim::World) {
+        pub fn set_temporal_except_instr(&mut self, time: usize, world: &sim::World, cycles_remaining_value: u64) {
             let Spatiotemporal {
                 used,
                 arm_base_length,
@@ -562,13 +564,14 @@ pub mod features {
                 }
             }
 
-            let Temporal { cycles } = Temporal::OFFSETS;
+            let Temporal { cycles, cycles_remaining } = Temporal::OFFSETS;
             self.temporal[time][cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
+            self.temporal[time][cycles_remaining.get_offset()] = (cycles_remaining_value as f64 / 100.).tanh() as f32;
         }
 
         /// Set all timesteps' data to this world. Used for initialization.
-        pub fn init_all_temporal(&mut self, world: &sim::World) {
-            self.set_temporal_except_instr(0, world);
+        pub fn init_all_temporal(&mut self, world: &sim::World, cycles_remaining_value: u64) {
+            self.set_temporal_except_instr(0, world, cycles_remaining_value);
             for time in 1..N_HISTORY_CYCLES {
                 self.spatiotemporal[time] = self.spatiotemporal[0];
                 self.temporal[time] = self.temporal[0];

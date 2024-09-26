@@ -16,7 +16,7 @@ pub struct Item {
     pub playouts: [u32; BasicInstr::N_TYPES],
 }
 
-pub struct History(Vec<Item>);
+pub struct History(pub Vec<Item>);
 
 fn read_u32_le<R: Read>(reader: &mut R) -> Result<u32> {
     let mut buffer = [0u8; std::mem::size_of::<u32>()];
@@ -57,19 +57,21 @@ impl History {
 pub struct HistoryFile {
     pub solution_name: String,
     pub history: History,
+    pub timestep_limit: u32,
 }
 
 impl HistoryFile {
     pub fn read<R: Read>(r: &mut R) -> Result<Self> {
         let version = read_u32_le(r)?;
         match version {
-            0 => {
+            1 => {
                 let solution_name = {
                     let length = read_u32_le(r)?;
                     let mut dat = vec![0u8; length as usize];
                     r.read_exact(&mut dat)?;
                     String::from_utf8(dat)?
                 };
+                let timestep_limit = read_u32_le(r)?;
                 let len = read_u32_le(r)? as usize;
                 assert!(len < 100000, "unreasonable len");
                 let mut history = Vec::with_capacity(len);
@@ -84,6 +86,7 @@ impl HistoryFile {
                 Ok(Self {
                     solution_name,
                     history: History(history),
+                    timestep_limit,
                 })
             }
             _ => panic!("version number {} unsupported", version),
@@ -94,13 +97,15 @@ impl HistoryFile {
         let HistoryFile {
             solution_name,
             history: History(history),
+            timestep_limit,
         } = self;
-        write_u32_le(w, 0)?;
+        write_u32_le(w, 1)?;
         {
             let dat = solution_name.as_bytes();
             write_u32_le(w, dat.len().try_into()?)?;
             w.write_all(dat)?;
         }
+        write_u32_le(w, *timestep_limit)?;
         write_u32_le(w, history.len().try_into().unwrap())?;
         for item in history.iter() {
             write_u32_le(w, item.kind.to_u32().unwrap())?;
