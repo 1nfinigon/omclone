@@ -1227,17 +1227,25 @@ impl World {
         const STILL: ArmMovement = Move(HeldStill);
         let action = match instruction {
             Extend => {
-                if arm_type == Piston && arm.len < 3 {
-                    LengthAdjust(1)
+                if arm_type == Piston {
+                    if arm.len < 3 {
+                        LengthAdjust(1)
+                    } else {
+                        STILL
+                    }
                 } else {
-                    STILL
+                    return Err(sim_error_pos(&"Extend on non-piston arm", arm.pos));
                 }
             }
             Retract => {
-                if arm_type == Piston && arm.len > 1 {
-                    LengthAdjust(-1)
+                if arm_type == Piston {
+                    if arm.len > 1 {
+                        LengthAdjust(-1)
+                    } else {
+                        STILL
+                    }
                 } else {
-                    STILL
+                    return Err(sim_error_pos(&"Retract on non-piston arm", arm.pos));
                 }
             }
             RotateCounterClockwise => Move(Rotation(1, arm.pos)),
@@ -1274,17 +1282,35 @@ impl World {
                 }
                 STILL
             }
-            Forward => self
-                .track_maps
-                .plus
-                .get(&arm.pos)
-                .map_or(STILL, |&x| Move(Linear(x))),
-            Back => self
-                .track_maps
-                .minus
-                .get(&arm.pos)
-                .map_or(STILL, |&x| Move(Linear(x))),
-            Empty => (STILL),
+            Forward => {
+                if let Some(&x) = self.track_maps.plus.get(&arm.pos) {
+                    if x == Pos::zeros() {
+                        STILL
+                    } else {
+                        Move(Linear(x))
+                    }
+                } else {
+                    if !self.track_maps.minus.contains_key(&arm.pos) {
+                        return Err(sim_error_pos(&"Forward on arm that's not on a track", arm.pos));
+                    }
+                    STILL
+                }
+            },
+            Back => {
+                if let Some(&x) = self.track_maps.minus.get(&arm.pos) {
+                    if x == Pos::zeros() {
+                        STILL
+                    } else {
+                        Move(Linear(x))
+                    }
+                } else {
+                    if !self.track_maps.plus.contains_key(&arm.pos) {
+                        return Err(sim_error_pos(&"Back on arm that's not on a track", arm.pos));
+                    }
+                    STILL
+                }
+            },
+            Empty => STILL,
         };
         let rotation_store = arm.rot;
         for atom in arm.atoms_grabbed {
