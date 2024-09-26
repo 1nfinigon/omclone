@@ -714,6 +714,12 @@ impl InitialWorld {
         }
         (area_touched, has_overlap)
     }
+
+    pub fn has_overlap(&self) -> bool {
+        let (_, overlap) = self.mark_initial_area_and_detect_overlap();
+        overlap
+    }
+
     pub fn move_by(&mut self, pos: Pos) {
         for glyph in self.glyphs.iter_mut() {
             glyph.move_by(pos);

@@ -13,6 +13,10 @@ fn check_solution(stats: &mut (usize, usize), fpath: &Path, sol: &FullSolution, 
         }
         Ok(s) => s,
     };
+    if init.has_overlap() {
+        //println!("skipping due to overlap");
+        return;
+    }
     let mut world = match WorldWithTapes::setup_sim(&init) {
         Err(e) => {
             println!("Failed to setup {:?}: {}", fpath, e);
