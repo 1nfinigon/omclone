@@ -713,14 +713,14 @@ pub mod model {
                 tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([1, G as i64, T as i64])?;
 
             let input = [
-                tch::IValue::Tensor(spatial_input.copy()),
-                tch::IValue::Tensor(spatiotemporal_input.copy()),
-                tch::IValue::Tensor(temporal_input.copy()),
+                tch::IValue::Tensor(spatial_input.f_to(self.device)?),
+                tch::IValue::Tensor(spatiotemporal_input.f_to(self.device)?),
+                tch::IValue::Tensor(temporal_input.f_to(self.device)?),
                 tch::IValue::Tensor(tch::Tensor::f_from_slice(&[if is_root {
                     1.03
                 } else {
                     1.
-                }])?),
+                }])?.f_to(self.device)?),
             ];
 
             let output = self.module.forward_is(&input)?;
