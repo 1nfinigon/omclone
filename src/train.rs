@@ -66,6 +66,10 @@ fn main() -> Result<()> {
             let instr = world.tapes[arm_index]
                 .get(search_state.world.timestep as usize, world.repeat_length);
 
+            let next_arm_pos = search_state.world.arms[arm_index].pos;
+            let (x, y) =
+                nn::features::normalize_position(next_arm_pos).expect("arm out of nn bounds");
+
             match history_item.kind {
                 search_history::Kind::FromOptimalSolution => {
                     // include 10% of these
@@ -73,9 +77,9 @@ fn main() -> Result<()> {
                         // mock up a policy of solely picking the right answer, 90% of the time
                         // TODO: dunno if this is right/good,
                         // it certainly gets us more data quicker though.
-                        let mut policy = vec![1f32; sim::BasicInstr::N_TYPES];
-                        policy[instr.to_usize().unwrap()] = 9.;
-                        tensors.push((search_state.nn_features.clone(), policy));
+                        let mut visits = [1f32; sim::BasicInstr::N_TYPES];
+                        visits[instr.to_usize().unwrap()] = 9.;
+                        tensors.push((search_state.nn_features.clone(), visits, (x, y)));
                     }
                 }
                 search_history::Kind::MCTS => {
@@ -83,14 +87,16 @@ fn main() -> Result<()> {
                     // >= 200 playouts
                     let n_playouts: u32 = history_item.playouts.iter().sum();
                     let _ = n_playouts;
+                    let visits: Vec<_> = history_item
+                        .playouts
+                        .iter()
+                        .copied()
+                        .map(|p| p as f32)
+                        .collect();
                     tensors.push((
                         search_state.nn_features.clone(),
-                        history_item
-                            .playouts
-                            .iter()
-                            .copied()
-                            .map(|p| p as f32)
-                            .collect(),
+                        visits.try_into().unwrap(),
+                        (x, y),
                     ));
                 }
             }
@@ -107,21 +113,22 @@ fn main() -> Result<()> {
             continue;
         };
 
-        for (input, policy) in tensors {
-            all_tensors.push((input, final_result, policy));
+        for (input, visits, pos) in tensors {
+            all_tensors.push((input, final_result, visits, pos));
         }
     }
 
     println!("Writing out");
-    for (idx, (features, value, policy)) in all_tensors.iter().enumerate() {
+    for (idx, (features, value, visits, (x, y))) in all_tensors.iter().enumerate() {
         if idx % 1000 == 0 {
             println!("Writing out: {}/{}", idx, all_tensors.len());
         }
 
         let (spatial_input, spatiotemporal_input, temporal_input) =
             features.to_tensor(tch::Device::Cpu)?;
-        let value_output = tch::Tensor::f_from_slice(&[*value])?;
-        let policy_output = tch::Tensor::f_from_slice(&policy[..])?;
+        let value_output = tch::Tensor::f_from_slice(&[*value, 1. - *value])?;
+        let policy_output = tch::Tensor::f_from_slice(&visits[..])?.f_softmax(0, None)?;
+        let pos = tch::Tensor::f_from_slice(&[*x as i64, *y as i64])?;
 
         tch::Tensor::write_npz(
             &[
@@ -130,6 +137,7 @@ fn main() -> Result<()> {
                 ("temporal_input", &temporal_input),
                 ("value_output", &value_output),
                 ("policy_output", &policy_output),
+                ("pos", &pos),
             ],
             format!("test/next-training/{}.npz", idx),
         )?;
