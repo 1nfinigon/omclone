@@ -152,7 +152,7 @@ fn solve_one_puzzle_seeded(
     };
     let out_solution = parser::create_solution(
         &out_world,
-        seed_puzzle.puzzle_name.clone(),
+        seed_solution.puzzle_name.clone(),
         solution_name.clone(),
         if result_is_success {
             Some(out_world.get_stats())
