@@ -698,6 +698,9 @@ impl InitialWorld {
     fn mark_initial_area_and_detect_overlap(&self) -> (FxHashSet<Pos>, bool) {
         let mut area_touched = FxHashSet::default();
         let mut has_overlap = false;
+
+        // first, do all of the positions that cannot overlap with each other.
+
         for glyph in self.glyphs.iter() {
             for p in glyph.positions() {
                 if !area_touched.insert(p) {
@@ -706,14 +709,22 @@ impl InitialWorld {
             }
         }
         for arm in self.arms.iter() {
-            for n in 0..=arm.len {
+            if !area_touched.insert(arm.pos) {
+                has_overlap = true;
+            }
+        }
+
+        // now, do everything that should be marked as area, but are irrelevant
+        // to overlap.
+
+        for arm in self.arms.iter() {
+            for n in 1..=arm.len {
                 for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
-                    if !area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot + r)) && n == 0 {
-                        has_overlap = true;
-                    }
+                    area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot + r));
                 }
             }
         }
+
         (area_touched, has_overlap)
     }
 
