@@ -18,14 +18,7 @@ pub enum CheckResult {
     FailedStatMismatch(String),
 }
 
-pub fn check_solution(
-    sol: &FullSolution,
-    puzzle_map: &PuzzleMap,
-    skip_overlap: bool,
-) -> CheckResult {
-    let (_puzzle_fpath, puzzle) = puzzle_map.get(&sol.puzzle_name).expect(
-        "at this point solution should have been paired up with a puzzle in puzzle_map already",
-    );
+pub fn check_solution(sol: &FullSolution, puzzle: &FullPuzzle, skip_overlap: bool) -> CheckResult {
     let init = match puzzle_prep(&puzzle, &sol) {
         Err(e) => {
             return CheckResult::FailedPrep(e.to_string());
@@ -73,11 +66,14 @@ fn check_all() {
     let mut puzzle_map = PuzzleMap::new();
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
-    let mut cb = |fpath: PathBuf, solution| {
+    let mut cb = |fpath: PathBuf, solution: FullSolution| {
         let print_err = |kind: &str, details: &str| {
             println!("{}: {:?}: {}", kind, fpath, details);
         };
-        match check_solution(&solution, &puzzle_map, false) {
+        let (_puzzle_fpath, puzzle) = puzzle_map.get(&solution.puzzle_name).expect(
+            "at this point solution should have been paired up with a puzzle in puzzle_map already",
+        );
+        match check_solution(&solution, &puzzle, false) {
             CheckResult::Skipped(s) => (),
             CheckResult::FailedPrep(e) => {
                 print_err("Failed during prep", &e);

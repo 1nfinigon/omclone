@@ -5,6 +5,7 @@ mod search;
 mod search_history;
 mod search_state;
 mod sim;
+mod test;
 mod utils;
 
 use rand::prelude::*;
@@ -24,10 +25,7 @@ fn solve_one_puzzle_seeded(
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
-    if seed_init.has_overlap() {
-        println!("(skipping due to overlap)");
-        return Ok(());
-    }
+    assert!(!seed_init.has_overlap());
     seed_init.centre();
     seed_init.move_by(sim::Pos::new(
         nn::constants::N_WIDTH as i32 / 2,
@@ -187,6 +185,14 @@ fn main() -> Result<()> {
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
+
+            match test::check_solution(&seed_solution, seed_puzzle, true) {
+                test::CheckResult::Ok => (),
+                _ => {
+                    continue;
+                }
+            }
+
             println!(
                 "====== starting {:?}, seeding with {:?}",
                 puzzle_fpath, solution_fpath
