@@ -258,17 +258,15 @@ impl TreeSearch {
         };
 
         // backpropagate
-        let mut this_depth = 0u32;
         for &node_idx in path.iter().rev() {
             self.node_mut(node_idx).incr_visits();
             if let Node::Real(real_node) = self.node_mut(node_idx) {
                 real_node.value_sum += leaf_utility;
             }
-
-            this_depth += 1;
         }
-        self.sum_depth += this_depth as usize;
-        self.max_depth = self.max_depth.max(this_depth);
+        let this_depth = path.len().saturating_sub(1);
+        self.sum_depth += this_depth;
+        self.max_depth = self.max_depth.max(this_depth as u32);
 
         Ok(())
     }
