@@ -1150,7 +1150,7 @@ impl World {
             let maybe_move = motion.atoms.get(this_key);
             if let Some(curr_move) = maybe_move {
                 if curr_move != &movement {
-                    println!("was {:?},applying {:?}", curr_move, movement);
+                    //println!("was {:?},applying {:?}", curr_move, movement);
                     let error_str = &"Atom moved in multiple directions!";
                     return Err(sim_error_pos(error_str, self.atoms.atom_map[this_key].pos));
                 }
@@ -1326,7 +1326,7 @@ impl World {
                 let tmp = motion.atoms.insert(atom, atom_movement);
                 match tmp {
                     Some(x) if x != atom_movement => {
-                        println!("was {:?},applying {:?}", atom_movement, x);
+                        //println!("was {:?},applying {:?}", atom_movement, x);
                         let error_str = &"Atom moved in multiple directions!";
                         return Err(sim_error_pos(error_str, self.atoms.atom_map[atom].pos));
                     }
