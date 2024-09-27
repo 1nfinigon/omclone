@@ -608,10 +608,11 @@ pub mod features {
         }
 
         /// Copies all temporal data one timestep later. The current timestep's
-        /// temporal data is left unmodified.
+        /// temporal data is cleared.
         pub fn shift_temporal(&mut self) {
             self.spatiotemporal
                 .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
+            self.clear_temporal(0);
         }
 
         /// Fully erases the current timestep's temporal data.
