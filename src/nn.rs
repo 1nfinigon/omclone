@@ -869,7 +869,7 @@ pub mod model {
                 ),
             ];
 
-            let output = self.module.forward_is(&input)?;
+            let output = tch::no_grad(|| self.module.forward_is(&input))?;
 
             let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
 
