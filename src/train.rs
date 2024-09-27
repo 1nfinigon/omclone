@@ -179,8 +179,6 @@ fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "full");
     install()?;
 
-    let model = nn::Model::load()?;
-
     println!("loading seed puzzles");
     let mut puzzle_map = utils::PuzzleMap::new();
     utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
