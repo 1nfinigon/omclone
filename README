@@ -69,6 +69,7 @@ Science-y investigation work:
 -   keep more notes/observations for experiments, be more scientific about this
 -   run same NN several times to get an idea of consistency
 -   validation set in addition to training set
+-   Batch size? https://arxiv.org/pdf/1812.06162
 
 # idk
 
