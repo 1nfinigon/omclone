@@ -34,6 +34,13 @@ $ cargo run --features color_eyre,nn --bin solver
         "cycles left until cycle limit > some small number"? I think so...
     -   Solution: Generate solutions that have higher cycles-left but still
         succeed, and lower cycles-left but still fail
+-   Starting to see forms of overfitting, from training on limited numbers of human solutions.
+    In a particular solution to OM2021_W0, an arm has learnt to "fard"
+    repeatedly, and another "faar", all the way to the end, even though this
+    isn't actually the shortest/most optimal sequence -- it's just learned
+    behaviour from the fact that this instruction-count solution repeats those
+    motifs a lot.
+    -   Solution: taper off the human training and generate more MCTS data?
 
 # Future work
 
