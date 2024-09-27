@@ -66,11 +66,11 @@ fn solve_one_puzzle_seeded(
     let first_timestep = seed_world.world.timestep;
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
-    let n_moves_to_search = rng.gen_range(1..=8); // how many moves to leave behind for MCTS to find
+    let n_moves_to_search = rng.gen_range(1..=15); // how many moves to leave behind for MCTS to find
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        first_timestep + (n_moves + rng.gen_range(1..=16) + n_arms - 1) / n_arms,
+        first_timestep + (n_moves + rng.gen_range(1..=30) + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
@@ -113,7 +113,7 @@ fn solve_one_puzzle_seeded(
 
         let mut tree_search = search::TreeSearch::new(search_state.clone());
 
-        let playouts = if rng.gen_bool(0.75) { 100 } else { 500 };
+        let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
         for _ in 0..playouts {
             tree_search.search_once(rng, &model)?;
