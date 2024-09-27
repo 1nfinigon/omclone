@@ -13,7 +13,7 @@ def device():
             d = torch.cuda.device(i)
             w = torch.cuda.power_draw(d)
             if min_d is None or w < min_w:
-                min_d, min_d = d, w
+                min_d, min_w = d, w
         print("Selected device ", min_d)
         return min_d
     print("Using CPU")
