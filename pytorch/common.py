@@ -8,13 +8,13 @@ def device():
         return torch.device('mps')
     if torch.cuda.is_available():
         print("Using CUDA")
-        min_d, min_w = None, None
+        min_i, min_d, min_w = None, None
         for i in range(torch.cuda.device_count()):
             d = torch.cuda.device(i)
             w = torch.cuda.power_draw(d)
             if min_d is None or w < min_w:
-                min_d, min_w = d, w
-        print("Selected device ", min_d)
+                min_i, min_d, min_w = i, d, w
+        print("Selected device ", min_i)
         return min_d
     print("Using CPU")
     return torch.device('cpu')
