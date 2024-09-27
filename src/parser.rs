@@ -494,7 +494,7 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
         let pos = parse_bytepos(f)?;
         pattern.push(Atom::new(pos, atom_type));
         let check = atom_locs.insert(pos, i);
-        ensure!(check == None, "Multiple atoms in same location!");
+        ensure!(check.is_none(), "Multiple atoms in same location!");
     }
     //bonds
     for _ in 0..parse_i32(f)? {
@@ -518,7 +518,7 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
 fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
     let mut atom_locs: HashMap<Pos, usize> = HashMap::new();
     write_i32(f, pattern.len().try_into()?)?;
-    for (i, atom) in pattern.into_iter().enumerate() {
+    for (i, atom) in pattern.iter().enumerate() {
         use num_traits::ToPrimitive;
         write_u8(f, atom.atom_type.to_u8().ok_or(eyre!("invalid atom type"))?)?;
         write_bytepos(f, atom.pos)?;

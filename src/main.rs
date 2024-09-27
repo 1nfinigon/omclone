@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         };
         miniquad::start(conf, || Box::new(ui::MyMiniquadApp::new()));
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(any(feature = "editor_ui", feature = "display_ui",)))]

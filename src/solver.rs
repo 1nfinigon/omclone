@@ -11,7 +11,6 @@ use rand::prelude::*;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use uuid;
 
 use eyre::Result;
 

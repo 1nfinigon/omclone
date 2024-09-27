@@ -26,7 +26,6 @@ impl egui::widgets::text_edit::TextBuffer for TapeBuffer<'_> {
         true
     }
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
-        let char_index = char_index;
         *self.earliest_edit = Some(char_index);
         let tape = &mut self.tape_ref;
         let instr_mapped: Vec<BasicInstr> = text

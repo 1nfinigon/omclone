@@ -48,12 +48,12 @@ pub fn check_solution(sol: &FullSolution, puzzle: &FullPuzzle, skip_overlap: boo
         newstats.area = oldstats.area
     };
     if &newstats == oldstats {
-        return CheckResult::Ok;
+        CheckResult::Ok
     } else {
-        return CheckResult::FailedStatMismatch(format!(
+        CheckResult::FailedStatMismatch(format!(
             "Stats don't match! {:?} vs true {:?}",
             newstats, oldstats
-        ));
+        ))
     }
 }
 
