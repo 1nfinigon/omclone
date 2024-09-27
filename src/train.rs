@@ -98,17 +98,18 @@ fn process_one_solution(
                 // from MCTS
                 let loss_weights = [0.00001, 1.0, 1.0];
 
-                if rng.gen_bool(if instr == BasicInstr::Empty {
-                    0.1
-                } else {
-                    1.0
-                }) {
+                if rng.gen_bool(if instr == BasicInstr::Empty { 0.1 } else { 1.0 }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
                     // it certainly gets us more data quicker though.
                     let mut visits = [1f32; BasicInstr::N_TYPES];
                     visits[instr.to_usize().unwrap()] = 4.;
-                    tensors.push((search_state.nn_features.clone(), visits, (x, y), loss_weights));
+                    tensors.push((
+                        search_state.nn_features.clone(),
+                        visits,
+                        (x, y),
+                        loss_weights,
+                    ));
                 }
             }
             search_history::Kind::MCTS => {
@@ -151,7 +152,14 @@ fn process_one_solution(
     };
 
     for (features, visits, pos, loss_weights) in tensors {
-        write_npz_files(file_index, features, final_result, visits, pos, loss_weights)?;
+        write_npz_files(
+            file_index,
+            features,
+            final_result,
+            visits,
+            pos,
+            loss_weights,
+        )?;
     }
 
     Ok(())

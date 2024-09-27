@@ -319,39 +319,151 @@ pub mod features {
         }
     }
 
+    trait SparseCooAsSlice {
+        fn set_slice(&mut self, coord: &[usize], value: f32);
+    }
+
+    #[derive(Clone, Debug)]
+    struct SparseCoo<const N: usize> {
+        /// flattened representation; indices.len() == nonzero_count * N
+        indices: Vec<i64>,
+        values: Vec<f32>,
+        size: [usize; N],
+    }
+
+    impl<const N: usize> SparseCoo<N> {
+        fn new(size: [usize; N]) -> Self {
+            Self {
+                indices: Vec::new(),
+                values: Vec::new(),
+                size,
+            }
+        }
+
+        fn set(&mut self, coord: &[usize; N], value: f32) {
+            for i in 0..N {
+                assert!(coord[i] < self.size[i]);
+                self.indices.push(coord[i].try_into().unwrap());
+            }
+            self.values.push(value);
+        }
+
+        fn clear(&mut self) {
+            self.indices.clear();
+            self.values.clear()
+        }
+
+        fn retain_coords_mut<F: FnMut(&mut [i64]) -> bool>(&mut self, mut f: F) {
+            let mut new_i = 0;
+            for old_i in 0..self.values.len() {
+                if f(&mut self.indices[old_i * N..(old_i + 1) * N]) {
+                    if old_i != new_i {
+                        self.indices
+                            .copy_within(old_i * N..(old_i + 1) * N, new_i * N);
+                        self.values[new_i] = self.values[old_i];
+                    }
+                    new_i += 1;
+                }
+            }
+            self.indices.truncate(new_i * N);
+            self.values.truncate(new_i);
+        }
+
+        fn slice_all_but_one_dim<'a>(
+            &mut self,
+            dim: usize,
+            other_coords: &[usize],
+        ) -> SparseCoo1DSlice {
+            assert_eq!(other_coords.len(), N - 1);
+            SparseCoo1DSlice {
+                underlying: Box::new(self),
+                dim,
+                other_coords: other_coords.to_owned(),
+            }
+        }
+
+        fn to_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
+            let indices = tch::Tensor::f_from_slice(&self.indices[..])?
+                .f_view([-1, N as i64])?
+                .f_t_()?;
+            let values = tch::Tensor::f_from_slice(&self.values[..])?;
+            let size: Vec<_> = self.size.iter().map(|s| *s as i64).collect();
+            let tensor = tch::Tensor::f_sparse_coo_tensor_indices_size(
+                &indices,
+                &values,
+                &size[..],
+                options,
+                true,
+            )?;
+            Ok(tensor)
+        }
+    }
+
+    impl<const N: usize> SparseCooAsSlice for SparseCoo<N> {
+        fn set_slice(&mut self, coord: &[usize], value: f32) {
+            self.set(coord.try_into().unwrap(), value)
+        }
+    }
+
+    struct SparseCoo1DSlice<'a> {
+        underlying: Box<&'a mut dyn SparseCooAsSlice>,
+        dim: usize,
+        other_coords: Vec<usize>,
+    }
+
+    impl<'a> SparseCoo1DSlice<'a> {
+        fn set(&mut self, this_coord: usize, value: f32) {
+            let n_dims = self.other_coords.len() + 1;
+            let mut coord = vec![0usize; n_dims];
+            for i in 0..n_dims {
+                coord[i] = match i.cmp(&self.dim) {
+                    std::cmp::Ordering::Less => self.other_coords[i],
+                    std::cmp::Ordering::Equal => this_coord,
+                    std::cmp::Ordering::Greater => self.other_coords[i - 1],
+                };
+            }
+            self.underlying.set_slice(&coord[..], value);
+        }
+    }
+
     #[derive(Clone)]
     pub struct Features {
-        pub spatial: [[[f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
-        pub spatiotemporal: [[[[f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT]; N_HISTORY_CYCLES],
-        pub temporal: [[f32; Temporal::SIZE]; N_HISTORY_CYCLES],
+        pub spatial: SparseCoo<3>,
+        pub spatiotemporal: SparseCoo<4>,
+        pub temporal: SparseCoo<2>,
     }
 
     impl Features {
         pub fn new() -> Self {
             Self {
-                spatial: [[[0f32; Spatial::SIZE]; N_WIDTH]; N_HEIGHT],
-                spatiotemporal: [[[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT];
-                    N_HISTORY_CYCLES],
-                temporal: [[0f32; Temporal::SIZE]; N_HISTORY_CYCLES],
+                spatial: SparseCoo::new([Spatial::SIZE, N_HEIGHT, N_WIDTH]),
+                spatiotemporal: SparseCoo::new([
+                    Spatiotemporal::SIZE,
+                    N_HISTORY_CYCLES,
+                    N_HEIGHT,
+                    N_WIDTH,
+                ]),
+                temporal: SparseCoo::new([Temporal::SIZE, N_HISTORY_CYCLES]),
             }
         }
 
-        fn get_spatial_mut(&mut self, pos: sim::Pos) -> Option<&mut [f32; Spatial::SIZE]> {
-            normalize_position(pos).map(|(x, y)| &mut self.spatial[y][x])
+        fn get_spatial_mut(&mut self, pos: sim::Pos) -> Option<SparseCoo1DSlice> {
+            normalize_position(pos).map(|(x, y)| self.spatial.slice_all_but_one_dim(0, &[y, x]))
         }
 
         fn get_spatiotemporal_mut(
             &mut self,
             time: usize,
             pos: sim::Pos,
-        ) -> Option<&mut [f32; Spatiotemporal::SIZE]> {
-            normalize_position(pos).map(|(x, y)| &mut self.spatiotemporal[time][y][x])
+        ) -> Option<SparseCoo1DSlice> {
+            normalize_position(pos)
+                .map(|(x, y)| self.spatiotemporal.slice_all_but_one_dim(0, &[time, y, x]))
         }
 
         /// Helper function for setting features relating to an Atom.
         fn set_atom(
             atom: &sim::Atom,
-            features: &mut [f32],
+            features: &mut SparseCoo1DSlice,
             offset_atom_type: OneHot<N_ATOM_TYPES>,
             offset_atom_bonds: [[Binary; N_BOND_TYPES]; N_ORIENTATIONS],
             offset_atom_is_berlo: Option<Binary>,
@@ -363,25 +475,28 @@ pub mod features {
                 is_berlo,
             } = atom;
             use num_traits::ToPrimitive;
-            features[offset_atom_type.get_onehot_offset(atom_type.to_usize().unwrap())] = 1.;
+            features.set(
+                offset_atom_type.get_onehot_offset(atom_type.to_usize().unwrap()),
+                1.,
+            );
             for rot in 0..6 {
                 if connections[rot].intersects(sim::Bonds::NORMAL) {
-                    features[offset_atom_bonds[rot][0].get_offset()] = 1.;
+                    features.set(offset_atom_bonds[rot][0].get_offset(), 1.);
                 }
                 if connections[rot].intersects(sim::Bonds::TRIPLEX_R) {
-                    features[offset_atom_bonds[rot][1].get_offset()] = 1.;
+                    features.set(offset_atom_bonds[rot][1].get_offset(), 1.);
                 }
                 if connections[rot].intersects(sim::Bonds::TRIPLEX_K) {
-                    features[offset_atom_bonds[rot][2].get_offset()] = 1.;
+                    features.set(offset_atom_bonds[rot][2].get_offset(), 1.);
                 }
                 if connections[rot].intersects(sim::Bonds::TRIPLEX_Y) {
-                    features[offset_atom_bonds[rot][3].get_offset()] = 1.;
+                    features.set(offset_atom_bonds[rot][3].get_offset(), 1.);
                 }
             }
             match offset_atom_is_berlo {
                 Some(offset_atom_is_berlo) => {
                     if *is_berlo {
-                        features[offset_atom_is_berlo.get_offset()] = 1.;
+                        features.set(offset_atom_is_berlo.get_offset(), 1.);
                     }
                 }
                 None => assert!(!is_berlo),
@@ -417,45 +532,50 @@ pub mod features {
             for glyph in world.glyphs.iter() {
                 let positions = glyph.positions();
                 for (i, position) in positions.iter().enumerate() {
-                    if let Some(features) = self.get_spatial_mut(*position) {
-                        features[glyph_orientation
-                            .get_onehot_offset(sim::normalize_dir(glyph.rot) as usize)] = 1.;
+                    if let Some(mut features) = self.get_spatial_mut(*position) {
+                        features.set(
+                            glyph_orientation
+                                .get_onehot_offset(sim::normalize_dir(glyph.rot) as usize),
+                            1.,
+                        );
                         use sim::GlyphType;
                         match &glyph.glyph_type {
                             GlyphType::Calcification => {
-                                features[glyph_calcification.get_onehot_offset(i)] = 1.
+                                features.set(glyph_calcification.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Animismus => {
-                                features[glyph_animismus.get_onehot_offset(i)] = 1.
+                                features.set(glyph_animismus.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Projection => {
-                                features[glyph_projection.get_onehot_offset(i)] = 1.
+                                features.set(glyph_projection.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Dispersion => {
-                                features[glyph_dispersion.get_onehot_offset(i)] = 1.
+                                features.set(glyph_dispersion.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Purification => {
-                                features[glyph_purification.get_onehot_offset(i)] = 1.
+                                features.set(glyph_purification.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Duplication => {
-                                features[glyph_duplication.get_onehot_offset(i)] = 1.
+                                features.set(glyph_duplication.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Unification => {
-                                features[glyph_unification.get_onehot_offset(i)] = 1.
+                                features.set(glyph_unification.get_onehot_offset(i), 1.)
                             }
-                            GlyphType::Bonding => features[glyph_bonding.get_onehot_offset(i)] = 1.,
+                            GlyphType::Bonding => {
+                                features.set(glyph_bonding.get_onehot_offset(i), 1.)
+                            }
                             GlyphType::Unbonding => {
-                                features[glyph_unbonding.get_onehot_offset(i)] = 1.
+                                features.set(glyph_unbonding.get_onehot_offset(i), 1.)
                             }
                             GlyphType::TriplexBond => {
-                                features[glyph_triplex_bond.get_onehot_offset(i)] = 1.
+                                features.set(glyph_triplex_bond.get_onehot_offset(i), 1.)
                             }
                             GlyphType::MultiBond => {
-                                features[glyph_multi_bond.get_onehot_offset(i)] = 1.
+                                features.set(glyph_multi_bond.get_onehot_offset(i), 1.)
                             }
                             GlyphType::Disposal => {
                                 if i == 0 {
-                                    features[glyph_disposal.get_offset()] = 1.
+                                    features.set(glyph_disposal.get_offset(), 1.)
                                 }
                             }
                             GlyphType::Equilibrium => (),
@@ -464,12 +584,14 @@ pub mod features {
                                 if i >= 1 {
                                     let other_pos = positions[i - 1];
                                     let rot = sim::pos_to_rot(other_pos - position).unwrap();
-                                    features[track_minus_dir.get_onehot_offset(rot as usize)] = 1.;
+                                    features
+                                        .set(track_minus_dir.get_onehot_offset(rot as usize), 1.);
                                 }
                                 if i + 1 < positions.len() {
                                     let other_pos = positions[i + 1];
                                     let rot = sim::pos_to_rot(other_pos - position).unwrap();
-                                    features[track_plus_dir.get_onehot_offset(rot as usize)] = 1.;
+                                    features
+                                        .set(track_plus_dir.get_onehot_offset(rot as usize), 1.);
                                 }
                             }
                             GlyphType::Conduit(_, _) => unimplemented!(),
@@ -477,7 +599,7 @@ pub mod features {
                                 assert!(pattern[i].pos == *position);
                                 Self::set_atom(
                                     &pattern[i],
-                                    features,
+                                    &mut features,
                                     input_atom_type,
                                     input_bonds,
                                     None,
@@ -487,15 +609,18 @@ pub mod features {
                                 assert!(pattern[i].pos == *position);
                                 Self::set_atom(
                                     &pattern[i],
-                                    features,
+                                    &mut features,
                                     output_atom_type,
                                     output_bonds,
                                     None,
                                 );
                                 if *count_left > 0 {
-                                    features[output_count_minus_one.get_onehot_offset(
-                                        (*count_left as usize).min(N_MAX_PRODUCTS) - 1,
-                                    )] = 1.;
+                                    features.set(
+                                        output_count_minus_one.get_onehot_offset(
+                                            (*count_left as usize).min(N_MAX_PRODUCTS) - 1,
+                                        ),
+                                        1.,
+                                    );
                                 }
                             }
                             GlyphType::OutputRepeating(_, _, _) => unimplemented!(),
@@ -529,8 +654,8 @@ pub mod features {
             } = Spatiotemporal::OFFSETS;
 
             for position in world.area_touched.iter() {
-                if let Some(features) = self.get_spatiotemporal_mut(time, *position) {
-                    features[used.get_offset()] = 1.;
+                if let Some(mut features) = self.get_spatiotemporal_mut(time, *position) {
+                    features.set(used.get_offset(), 1.);
                 }
             }
 
@@ -543,24 +668,29 @@ pub mod features {
                     grabbing,
                     atoms_grabbed,
                 } = arm;
-                if let Some(features) = self.get_spatiotemporal_mut(time, *pos) {
-                    features[arm_base_length.get_onehot_offset((len - 1).try_into().unwrap())] = 1.;
+                if let Some(mut features) = self.get_spatiotemporal_mut(time, *pos) {
+                    features.set(
+                        arm_base_length.get_onehot_offset((len - 1).try_into().unwrap()),
+                        1.,
+                    );
                     if *arm_type == sim::ArmType::Piston {
-                        features[arm_base_is_piston.get_offset()] = 1.;
+                        features.set(arm_base_is_piston.get_offset(), 1.);
                     }
                     if *grabbing {
-                        features[arm_base_is_grabbing.get_offset()] = 1.;
+                        features.set(arm_base_is_grabbing.get_offset(), 1.);
                     }
                     if *arm_type == sim::ArmType::VanBerlo {
-                        features[arm_base_is_berlo.get_offset()] = 1.;
+                        features.set(arm_base_is_berlo.get_offset(), 1.);
                     }
                     for rel_r in (0..6).step_by(arm_type.angles_between_arm() as usize) {
                         let abs_r = sim::normalize_dir(rel_r + rot);
-                        features[arm_in_orientation[abs_r as usize].get_offset()] = 1.;
+                        features.set(arm_in_orientation[abs_r as usize].get_offset(), 1.);
                         use slotmap::Key;
                         if !atoms_grabbed[rel_r as usize].is_null() {
-                            features[arm_in_orientation_and_holding_atom[abs_r as usize]
-                                .get_offset()] = 1.;
+                            features.set(
+                                arm_in_orientation_and_holding_atom[abs_r as usize].get_offset(),
+                                1.,
+                            );
                         }
                     }
                 }
@@ -568,8 +698,14 @@ pub mod features {
 
             for atom in world.atoms.atom_map.values() {
                 let pos = atom.pos;
-                if let Some(features) = self.get_spatiotemporal_mut(time, pos) {
-                    Self::set_atom(atom, features, atom_type, atom_bonds, Some(atom_is_berlo));
+                if let Some(mut features) = self.get_spatiotemporal_mut(time, pos) {
+                    Self::set_atom(
+                        atom,
+                        &mut features,
+                        atom_type,
+                        atom_bonds,
+                        Some(atom_is_berlo),
+                    );
                 }
             }
 
@@ -577,17 +713,21 @@ pub mod features {
                 cycles,
                 cycles_remaining,
             } = Temporal::OFFSETS;
-            self.temporal[time][cycles.get_offset()] = (world.timestep as f64 / 100.).tanh() as f32;
-            self.temporal[time][cycles_remaining.get_offset()] =
-                (cycles_remaining_value as f64 / 100.).tanh() as f32;
+            self.temporal.set(
+                &[cycles.get_offset(), time],
+                (world.timestep as f64 / 100.).tanh() as f32,
+            );
+            self.temporal.set(
+                &[cycles_remaining.get_offset(), time],
+                (cycles_remaining_value as f64 / 100.).tanh() as f32,
+            );
         }
 
         /// Set all timesteps' data to this world. Used for initialization.
         pub fn init_all_temporal(&mut self, world: &sim::World, cycles_remaining_value: u64) {
-            self.set_temporal_except_instr(0, world, cycles_remaining_value);
-            for time in 1..N_HISTORY_CYCLES {
-                self.spatiotemporal[time] = self.spatiotemporal[0];
-                self.temporal[time] = self.temporal[0];
+            // TODO: minor optim, could do just time and then do a blind copy for all other ts
+            for t in 0..N_HISTORY_CYCLES {
+                self.set_temporal_except_instr(t, world, cycles_remaining_value);
             }
         }
 
@@ -601,48 +741,41 @@ pub mod features {
             let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
             let arm = &world.arms[arm_idx];
             let pos = arm.pos;
-            if let Some(features) = self.get_spatiotemporal_mut(time, pos) {
+            if let Some(mut features) = self.get_spatiotemporal_mut(time, pos) {
                 use num_traits::ToPrimitive;
-                features[arm_base_instr.get_onehot_offset(instr.to_usize().unwrap())] = 1.;
+                features.set(
+                    arm_base_instr.get_onehot_offset(instr.to_usize().unwrap()),
+                    1.,
+                );
             }
         }
 
         /// Copies all temporal data one timestep later. The current timestep's
         /// temporal data is cleared.
         pub fn shift_temporal(&mut self) {
-            self.spatiotemporal
-                .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
-            self.temporal
-                .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
-            self.clear_temporal(0);
-        }
-
-        /// Fully erases the current timestep's temporal data.
-        pub fn clear_temporal(&mut self, time: usize) {
-            self.spatiotemporal[0] = [[[0f32; Spatiotemporal::SIZE]; N_WIDTH]; N_HEIGHT];
-            self.temporal[0] = [0f32; Temporal::SIZE];
-        }
-
-        /// Erases the current timestep's temporal instr data.
-        pub fn clear_temporal_instr(&mut self, time: usize) {
-            let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
-            for y in 0..N_WIDTH {
-                for x in 0..N_HEIGHT {
-                    let features = &mut self.spatiotemporal[time][y][x];
-                    for offset in arm_base_instr.get_offsets() {
-                        features[offset] = 0.;
-                    }
+            self.spatiotemporal.retain_coords_mut(|c| {
+                if c[1] + 1 >= N_HISTORY_CYCLES as i64 {
+                    false
+                } else {
+                    c[1] += 1;
+                    true
                 }
-            }
+            });
+            self.temporal.retain_coords_mut(|c| {
+                if c[1] + 1 >= N_HISTORY_CYCLES as i64 {
+                    false
+                } else {
+                    c[1] += 1;
+                    true
+                }
+            });
         }
 
         pub fn to_tensor(
             &self,
-            device: tch::Device,
+            options: (tch::Kind, tch::Device),
         ) -> Result<(tch::Tensor, tch::Tensor, tch::Tensor)> {
             // TODO: all this copying is very slow
-            let options = (tch::Kind::Float, device);
-
             const S: usize = feature_offsets::Spatial::SIZE;
             const H: usize = constants::N_HEIGHT;
             const W: usize = constants::N_WIDTH;
@@ -650,46 +783,11 @@ pub mod features {
             const T: usize = constants::N_HISTORY_CYCLES;
             const G: usize = feature_offsets::Temporal::SIZE;
 
-            let mut spatial_input = Vec::with_capacity(S * H * W);
-            let mut spatiotemporal_input = Vec::with_capacity(X * T * H * W);
-            let mut temporal_input = Vec::with_capacity(G * T);
+            let spatial_input = self.spatial.to_tensor(options)?;
+            let spatiotemporal_input = self.spatiotemporal.to_tensor(options)?;
+            let temporal_input = self.temporal.to_tensor(options)?;
 
-            for i_s in 0..S {
-                for i_h in 0..H {
-                    for i_w in 0..W {
-                        spatial_input.push(self.spatial[i_h][i_w][i_s]);
-                    }
-                }
-            }
-
-            for i_x in 0..X {
-                for i_t in 0..T {
-                    for i_h in 0..H {
-                        for i_w in 0..W {
-                            spatiotemporal_input.push(self.spatiotemporal[i_t][i_h][i_w][i_x]);
-                        }
-                    }
-                }
-            }
-
-            for i_g in 0..G {
-                for i_t in 0..T {
-                    temporal_input.push(self.temporal[i_t][i_g]);
-                }
-            }
-
-            let spatial_input = tch::Tensor::f_from_slice(&spatial_input[..])?
-                .f_view([S as i64, H as i64, W as i64])?;
-            let spatiotemporal_input = tch::Tensor::f_from_slice(&spatiotemporal_input[..])?
-                .f_view([X as i64, T as i64, H as i64, W as i64])?;
-            let temporal_input =
-                tch::Tensor::f_from_slice(&temporal_input[..])?.f_view([G as i64, T as i64])?;
-
-            Ok((
-                spatial_input.f_to(device)?,
-                spatiotemporal_input.f_to(device)?,
-                temporal_input.f_to(device)?,
-            ))
+            Ok((spatial_input, spatiotemporal_input, temporal_input))
         }
     }
 }
@@ -743,12 +841,16 @@ pub mod model {
             assert!(y < constants::N_HEIGHT);
 
             let (spatial_input, spatiotemporal_input, temporal_input) =
-                features.to_tensor(self.device)?;
+                features.to_tensor((tch::Kind::Float, self.device))?;
 
             let input = [
-                tch::IValue::Tensor(spatial_input.unsqueeze(0)),
-                tch::IValue::Tensor(spatiotemporal_input.unsqueeze(0)),
-                tch::IValue::Tensor(temporal_input.unsqueeze(0)),
+                tch::IValue::Tensor(spatial_input.f_unsqueeze(0)?.f_to_dense(None, false)?),
+                tch::IValue::Tensor(
+                    spatiotemporal_input
+                        .f_unsqueeze(0)?
+                        .f_to_dense(None, false)?,
+                ),
+                tch::IValue::Tensor(temporal_input.f_unsqueeze(0)?.f_to_dense(None, false)?),
                 tch::IValue::Tensor(
                     tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
                         .f_to(self.device)?,
