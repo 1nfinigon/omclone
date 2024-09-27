@@ -12,7 +12,7 @@ def device():
         for i in range(torch.cuda.device_count()):
             d = torch.cuda.device(i)
             w = torch.cuda.power_draw(d)
-            if min_d is None or w < min_w:
+            if min_i is None or w < min_w:
                 min_i, min_w = i, w
         print("Selected device ", min_i)
         return torch.device('cuda:{}'.format(min_i))
