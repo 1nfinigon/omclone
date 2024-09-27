@@ -34,8 +34,13 @@ $ cargo run --features color_eyre,nn --bin solver
 Technical/impl work:
 
 -   Generate solutions that have low cycles-left but still fail
-    -    ...because the layout is bad
-    -    ...because the layout is good but there's just not enough cycles left
+    -   ...because the layout is bad
+    -   ...because the layout is good but there's just not enough cycles left
+-   Randomly generate some training samples that have no history
+-   Evaluate and monitor
+    -   proportion of successful solves (where it had to find _n_ moves,
+        as a function of _n_?)
+    -   how well does it solve with no history?
 -   Train a timesteps-left head on existing solutions
 -   sparse tensors forfeatures and training data (right now bottlenecked on disk
     read speed, ~500MB/s)
