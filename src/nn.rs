@@ -308,10 +308,10 @@ impl<const N: usize> SparseCoo<N> {
         }
     }
 
-    fn set(&mut self, coord: &[usize; N], value: f32) {
-        for i in 0..N {
-            assert!(coord[i] < self.size[i] as usize);
-            self.indices.push(coord[i].try_into().unwrap());
+    fn set(&mut self, coords: &[usize; N], value: f32) {
+        for (&coord, &size) in coords.iter().zip(self.size.iter()) {
+            assert!(coord < size as usize);
+            self.indices.push(coord.try_into().unwrap());
         }
         self.values.push(value);
     }

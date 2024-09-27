@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
+use std::fmt::{Display, Write};
 use std::{error, f32::consts::PI, fmt};
 
 #[derive(Debug)]
@@ -275,17 +276,19 @@ impl<InstrT: Copy + From<BasicInstr>> Tape<InstrT> {
     }
 }
 
-impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
-    pub fn to_string(&self) -> String {
-        let mut output = " ".repeat(self.first);
+impl<InstrT: InstrToChar> Display for Tape<InstrT> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&" ".repeat(self.first))?;
         for i in &self.instructions {
-            output.push(i.to_char());
+            f.write_char(i.to_char())?;
         }
-        output
+        Ok(())
     }
+}
 
+impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
     pub fn clear_leading_emptys(&mut self) {
-        while self.instructions.get(0) == Some(&BasicInstr::Empty.into()) {
+        while self.instructions.first() == Some(&BasicInstr::Empty.into()) {
             self.first += 1;
             self.instructions.remove(0);
         }
@@ -298,7 +301,7 @@ impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
 }
 
 pub fn normalize_dir(r: Rot) -> Rot {
-    return r.rem_euclid(6);
+    r.rem_euclid(6)
 }
 
 pub fn pos_to_rot(input: Pos) -> Option<Rot> {
@@ -900,7 +903,7 @@ impl WorldAtoms {
         if atom_key != key {
             panic!("Inconsistent atoms (take key)!");
         }
-        return atom;
+        atom
     }
     fn create_atom(&mut self, atom: Atom) -> SimResult<AtomKey> {
         let key = self.atom_map.insert(atom);
@@ -970,12 +973,12 @@ pub struct FloatAtom {
 }
 impl From<&Atom> for FloatAtom {
     fn from(a: &Atom) -> FloatAtom {
-        return FloatAtom {
+        FloatAtom {
             pos: pos_to_xy(a.pos),
             rot: 0.,
             atom_type: a.atom_type,
             connections: a.connections,
-        };
+        }
     }
 }
 
@@ -1064,15 +1067,15 @@ impl FloatWorld {
             match movement {
                 Linear(offset) => {
                     let offset_xy = pos_to_xy(offset) - XYPos::origin();
-                    return (xy + (offset_xy * amount), 0.);
+                    (xy + (offset_xy * amount), 0.)
                 }
                 Rotation(r, pivot) => {
                     let pivot_xy = pos_to_xy(pivot);
                     let offset = xy - pivot_xy;
                     let rot = rot_to_angle(r) * amount;
-                    return (pivot_xy + (nalgebra::Rotation2::new(-rot) * offset), rot);
+                    (pivot_xy + (nalgebra::Rotation2::new(-rot) * offset), rot)
                 }
-                HeldStill => return (xy, 0.),
+                HeldStill => (xy, 0.),
             }
         }
         for (atom_key, atom) in &world.atoms.atom_map {
@@ -1240,7 +1243,7 @@ impl World {
                         STILL
                     }
                 } else {
-                    return Err(sim_error_pos(&"Extend on non-piston arm", arm.pos));
+                    return Err(sim_error_pos("Extend on non-piston arm", arm.pos));
                 }
             }
             Retract => {
@@ -1251,7 +1254,7 @@ impl World {
                         STILL
                     }
                 } else {
-                    return Err(sim_error_pos(&"Retract on non-piston arm", arm.pos));
+                    return Err(sim_error_pos("Retract on non-piston arm", arm.pos));
                 }
             }
             RotateCounterClockwise => Move(Rotation(1, arm.pos)),
@@ -1298,7 +1301,7 @@ impl World {
                 } else {
                     if !self.track_maps.minus.contains_key(&arm.pos) {
                         return Err(sim_error_pos(
-                            &"Forward on arm that's not on a track",
+                            "Forward on arm that's not on a track",
                             arm.pos,
                         ));
                     }
@@ -1314,7 +1317,7 @@ impl World {
                     }
                 } else {
                     if !self.track_maps.plus.contains_key(&arm.pos) {
-                        return Err(sim_error_pos(&"Back on arm that's not on a track", arm.pos));
+                        return Err(sim_error_pos("Back on arm that's not on a track", arm.pos));
                     }
                     STILL
                 }
@@ -1329,14 +1332,13 @@ impl World {
                     ArmMovement::Move(m) => m,
                     ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store) * a),
                 };
-                let tmp = motion.atoms.insert(atom, atom_movement);
-                match tmp {
+                match motion.atoms.insert(atom, atom_movement) {
                     Some(x) if x != atom_movement => {
                         //println!("was {:?},applying {:?}", atom_movement, x);
-                        let error_str = &"Atom moved in multiple directions!";
+                        let error_str = "Atom moved in multiple directions!";
                         return Err(sim_error_pos(error_str, self.atoms.atom_map[atom].pos));
                     }
-                    _ => {}
+                    _ => (),
                 }
             }
         }
@@ -1348,15 +1350,12 @@ impl World {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
-            match &mut glyph.glyph_type {
-                Input(pattern, _) => {
-                    if pattern.iter().all(|a| atoms.check_empty(motion, a.pos)) {
-                        for a in pattern {
-                            atoms.create_atom(a.clone())?;
-                        }
+            if let Input(pattern, _) = &mut glyph.glyph_type {
+                if pattern.iter().all(|a| atoms.check_empty(motion, a.pos)) {
+                    for a in pattern {
+                        atoms.create_atom(a.clone())?;
                     }
                 }
-                _ => {}
             }
         }
         Ok(())
@@ -1644,7 +1643,7 @@ impl World {
                     }
                 }
                 Disposal => {
-                    if let Some(_) = atoms.get_consumable_type_immediate(motion, pos) {
+                    if atoms.get_consumable_type_immediate(motion, pos).is_some() {
                         atoms.destroy_atom_at(pos);
                     }
                 }
@@ -1696,7 +1695,7 @@ impl World {
         let mut offset_rot = conduit_info.offset_rot;
         if conduit_info.vecids.0 == glyph_id {
             offset_pos *= -1;
-            offset_rot = normalize_dir(offset_rot * -1);
+            offset_rot = normalize_dir(-offset_rot);
         } else {
             assert!(conduit_info.vecids.1 == glyph_id, "Conduit invalid vec id");
         }
@@ -1730,7 +1729,7 @@ impl World {
                             }
                         }
                     }
-                    return true;
+                    true
                 };
                 //If the atom was just dropped and all connected are on the conduit, move the atoms to the new position via spawning
                 if motion.drop_conduit_check.contains(key) && atoms_send_check(*key) {
@@ -1890,8 +1889,8 @@ impl World {
     ) -> SimResult<()> {
         motion.clear();
         assert_eq!(instructions.len(), self.arms.len());
-        for i in 0..self.arms.len() {
-            self.do_instruction(motion, i, instructions[i])?;
+        for (i, &instruction) in instructions.iter().enumerate() {
+            self.do_instruction(motion, i, instruction)?;
         }
         self.process_inputs(motion)?;
         self.process_glyphs(motion, true)?;
@@ -1904,7 +1903,7 @@ impl World {
                     let location = pos_to_xy(position);
                     return Err(SimError {
                         location,
-                        error_str: &"Arm-Arm collision!",
+                        error_str: "Arm-Arm collision!",
                     });
                 }
             }
@@ -1970,31 +1969,26 @@ impl World {
 
 /// Setup stuff
 impl World {
-    fn add_track(track_maps: &mut TrackMaps, track_pos: &Vec<Pos>) -> Result<()> {
-        ensure!(track_pos.len() > 0, "Track of length 0!");
-        fn try_insert(map: &mut TrackMap, key: Pos, value: Pos) {
-            if !map.contains_key(&key) {
-                map.insert(key, value);
-            }
-        }
+    fn add_track(track_maps: &mut TrackMaps, track_pos: &[Pos]) -> Result<()> {
+        ensure!(!track_pos.is_empty(), "Track of length 0!");
         //first do all except the possible loopback
         for track_pair in track_pos.windows(2) {
             let (t_prev, t_now) = (track_pair[0], track_pair[1]);
             let offset = t_now - t_prev;
-            try_insert(&mut track_maps.minus, t_now, -offset);
-            try_insert(&mut track_maps.plus, t_prev, offset);
+            track_maps.minus.entry(t_now).or_insert(-offset);
+            track_maps.plus.entry(t_prev).or_insert(offset);
         }
         let first = *track_pos.first().unwrap();
         let last = *track_pos.last().unwrap();
         let offset = first - last;
         //check for looping on first/last
         if track_pos.len() > 2 && pos_to_rot(offset).is_some() {
-            try_insert(&mut track_maps.minus, first, -offset);
-            try_insert(&mut track_maps.plus, last, offset);
+            track_maps.minus.entry(first).or_insert(-offset);
+            track_maps.plus.entry(last).or_insert(offset);
         } else {
             //If not looping, block future track overlaps here
-            try_insert(&mut track_maps.minus, first, Pos::new(0, 0));
-            try_insert(&mut track_maps.plus, last, Pos::new(0, 0));
+            track_maps.minus.entry(first).or_insert(Pos::new(0, 0));
+            track_maps.plus.entry(last).or_insert(Pos::new(0, 0));
         }
         Ok(())
     }
@@ -2051,9 +2045,8 @@ impl World {
                 use AtomType::*;
                 a.grabbing = true;
                 const ATOM_SETUP: [AtomType; 6] = [Salt, Water, Air, Salt, Fire, Earth];
-                for i in 0..6 {
+                for (i, &atom_type) in ATOM_SETUP.iter().enumerate() {
                     let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
-                    let atom_type = ATOM_SETUP[i];
                     let key = world.atoms.create_atom(Atom {
                         pos,
                         atom_type,
@@ -2068,7 +2061,10 @@ impl World {
         let mut unfinished_conduit_count = 0;
         for (id, glyph) in world.glyphs.iter_mut().enumerate() {
             if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
-                if pattern.iter().all(|a| world.atoms.locs.get(&a.pos) == None) {
+                if pattern
+                    .iter()
+                    .all(|a| !world.atoms.locs.contains_key(&a.pos))
+                {
                     for a in pattern {
                         world.atoms.create_atom(a.clone())?;
                     }
@@ -2291,7 +2287,7 @@ impl WorldWithTapes {
                     }
                     position_check = original_arm.pos;
 
-                    if reset_vec.len() == 0 {
+                    if reset_vec.is_empty() {
                         reset_vec.push(BasicInstr::Empty);
                     };
                     for i in 0..reset_vec.len() {
@@ -2369,7 +2365,7 @@ impl WorldWithTapes {
     }
 
     fn get_first_timestep(&self) -> u64 {
-        if self.tapes.len() == 0 {
+        if self.tapes.is_empty() {
             return 0;
         }
         self.tapes

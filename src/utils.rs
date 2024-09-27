@@ -16,30 +16,27 @@ pub const PUZZLE_DIR: &str = "test/puzzle";
 pub type PuzzleMap = HashMap<String, (PathBuf, parser::FullPuzzle)>;
 
 pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Path>) {
-    for f in fs::read_dir(directory).unwrap() {
-        if let Ok(f) = f {
-            let ftype = f.file_type().unwrap();
-            if ftype.is_dir() {
-                read_puzzle_recurse(puzzle_map, &f.path());
-            } else if ftype.is_file() {
-                let f_puzzle = File::open(f.path()).unwrap();
-                let fname = f.file_name().into_string().unwrap();
-                let fname = fname.strip_suffix(".puzzle").unwrap_or(&fname);
-                if let Ok(puzzle) = parser::parse_puzzle(&mut BufReader::new(f_puzzle)) {
-                    if puzzle.outputs.iter().any(|atoms| {
-                        atoms
-                            .iter()
-                            .any(|atom| atom.atom_type == AtomType::RepeatingOutputMarker)
-                    }) {
-                        println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
-                    } else {
-                        let existing_puzzle =
-                            puzzle_map.insert(fname.to_string(), (f.path(), puzzle));
-                        assert!(existing_puzzle.is_none());
-                    }
+    for f in fs::read_dir(directory).unwrap().flatten() {
+        let ftype = f.file_type().unwrap();
+        if ftype.is_dir() {
+            read_puzzle_recurse(puzzle_map, f.path());
+        } else if ftype.is_file() {
+            let f_puzzle = File::open(f.path()).unwrap();
+            let fname = f.file_name().into_string().unwrap();
+            let fname = fname.strip_suffix(".puzzle").unwrap_or(&fname);
+            if let Ok(puzzle) = parser::parse_puzzle(&mut BufReader::new(f_puzzle)) {
+                if puzzle.outputs.iter().any(|atoms| {
+                    atoms
+                        .iter()
+                        .any(|atom| atom.atom_type == AtomType::RepeatingOutputMarker)
+                }) {
+                    println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
                 } else {
-                    println!("Puzzle failed to load: {:?}", f.path());
+                    let existing_puzzle = puzzle_map.insert(fname.to_string(), (f.path(), puzzle));
+                    assert!(existing_puzzle.is_none());
                 }
+            } else {
+                println!("Puzzle failed to load: {:?}", f.path());
             }
         }
     }
@@ -50,16 +47,14 @@ pub fn read_file_suffix_recurse<F: FnMut(PathBuf)>(
     suffix: &str,
     directory: impl AsRef<Path>,
 ) {
-    for f in fs::read_dir(directory).unwrap() {
-        if let Ok(f) = f {
-            let ftype = f.file_type().unwrap();
-            if ftype.is_dir() {
-                read_file_suffix_recurse(cb, suffix, &f.path());
-            } else if ftype.is_file() {
-                let fname = f.file_name().into_string().unwrap();
-                if fname.ends_with(suffix) {
-                    cb(f.path());
-                }
+    for f in fs::read_dir(directory).unwrap().flatten() {
+        let ftype = f.file_type().unwrap();
+        if ftype.is_dir() {
+            read_file_suffix_recurse(cb, suffix, f.path());
+        } else if ftype.is_file() {
+            let fname = f.file_name().into_string().unwrap();
+            if fname.ends_with(suffix) {
+                cb(f.path());
             }
         }
     }
