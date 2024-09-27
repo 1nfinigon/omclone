@@ -195,15 +195,14 @@ fn write_stats(f: &mut impl Write, stats: &Option<SolutionStats>) -> Result<()> 
 
 #[derive(Debug, PartialEq, Eq)]
 enum PartType {
-    TGlyph(BasicGlyphType),
-    TArm(ArmType),
-    TTrack,
-    TInput,
-    TOutput,
-    TOutputRep,
-    TConduit,
+    Glyph(BasicGlyphType),
+    Arm(ArmType),
+    Track,
+    Input,
+    Output,
+    OutputRep,
+    Conduit,
 }
-use PartType::*;
 struct Part {
     part_type: PartType,
     pos: Pos,
@@ -219,30 +218,30 @@ fn name_to_part_type(name: String) -> Result<PartType> {
     use ArmType::*;
     use BasicGlyphType::*;
     Ok(match name.as_str() {
-        "glyph-calcification" => TGlyph(Calcification),
-        "glyph-life-and-death" => TGlyph(Animismus),
-        "glyph-projection" => TGlyph(Projection),
-        "glyph-dispersion" => TGlyph(Dispersion),
-        "glyph-purification" => TGlyph(Purification),
-        "glyph-duplication" => TGlyph(Duplication),
-        "glyph-unification" => TGlyph(Unification),
-        "bonder" => TGlyph(Bonding),
-        "unbonder" => TGlyph(Unbonding),
-        "bonder-prisma" => TGlyph(TriplexBond),
-        "bonder-speed" => TGlyph(MultiBond),
-        "glyph-disposal" => TGlyph(Disposal),
-        "glyph-marker" => TGlyph(Equilibrium),
-        "arm1" => TArm(PlainArm),
-        "arm2" => TArm(DoubleArm),
-        "arm3" => TArm(TripleArm),
-        "arm6" => TArm(HexArm),
-        "piston" => TArm(Piston),
-        "baron" => TArm(VanBerlo),
-        "track" => TTrack,
-        "input" => TInput,
-        "out-std" => TOutput,
-        "out-rep" => TOutputRep,
-        "pipe" => TConduit,
+        "glyph-calcification" => PartType::Glyph(Calcification),
+        "glyph-life-and-death" => PartType::Glyph(Animismus),
+        "glyph-projection" => PartType::Glyph(Projection),
+        "glyph-dispersion" => PartType::Glyph(Dispersion),
+        "glyph-purification" => PartType::Glyph(Purification),
+        "glyph-duplication" => PartType::Glyph(Duplication),
+        "glyph-unification" => PartType::Glyph(Unification),
+        "bonder" => PartType::Glyph(Bonding),
+        "unbonder" => PartType::Glyph(Unbonding),
+        "bonder-prisma" => PartType::Glyph(TriplexBond),
+        "bonder-speed" => PartType::Glyph(MultiBond),
+        "glyph-disposal" => PartType::Glyph(Disposal),
+        "glyph-marker" => PartType::Glyph(Equilibrium),
+        "arm1" => PartType::Arm(PlainArm),
+        "arm2" => PartType::Arm(DoubleArm),
+        "arm3" => PartType::Arm(TripleArm),
+        "arm6" => PartType::Arm(HexArm),
+        "piston" => PartType::Arm(Piston),
+        "baron" => PartType::Arm(VanBerlo),
+        "track" => PartType::Track,
+        "input" => PartType::Input,
+        "out-std" => PartType::Output,
+        "out-rep" => PartType::OutputRep,
+        "pipe" => PartType::Conduit,
         _ => bail!("Arm/Glyph {:?} not recognized", name),
     })
 }
@@ -250,30 +249,30 @@ fn part_type_to_name(part: &PartType) -> Result<&'static str> {
     use ArmType::*;
     use BasicGlyphType::*;
     Ok(match part {
-        TGlyph(Calcification) => "glyph-calcification",
-        TGlyph(Animismus) => "glyph-life-and-death",
-        TGlyph(Projection) => "glyph-projection",
-        TGlyph(Dispersion) => "glyph-dispersion",
-        TGlyph(Purification) => "glyph-purification",
-        TGlyph(Duplication) => "glyph-duplication",
-        TGlyph(Unification) => "glyph-unification",
-        TGlyph(Bonding) => "bonder",
-        TGlyph(Unbonding) => "unbonder",
-        TGlyph(TriplexBond) => "bonder-prisma",
-        TGlyph(MultiBond) => "bonder-speed",
-        TGlyph(Disposal) => "glyph-disposal",
-        TGlyph(Equilibrium) => "glyph-marker",
-        TArm(PlainArm) => "arm1",
-        TArm(DoubleArm) => "arm2",
-        TArm(TripleArm) => "arm3",
-        TArm(HexArm) => "arm6",
-        TArm(Piston) => "piston",
-        TArm(VanBerlo) => "baron",
-        TTrack => "track",
-        TInput => "input",
-        TOutput => "out-std",
-        TOutputRep => "out-rep",
-        TConduit => "pipe",
+        PartType::Glyph(Calcification) => "glyph-calcification",
+        PartType::Glyph(Animismus) => "glyph-life-and-death",
+        PartType::Glyph(Projection) => "glyph-projection",
+        PartType::Glyph(Dispersion) => "glyph-dispersion",
+        PartType::Glyph(Purification) => "glyph-purification",
+        PartType::Glyph(Duplication) => "glyph-duplication",
+        PartType::Glyph(Unification) => "glyph-unification",
+        PartType::Glyph(Bonding) => "bonder",
+        PartType::Glyph(Unbonding) => "unbonder",
+        PartType::Glyph(TriplexBond) => "bonder-prisma",
+        PartType::Glyph(MultiBond) => "bonder-speed",
+        PartType::Glyph(Disposal) => "glyph-disposal",
+        PartType::Glyph(Equilibrium) => "glyph-marker",
+        PartType::Arm(PlainArm) => "arm1",
+        PartType::Arm(DoubleArm) => "arm2",
+        PartType::Arm(TripleArm) => "arm3",
+        PartType::Arm(HexArm) => "arm6",
+        PartType::Arm(Piston) => "piston",
+        PartType::Arm(VanBerlo) => "baron",
+        PartType::Track => "track",
+        PartType::Input => "input",
+        PartType::Output => "out-std",
+        PartType::OutputRep => "out-rep",
+        PartType::Conduit => "pipe",
     })
 }
 pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
@@ -304,7 +303,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
                 Instr::from_byte(action).ok_or(eyre!("invalid instruction"))?,
             ));
         }
-        let tracks = if part_type == PartType::TTrack {
+        let tracks = if part_type == PartType::Track {
             let track_count = parse_i32(f)?;
             let mut inner_tracks = Vec::new();
             for _ in 0..track_count {
@@ -315,7 +314,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
             None
         };
         let arm_index = parse_i32(f)?;
-        let conduit = if part_type == PartType::TConduit {
+        let conduit = if part_type == PartType::Conduit {
             let conduit_id = parse_i32(f)?;
             let conduit_count = parse_i32(f)?;
             let mut inner_conduits = Vec::new();
@@ -362,21 +361,21 @@ pub fn create_solution(
         //Clone and return points to relative position (absolute position done in setup_sim/reposition_glyph)
         let (part_type, input_output_index, tracks, conduit) = match &glyph.glyph_type {
             GlyphType::Track(track) => (
-                TTrack,
+                PartType::Track,
                 0,
                 Some(track.iter().map(|x| rotate(x - pos, -rot)).collect()),
                 None,
             ),
-            GlyphType::Input(_, id) => (TInput, *id, None, None),
-            GlyphType::Output(_, _, id) => (TOutput, *id, None, None),
-            GlyphType::OutputRepeating(_, _, id) => (TOutputRep, *id, None, None),
+            GlyphType::Input(_, id) => (PartType::Input, *id, None, None),
+            GlyphType::Output(_, _, id) => (PartType::Output, *id, None, None),
+            GlyphType::OutputRepeating(_, _, id) => (PartType::OutputRep, *id, None, None),
             GlyphType::Conduit(conduit, id) => (
-                TConduit,
+                PartType::Conduit,
                 *id,
                 None,
                 Some((*id, conduit.iter().map(|x| rotate(x - pos, -rot)).collect())),
             ),
-            basic_glyph_type => (TGlyph(basic_glyph_type.try_into().unwrap()), 0, None, None),
+            basic_glyph_type => (PartType::Glyph(basic_glyph_type.try_into().unwrap()), 0, None, None),
         };
         part_list.push(Part {
             part_type,
@@ -396,7 +395,7 @@ pub fn create_solution(
         let mut tape = tape.clone();
         tape.clear_leading_emptys();
 
-        let part_type = TArm(arm.arm_type);
+        let part_type = PartType::Arm(arm.arm_type);
         let pos = arm.pos;
         let arm_size = arm.len;
         let rot = arm.rot;
@@ -452,7 +451,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
         }
         if let Some(tracks) = &part.tracks {
             ensure!(
-                part.part_type == PartType::TTrack,
+                part.part_type == PartType::Track,
                 "Tracks on non-track piece"
             );
             write_i32(f, tracks.len() as i32)?;
@@ -463,7 +462,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
         write_i32(f, part.arm_index)?;
         if let Some((id, conduits)) = &part.conduit {
             ensure!(
-                part.part_type == PartType::TConduit,
+                part.part_type == PartType::Conduit,
                 "Conduits on non-conduit piece"
             );
             write_i32(f, *id)?;
@@ -682,14 +681,14 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
     let mut arms_and_tapes = Vec::new();
     for p in &soln.part_list {
         match &p.part_type {
-            TGlyph(gtype) => {
+            PartType::Glyph(gtype) => {
                 glyphs.push(Glyph {
                     glyph_type: (*gtype).into(),
                     pos: p.pos,
                     rot: p.rot,
                 });
             }
-            TArm(atype) => {
+            PartType::Arm(atype) => {
                 let instr = process_instructions(&p.instructions)?;
                 arms_and_tapes.push((
                     Arm::new(p.pos, p.rot, p.arm_size, *atype),
@@ -697,7 +696,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     p.arm_index,
                 ));
             }
-            TInput => {
+            PartType::Input => {
                 let id = p.input_output_index;
                 let pattern = puzzle.inputs.get(id as usize).ok_or(eyre!(
                     "Input ID {} not found (max {})",
@@ -714,7 +713,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
             }
-            TOutput => {
+            PartType::Output => {
                 let id = p.input_output_index;
                 let pattern = puzzle.outputs.get(id as usize).ok_or(eyre!(
                     "Output ID {} not found (max {})",
@@ -735,7 +734,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
             }
-            TOutputRep => {
+            PartType::OutputRep => {
                 let id = p.input_output_index;
                 let pattern = puzzle.outputs.get(id as usize).ok_or(eyre!(
                     "Output(rep) ID {} not found (max {})",
@@ -757,7 +756,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
             }
-            TTrack => {
+            PartType::Track => {
                 let track_locs = p
                     .tracks
                     .clone()
@@ -771,7 +770,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
             }
-            TConduit => {
+            PartType::Conduit => {
                 let (conduit_id, conduit_locs) = p
                     .conduit
                     .clone()
