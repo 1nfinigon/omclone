@@ -303,6 +303,7 @@ pub struct UpdateWithStats {
 #[derive(Debug)]
 pub struct NextUpdatesWithStats {
     pub root_value: f32,
+    pub root_raw_utility: f32,
     pub updates_with_stats: Vec<UpdateWithStats>,
     pub avg_depth: f32,
     pub max_depth: u32,
@@ -343,6 +344,7 @@ impl TreeSearch {
                     .collect();
                 NextUpdatesWithStats {
                     root_value: root_real_node.value(),
+                    root_raw_utility: root_real_node.utility,
                     updates_with_stats,
                     avg_depth: self.avg_depth(),
                     max_depth: self.max_depth(),

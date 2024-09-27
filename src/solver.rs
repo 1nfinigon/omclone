@@ -124,8 +124,8 @@ fn solve_one_puzzle_seeded(
 
         let instr = stats.best_update();
         println!(
-            "after searching {} playouts (value = {:.6}, depth = {}/{:.1}): {:?}",
-            playouts, stats.root_value, stats.avg_depth, stats.max_depth, instr
+            "after searching {} playouts (value = {:.6} (raw {:.6}), depth = {}/{:.1}): {:?}",
+            playouts, stats.root_value, stats.root_raw_utility, stats.avg_depth, stats.max_depth, instr
         );
 
         tapes[search_state.next_arm_index()]
