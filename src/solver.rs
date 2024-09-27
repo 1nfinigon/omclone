@@ -119,6 +119,7 @@ fn solve_one_puzzle_seeded(
         //println!("{:?}", stats);
 
         let instr = stats.best_update();
+
         println!(
             "{}{:<23} #={} (v={:.3} (raw {:.3}) d={:>5.2}/{:>2}) {}",
             if search_state.next_arm_index() == 0 {
@@ -136,7 +137,20 @@ fn solve_one_puzzle_seeded(
                 let v: Vec<_> = stats
                     .updates_with_stats
                     .iter()
-                    .map(|u| format!("[{}{:>3}]", u.instr.to_char(), u.visits * 100 / playouts))
+                    .map(|u| {
+                        let brackets = if u.is_terminal {
+                            ["#", "#"]
+                        } else {
+                            ["[", "]"]
+                        };
+                        format!(
+                            "{}{}{:>3}{}",
+                            brackets[0],
+                            u.instr.to_char(),
+                            u.visits * 100 / playouts,
+                            brackets[1]
+                        )
+                    })
                     .collect();
                 v.join(" ")
             }
