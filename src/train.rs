@@ -10,6 +10,7 @@ mod utils;
 use eyre::{eyre, Result};
 use num_traits::ToPrimitive;
 use rand::prelude::*;
+use rayon::prelude::*;
 use sim::BasicInstr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -23,7 +24,7 @@ use color_eyre::install;
 use simple_eyre::install;
 
 fn write_npz_files(
-    index: &mut usize,
+    file_basename: &str,
     features: Box<nn::Features>,
     value: f32,
     visits: [f32; BasicInstr::N_TYPES],
@@ -57,10 +58,9 @@ fn write_npz_files(
             ("pos", &pos),
             ("loss_weights", &loss_weights),
         ],
-        format!("test/next-training/{}.npz", *index),
+        format!("test/next-training/{}.npz", file_basename),
     )?;
 
-    *index += 1;
     Ok(())
 }
 
@@ -68,8 +68,7 @@ fn process_one_solution(
     fpath: impl AsRef<Path>,
     rng: &mut impl Rng,
     puzzle_map: &utils::PuzzleMap,
-    file_index: &mut usize,
-) -> Result<()> {
+) -> Result<usize> {
     let solution = parser::parse_solution(&mut BufReader::new(File::open(fpath.as_ref())?))?;
 
     let (_, puzzle) = puzzle_map.get(&solution.puzzle_name).unwrap();
@@ -161,9 +160,10 @@ fn process_one_solution(
         ));
     };
 
-    for (features, visits, pos, loss_weights) in tensors {
+    let n_tensors = tensors.len();
+    for (i, (features, visits, pos, loss_weights)) in tensors.into_iter().enumerate() {
         write_npz_files(
-            file_index,
+            &format!("{}_{}", solution.solution_name, i),
             features,
             final_result,
             visits,
@@ -172,7 +172,7 @@ fn process_one_solution(
         )?;
     }
 
-    Ok(())
+    Ok(n_tensors)
 }
 
 fn main() -> Result<()> {
@@ -180,9 +180,6 @@ fn main() -> Result<()> {
     install()?;
 
     let model = nn::Model::load()?;
-    //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
-    let mut rng = rand::thread_rng();
-    let rng = &mut rng;
 
     println!("loading seed puzzles");
     let mut puzzle_map = utils::PuzzleMap::new();
@@ -195,23 +192,30 @@ fn main() -> Result<()> {
     };
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/current-epoch");
 
-    let mut file_index = 0;
-    for (i, fpath) in solution_paths.iter().enumerate() {
+    let mut i = std::sync::atomic::AtomicUsize::new(0);
+    let mut n_files_written = std::sync::atomic::AtomicUsize::new(0);
+    solution_paths.par_iter().for_each(|fpath| {
+        //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
+        let mut rng = rand::thread_rng();
+        let rng = &mut rng;
+
         println!(
-            "{}/{} ({} files written)",
-            i,
+            "{}/{} ({} files written so far)",
+            i.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             solution_paths.len(),
-            file_index
+            n_files_written.load(std::sync::atomic::Ordering::SeqCst),
         );
-        let result = process_one_solution(fpath, rng, &puzzle_map, &mut file_index);
+        let result = process_one_solution(fpath, rng, &puzzle_map);
         match result {
-            Ok(()) => (),
+            Ok(n) => {
+                n_files_written.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+            }
             Err(e) => {
                 // TODO: figure out where these errors are coming from???????
                 println!("ignoring error for {:?}: {}", fpath, e)
             }
         }
-    }
+    });
 
     Ok(())
 }
