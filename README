@@ -1,11 +1,12 @@
 ```
-$ cargo run --features color_eyre,display_ui,editor_ui --bin omclone
-$ cargo run --features color_eyre,benchmark --bin omclone_benchmark
-$ cargo test --features color_eyre,display_ui,editor_ui --bin omclone -- --nocapture
+$ cargo run --bin omclone
+$ cargo run --bin omclone_benchmark
+$ cargo test --bin omclone -- --nocapture
 
 
 $ export LIBTORCH_USE_PYTORCH=1
-$ cargo run --features color_eyre,nn --bin solver
+$ cargo run --bin solver
+$ cargo run --bin train
 ```
 
 # In progress

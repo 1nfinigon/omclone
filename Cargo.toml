@@ -6,7 +6,7 @@ default-run = "omclone"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = []
+default = ["benchmark", "editor_ui", "display_ui", "color_eyre", "nn"]
 benchmark = []
 editor_ui = ["display_ui"]
 display_ui = ["egui", "miniquad", "egui-miniquad", "image", "fontdue"]
