@@ -48,8 +48,8 @@ if __name__ == "__main__":
 
     full_set = NPZDataset('test/next-training', device=device)
     training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
-    training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
+    training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
 
     filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
     model = torch.jit.load(filename, map_location=device)
