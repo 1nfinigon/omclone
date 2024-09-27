@@ -18,6 +18,12 @@ $ cargo run --features color_eyre,nn --bin solver
 -   When training on samples derived from MCTS where we start the search from
     a-few-moves-from-the-end, the network very quickly overspecializes to spam
     "Drop"
+    -   This was partially just because I forgot to clear the input between
+        timesteps, meaning it was completely useless, which meant the best the
+        network could do is to blindly spam the most likely instruction
+    -   In response I also tweaked the loss-weight for samples that come from
+        human solutions (which ~only sees policy loss) vs those that come from
+        MCTS (which ~only sees value loss)
 -   Training both value and policy on a mix of human solutions (weight) +
     weak MCTS solutions, I attempted to weight the loss scale to significantly
     (x0.00001) shrink the impact of value loss for human solutions. This has
