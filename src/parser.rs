@@ -675,8 +675,8 @@ fn process_instructions(input: &[(i32, Instr)]) -> Result<Tape<Instr>> {
     })
 }
 
+/// Convert from generic parts to glyphs, arms, etc.
 pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWorld> {
-    //Convert from generic parts to glyphs, arms, etc.
     let mut glyphs = Vec::new();
     let mut arms_and_tapes = Vec::new();
     for p in &soln.part_list {
