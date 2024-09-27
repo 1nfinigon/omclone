@@ -1,4 +1,5 @@
 use crate::sim;
+use eyre::Result;
 use smallvec::SmallVec;
 
 pub mod constants {
@@ -306,6 +307,114 @@ pub mod feature_offsets {
     }
 }
 
+trait SparseCooAsSlice {
+    fn set_slice(&mut self, coord: &[usize], value: f32);
+}
+
+#[derive(Clone, Debug)]
+pub struct SparseCoo<const N: usize> {
+    /// flattened representation; indices.len() == nonzero_count * N
+    indices: Vec<i64>,
+    values: Vec<f32>,
+    size: [usize; N],
+}
+
+impl<const N: usize> SparseCoo<N> {
+    fn new(size: [usize; N]) -> Self {
+        Self {
+            indices: Vec::new(),
+            values: Vec::new(),
+            size,
+        }
+    }
+
+    fn set(&mut self, coord: &[usize; N], value: f32) {
+        for i in 0..N {
+            assert!(coord[i] < self.size[i]);
+            self.indices.push(coord[i].try_into().unwrap());
+        }
+        self.values.push(value);
+    }
+
+    fn clear(&mut self) {
+        self.indices.clear();
+        self.values.clear()
+    }
+
+    fn retain_coords_mut<F: FnMut(&mut [i64]) -> bool>(&mut self, mut f: F) {
+        let mut new_i = 0;
+        for old_i in 0..self.values.len() {
+            if f(&mut self.indices[old_i * N..(old_i + 1) * N]) {
+                if old_i != new_i {
+                    self.indices
+                        .copy_within(old_i * N..(old_i + 1) * N, new_i * N);
+                    self.values[new_i] = self.values[old_i];
+                }
+                new_i += 1;
+            }
+        }
+        self.indices.truncate(new_i * N);
+        self.values.truncate(new_i);
+    }
+
+    fn slice_all_but_one_dim<'a>(
+        &mut self,
+        dim: usize,
+        other_coords: &[usize],
+    ) -> SparseCoo1DSlice {
+        assert_eq!(other_coords.len(), N - 1);
+        SparseCoo1DSlice {
+            underlying: Box::new(self),
+            dim,
+            other_coords: other_coords.to_owned(),
+        }
+    }
+
+    pub fn to_dense_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
+        let indices = tch::Tensor::f_from_slice(&self.indices[..])?
+            .f_view([-1, N as i64])?
+            .f_t_()?;
+        let values = tch::Tensor::f_from_slice(&self.values[..])?;
+        let size: Vec<_> = self.size.iter().map(|s| *s as i64).collect();
+        let tensor = tch::Tensor::f_sparse_coo_tensor_indices_size(
+            &indices,
+            &values,
+            &size[..],
+            options,
+            true,
+        )?
+        .f_to_dense(None, false)?;
+        Ok(tensor)
+    }
+}
+
+impl<const N: usize> SparseCooAsSlice for SparseCoo<N> {
+    fn set_slice(&mut self, coord: &[usize], value: f32) {
+        self.set(coord.try_into().unwrap(), value)
+    }
+}
+
+struct SparseCoo1DSlice<'a> {
+    underlying: Box<&'a mut dyn SparseCooAsSlice>,
+    dim: usize,
+    other_coords: Vec<usize>,
+}
+
+impl<'a> SparseCoo1DSlice<'a> {
+    fn set(&mut self, this_coord: usize, value: f32) {
+        let n_dims = self.other_coords.len() + 1;
+        let mut coord = vec![0usize; n_dims];
+        for i in 0..n_dims {
+            coord[i] = match i.cmp(&self.dim) {
+                std::cmp::Ordering::Less => self.other_coords[i],
+                std::cmp::Ordering::Equal => this_coord,
+                std::cmp::Ordering::Greater => self.other_coords[i - 1],
+            };
+        }
+        self.underlying.set_slice(&coord[..], value);
+    }
+}
+
 pub mod features {
     use super::feature_offsets::*;
     use super::*;
@@ -316,114 +425,6 @@ pub mod features {
             Some((pos.x as usize, pos.y as usize))
         } else {
             None
-        }
-    }
-
-    trait SparseCooAsSlice {
-        fn set_slice(&mut self, coord: &[usize], value: f32);
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct SparseCoo<const N: usize> {
-        /// flattened representation; indices.len() == nonzero_count * N
-        indices: Vec<i64>,
-        values: Vec<f32>,
-        size: [usize; N],
-    }
-
-    impl<const N: usize> SparseCoo<N> {
-        fn new(size: [usize; N]) -> Self {
-            Self {
-                indices: Vec::new(),
-                values: Vec::new(),
-                size,
-            }
-        }
-
-        fn set(&mut self, coord: &[usize; N], value: f32) {
-            for i in 0..N {
-                assert!(coord[i] < self.size[i]);
-                self.indices.push(coord[i].try_into().unwrap());
-            }
-            self.values.push(value);
-        }
-
-        fn clear(&mut self) {
-            self.indices.clear();
-            self.values.clear()
-        }
-
-        fn retain_coords_mut<F: FnMut(&mut [i64]) -> bool>(&mut self, mut f: F) {
-            let mut new_i = 0;
-            for old_i in 0..self.values.len() {
-                if f(&mut self.indices[old_i * N..(old_i + 1) * N]) {
-                    if old_i != new_i {
-                        self.indices
-                            .copy_within(old_i * N..(old_i + 1) * N, new_i * N);
-                        self.values[new_i] = self.values[old_i];
-                    }
-                    new_i += 1;
-                }
-            }
-            self.indices.truncate(new_i * N);
-            self.values.truncate(new_i);
-        }
-
-        fn slice_all_but_one_dim<'a>(
-            &mut self,
-            dim: usize,
-            other_coords: &[usize],
-        ) -> SparseCoo1DSlice {
-            assert_eq!(other_coords.len(), N - 1);
-            SparseCoo1DSlice {
-                underlying: Box::new(self),
-                dim,
-                other_coords: other_coords.to_owned(),
-            }
-        }
-
-        pub fn to_dense_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
-            let indices = tch::Tensor::f_from_slice(&self.indices[..])?
-                .f_view([-1, N as i64])?
-                .f_t_()?;
-            let values = tch::Tensor::f_from_slice(&self.values[..])?;
-            let size: Vec<_> = self.size.iter().map(|s| *s as i64).collect();
-            let tensor = tch::Tensor::f_sparse_coo_tensor_indices_size(
-                &indices,
-                &values,
-                &size[..],
-                options,
-                true,
-            )?
-            .f_to_dense(None, false)?;
-            Ok(tensor)
-        }
-    }
-
-    impl<const N: usize> SparseCooAsSlice for SparseCoo<N> {
-        fn set_slice(&mut self, coord: &[usize], value: f32) {
-            self.set(coord.try_into().unwrap(), value)
-        }
-    }
-
-    struct SparseCoo1DSlice<'a> {
-        underlying: Box<&'a mut dyn SparseCooAsSlice>,
-        dim: usize,
-        other_coords: Vec<usize>,
-    }
-
-    impl<'a> SparseCoo1DSlice<'a> {
-        fn set(&mut self, this_coord: usize, value: f32) {
-            let n_dims = self.other_coords.len() + 1;
-            let mut coord = vec![0usize; n_dims];
-            for i in 0..n_dims {
-                coord[i] = match i.cmp(&self.dim) {
-                    std::cmp::Ordering::Less => self.other_coords[i],
-                    std::cmp::Ordering::Equal => this_coord,
-                    std::cmp::Ordering::Greater => self.other_coords[i - 1],
-                };
-            }
-            self.underlying.set_slice(&coord[..], value);
         }
     }
 
