@@ -1,7 +1,7 @@
+mod check;
 mod nonnan;
 mod parser;
 mod sim;
-mod test;
 mod utils;
 
 #[cfg(feature = "benchmark")]

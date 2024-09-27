@@ -1,10 +1,10 @@
+use crate::check;
 use crate::nn;
 use crate::parser;
 use crate::search;
 use crate::search_history;
 use crate::search_state;
 use crate::sim;
-use crate::test;
 use crate::utils;
 
 use rand::prelude::*;
@@ -25,8 +25,8 @@ fn solve_one_puzzle_seeded(
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
 
-    match test::check_solution(&seed_solution, seed_puzzle, true) {
-        test::CheckResult::Ok => (),
+    match check::check_solution(&seed_solution, seed_puzzle, true) {
+        check::CheckResult::Ok => (),
         _ => {
             return Ok(());
         }
