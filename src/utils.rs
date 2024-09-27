@@ -6,10 +6,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "color_eyre")]
-use color_eyre::Result;
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::Result;
+use eyre::Result;
 
 pub const PUZZLE_DIR: &str = "test/puzzle";
 

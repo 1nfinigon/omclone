@@ -1,12 +1,12 @@
 ```
-$ cargo run --bin omclone
-$ cargo run --bin omclone_benchmark
-$ cargo test --bin omclone -- --nocapture
+$ cargo run
+$ cargo run benchmark
+$ cargo test -- --nocapture
 
 
 $ export LIBTORCH_USE_PYTORCH=1
-$ cargo run --bin solver
-$ cargo run --bin train
+$ cargo run solver
+$ cargo run train
 ```
 
 # In progress

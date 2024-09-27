@@ -1,18 +1,10 @@
-mod parser;
-mod sim;
-mod utils;
+use crate::parser;
+use crate::sim;
+use crate::utils;
 
-#[cfg(feature = "color_eyre")]
-use color_eyre::{eyre::Result, install};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{eyre::Result, install};
+use eyre::Result;
 
-#[cfg(feature = "benchmark")]
-fn main() -> Result<()> {
-    use std::{fs::File, io::BufReader, path::Path};
-    std::env::set_var("RUST_BACKTRACE", "full");
-    install()?;
-
+pub fn main() -> Result<()> {
     let (puzzle, sol) = utils::get_default_puzzle_solution()?;
     //println!("Check: {:?}", sol.stats);
     let init = parser::puzzle_prep(&puzzle, &sol)?;

@@ -16,27 +16,7 @@ nn = ["tch", "rayon"]
 
 [[bin]]
 name="omclone"
-required-features = ["display_ui", "editor_ui"]
 path = "src/main.rs"
-
-[[bin]]
-name="omclone_benchmark"
-required-features = ["benchmark"]
-path = "src/benchmark.rs"
-
-[[bin]]
-name="solver"
-required-features = ["nn"]
-path = "src/solver.rs"
-
-[[bin]]
-name="train"
-required-features = ["nn"]
-path = "src/train.rs"
-
-[[bin]]
-name="synth"
-path = "src/synth.rs"
 
 [profile.dev]
 opt-level = 3

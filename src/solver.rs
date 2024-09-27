@@ -1,24 +1,19 @@
-mod nn;
-mod nonnan;
-mod parser;
-mod search;
-mod search_history;
-mod search_state;
-mod sim;
-mod test;
-mod utils;
+use crate::nn;
+use crate::parser;
+use crate::search;
+use crate::search_history;
+use crate::search_state;
+use crate::sim;
+use crate::test;
+use crate::utils;
 
 use rand::prelude::*;
-use sim::BasicInstr;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use uuid;
 
-#[cfg(feature = "color_eyre")]
-use color_eyre::{eyre::Result, install};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{eyre::Result, install};
+use eyre::Result;
 
 fn solve_one_puzzle_seeded(
     puzzle_fpath: impl AsRef<Path>,
@@ -216,10 +211,7 @@ fn solve_one_puzzle_seeded(
     Ok(())
 }
 
-fn main() -> Result<()> {
-    std::env::set_var("RUST_BACKTRACE", "full");
-    install()?;
-
+pub fn main() -> Result<()> {
     println!(
         "{} spatial features\n{} spatiotemporal features\n{} temporal features",
         nn::feature_offsets::Spatial::SIZE,

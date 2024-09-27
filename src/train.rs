@@ -1,11 +1,9 @@
-mod nn;
-mod nonnan;
-mod parser;
-mod search;
-mod search_history;
-mod search_state;
-mod sim;
-mod utils;
+use crate::nn;
+use crate::parser;
+use crate::search_history;
+use crate::search_state;
+use crate::sim;
+use crate::utils;
 
 use eyre::{eyre, Result};
 use num_traits::ToPrimitive;
@@ -13,15 +11,9 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use sim::BasicInstr;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use tch;
-use uuid;
-
-#[cfg(feature = "color_eyre")]
-use color_eyre::install;
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::install;
 
 fn write_npz_files(
     file_basename: &str,
@@ -175,10 +167,7 @@ fn process_one_solution(
     Ok(n_tensors)
 }
 
-fn main() -> Result<()> {
-    std::env::set_var("RUST_BACKTRACE", "full");
-    install()?;
-
+pub fn main() -> Result<()> {
     println!("loading seed puzzles");
     let mut puzzle_map = utils::PuzzleMap::new();
     utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
@@ -190,8 +179,8 @@ fn main() -> Result<()> {
     };
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/current-epoch");
 
-    let mut i = std::sync::atomic::AtomicUsize::new(0);
-    let mut n_files_written = std::sync::atomic::AtomicUsize::new(0);
+    let i = std::sync::atomic::AtomicUsize::new(0);
+    let n_files_written = std::sync::atomic::AtomicUsize::new(0);
     solution_paths.par_iter().for_each(|fpath| {
         //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
         let mut rng = rand::thread_rng();
