@@ -32,22 +32,19 @@ class NPZDataset(torch.utils.data.Dataset):
             indices = torch.from_numpy(npz_data['{}_indices'.format(prefix)])
             values = torch.from_numpy(npz_data['{}_values'.format(prefix)])
             size = torch.Size(npz_data['{}_size'.format(prefix)])
-            return torch.sparse_coo_tensor(indices, values, size, device=self.device, is_coalesced=True).to_dense()
+            return torch.sparse_coo_tensor(indices, values, size, is_coalesced=True).to_dense()
         data = NPZData(
             spatial_inputs        = parse_sparse('spatial_input'),
             spatiotemporal_inputs = parse_sparse('spatiotemporal_input'),
             temporal_inputs       = parse_sparse('temporal_input'),
-            value_outputs         = torch.from_numpy(npz_data['value_output']).to(self.device, non_blocking=True),
-            policy_outputs        = torch.from_numpy(npz_data['policy_output']).to(self.device, non_blocking=True),
-            pos                   = torch.from_numpy(npz_data['pos']).to(self.device, non_blocking=True),
-            loss_weights          = torch.from_numpy(npz_data['loss_weights']).to(self.device, non_blocking=True),
+            value_outputs         = torch.from_numpy(npz_data['value_output']),
+            policy_outputs        = torch.from_numpy(npz_data['policy_output']),
+            pos                   = torch.from_numpy(npz_data['pos']),
+            loss_weights          = torch.from_numpy(npz_data['loss_weights']),
         )
         return data
 
 if __name__ == "__main__":
-    # https://pytorch.org/docs/main/notes/multiprocessing.html#cuda-in-multiprocessing
-    multiprocessing.set_start_method('spawn')
-
     device = device()
 
     full_set = NPZDataset('test/next-training', device=device)
@@ -83,11 +80,20 @@ if __name__ == "__main__":
             optimizer.zero_grad(set_to_none=True)
 
             # Make predictions for this batch
-            model_policy_outputs, model_value_outputs = model(data.spatial_inputs, data.spatiotemporal_inputs, data.temporal_inputs, policy_softmax_temperature)
+            model_policy_outputs, model_value_outputs = model(
+                data.spatial_inputs.to(device, non_blocking=True),
+                data.spatiotemporal_inputs.to(device, non_blocking=True),
+                data.temporal_inputs.to(device, non_blocking=True),
+                policy_softmax_temperature)
 
             # Compute the loss and its gradients
-            losses = (loss_fn(model, data.pos, model_value_outputs, model_policy_outputs,
-                        data.value_outputs, data.policy_outputs) * data.loss_weights).mean(dim=0)
+            losses = (loss_fn(model,
+                              data.pos.to(device, non_blocking=True),
+                              model_value_outputs,
+                              model_policy_outputs,
+                              data.value_outputs.to(device, non_blocking=True),
+                              data.policy_outputs.to(device, non_blocking=True))
+                      * data.loss_weights).mean(dim=0)
             loss = losses.sum()
             loss.backward()
 
@@ -131,9 +137,20 @@ if __name__ == "__main__":
         # Disable gradient computation and reduce memory consumption.
         with torch.no_grad():
             for i, data in enumerate(validation_loader):
-                model_policy_outputs, model_value_outputs = model(data.spatial_inputs, data.spatiotemporal_inputs, data.temporal_inputs, policy_softmax_temperature)
-                losses = (loss_fn(model, data.pos, model_value_outputs, model_policy_outputs,
-                            data.value_outputs, data.policy_outputs) * data.loss_weights).mean(dim=0)
+                model_policy_outputs, model_value_outputs = model(
+                    data.spatial_inputs.to(device, non_blocking=True),
+                    data.spatiotemporal_inputs.to(device, non_blocking=True),
+                    data.temporal_inputs.to(device, non_blocking=True),
+                    policy_softmax_temperature)
+
+                losses = (loss_fn(model,
+                                data.pos.to(device, non_blocking=True),
+                                model_value_outputs,
+                                model_policy_outputs,
+                                data.value_outputs.to(device, non_blocking=True),
+                                data.policy_outputs.to(device, non_blocking=True))
+                        * data.loss_weights).mean(dim=0)
+
                 loss = losses.sum()
                 running_vloss += loss
 
