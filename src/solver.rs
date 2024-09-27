@@ -9,6 +9,7 @@ mod test;
 mod utils;
 
 use rand::prelude::*;
+use sim::BasicInstr;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -110,6 +111,10 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
+        if search_state.next_arm_index() == 0 {
+            println!("");
+        }
+
         let mut tree_search = search::TreeSearch::new(search_state.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 500 };
@@ -124,8 +129,12 @@ fn solve_one_puzzle_seeded(
 
         let instr = stats.best_update();
         println!(
-            "after searching {} playouts (value = {:.6} (raw {:.6}), depth = {}/{:.1}): {:?}",
-            playouts, stats.root_value, stats.root_raw_utility, stats.avg_depth, stats.max_depth, instr
+            "{:<23} #={} (v={:.3} (raw {:.3}) d={:>2.2}/{:>2}) {}",
+            format!("{:?}", instr), playouts, stats.root_value, stats.root_raw_utility, stats.avg_depth, stats.max_depth,
+            {
+                let v: Vec<_> = stats.updates_with_stats.iter().map(|u| format!("[{}]:{:>3}", u.instr.to_char(), u.visits)).collect();
+                v.join(" ")
+            }
         );
 
         tapes[search_state.next_arm_index()]
