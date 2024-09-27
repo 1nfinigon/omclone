@@ -93,7 +93,7 @@ if __name__ == "__main__":
                               model_policy_outputs,
                               data.value_outputs.to(device, non_blocking=True),
                               data.policy_outputs.to(device, non_blocking=True))
-                      * data.loss_weights).mean(dim=0)
+                      * data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
             loss = losses.sum()
             loss.backward()
 
@@ -149,7 +149,7 @@ if __name__ == "__main__":
                                 model_policy_outputs,
                                 data.value_outputs.to(device, non_blocking=True),
                                 data.policy_outputs.to(device, non_blocking=True))
-                        * data.loss_weights).mean(dim=0)
+                        * data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
 
                 loss = losses.sum()
                 running_vloss += loss
