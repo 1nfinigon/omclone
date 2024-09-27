@@ -324,7 +324,7 @@ pub mod features {
     }
 
     #[derive(Clone, Debug)]
-    struct SparseCoo<const N: usize> {
+    pub struct SparseCoo<const N: usize> {
         /// flattened representation; indices.len() == nonzero_count * N
         indices: Vec<i64>,
         values: Vec<f32>,
@@ -382,7 +382,7 @@ pub mod features {
             }
         }
 
-        fn to_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
+        pub fn to_dense_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
             let indices = tch::Tensor::f_from_slice(&self.indices[..])?
                 .f_view([-1, N as i64])?
                 .f_t_()?;
@@ -394,7 +394,8 @@ pub mod features {
                 &size[..],
                 options,
                 true,
-            )?;
+            )?
+            .f_to_dense(None, false)?;
             Ok(tensor)
         }
     }
@@ -770,25 +771,6 @@ pub mod features {
                 }
             });
         }
-
-        pub fn to_tensor(
-            &self,
-            options: (tch::Kind, tch::Device),
-        ) -> Result<(tch::Tensor, tch::Tensor, tch::Tensor)> {
-            // TODO: all this copying is very slow
-            const S: usize = feature_offsets::Spatial::SIZE;
-            const H: usize = constants::N_HEIGHT;
-            const W: usize = constants::N_WIDTH;
-            const X: usize = feature_offsets::Spatiotemporal::SIZE;
-            const T: usize = constants::N_HISTORY_CYCLES;
-            const G: usize = feature_offsets::Temporal::SIZE;
-
-            let spatial_input = self.spatial.to_tensor(options)?;
-            let spatiotemporal_input = self.spatiotemporal.to_tensor(options)?;
-            let temporal_input = self.temporal.to_tensor(options)?;
-
-            Ok((spatial_input, spatiotemporal_input, temporal_input))
-        }
     }
 }
 
@@ -840,17 +822,17 @@ pub mod model {
             assert!(x < constants::N_WIDTH);
             assert!(y < constants::N_HEIGHT);
 
-            let (spatial_input, spatiotemporal_input, temporal_input) =
-                features.to_tensor((tch::Kind::Float, self.device))?;
+            let options = (tch::Kind::Float, self.device);
 
             let input = [
-                tch::IValue::Tensor(spatial_input.f_unsqueeze(0)?.f_to_dense(None, false)?),
+                tch::IValue::Tensor(features.spatial.to_dense_tensor(options)?.f_unsqueeze(0)?),
                 tch::IValue::Tensor(
-                    spatiotemporal_input
-                        .f_unsqueeze(0)?
-                        .f_to_dense(None, false)?,
+                    features
+                        .spatiotemporal
+                        .to_dense_tensor(options)?
+                        .f_unsqueeze(0)?,
                 ),
-                tch::IValue::Tensor(temporal_input.f_unsqueeze(0)?.f_to_dense(None, false)?),
+                tch::IValue::Tensor(features.temporal.to_dense_tensor(options)?.f_unsqueeze(0)?),
                 tch::IValue::Tensor(
                     tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
                         .f_to(self.device)?,
@@ -860,18 +842,7 @@ pub mod model {
             let output = self.module.forward_is(&input)?;
 
             let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
-            /*
-            tch::Tensor::write_npz(
-                &[
-                    ("si", &spatial_input),
-                    ("xi", &spatiotemporal_input),
-                    ("gi", &temporal_input),
-                    ("p", &policy_tensor),
-                    ("v", &value_tensor),
-                ],
-                "/tmp/t.pt",
-            )?;
-            */
+
             let mut policy = [0f32; BasicInstr::N_TYPES];
 
             assert_eq!(
