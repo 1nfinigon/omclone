@@ -5,11 +5,9 @@ use std::{io::prelude::*, io::BufReader, io::BufWriter};
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::File, path::Path};
 
-#[cfg(feature = "color_eyre")]
-use color_eyre::eyre::Result;
-use core::ops::Range;
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::eyre::Result;
+use eyre::Result;
+use std::ops::Range;
+
 struct TapeBuffer<'a> {
     tape_ref: &'a mut Tape<BasicInstr>,
     earliest_edit: &'a mut Option<usize>,
@@ -108,7 +106,7 @@ struct PathInfo {
 enum RunState {
     Manual(usize),
     FreeRun,
-    Crashed(XYPos),
+    Crashed,
 }
 struct Loaded {
     base_world: WorldWithTapes,
@@ -142,7 +140,7 @@ impl Loaded {
         }
     }
     fn reset_world(&mut self) {
-        if let RunState::Crashed(_) = self.run_state {
+        if let RunState::Crashed = self.run_state {
             self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
         }
         self.saved_motions.clear();
@@ -156,7 +154,7 @@ impl Loaded {
         self.backup_step = 0;
     }
     fn reset_to_backup(&mut self) {
-        if let RunState::Crashed(_) = self.run_state {
+        if let RunState::Crashed = self.run_state {
             self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
         }
         self.saved_motions.clear();
@@ -167,7 +165,7 @@ impl Loaded {
         self.message = None;
     }
     fn try_set_target_time(&mut self, target: usize) {
-        if let RunState::Crashed(_) = self.run_state {
+        if let RunState::Crashed = self.run_state {
             if self.curr_world.world.timestep as usize > target {
                 self.run_state = RunState::Manual(target);
             }
@@ -214,7 +212,7 @@ impl Loaded {
                 }
             }
             RunState::FreeRun => self.curr_time + self.run_speed,
-            RunState::Crashed(_) => return,
+            RunState::Crashed => return,
         };
         if target_time < self.curr_time {
             self.reset_to(target_time as u64);
@@ -231,7 +229,7 @@ impl Loaded {
             while self.curr_world.world.timestep < backup_target_timestep {
                 let output = self.advance(&mut substep_time);
                 if let Err(output) = output {
-                    self.run_state = RunState::Crashed(output.location);
+                    self.run_state = RunState::Crashed;
                     self.message = Some(output.to_string());
                     self.curr_time = self.curr_world.world.timestep as f64
                         + (substep_time * self.curr_substep as f64);
@@ -252,7 +250,7 @@ impl Loaded {
         {
             let output = self.advance(&mut substep_time);
             if let Err(output) = output {
-                self.run_state = RunState::Crashed(output.location);
+                self.run_state = RunState::Crashed;
                 self.message = Some(output.to_string());
                 self.curr_time = self.curr_world.world.timestep as f64
                     + (substep_time * self.curr_substep as f64);
@@ -503,7 +501,7 @@ impl EventHandler for MyMiniquadApp {
                             let (mut running_free, enabled) = match loaded.run_state{
                                 RunState::FreeRun => (true, true),
                                 RunState::Manual(_) => (false, true),
-                                RunState::Crashed(_) => (false, false),
+                                RunState::Crashed => (false, false),
                             };
                             let was_freerun = running_free;
                             ui.add_enabled_ui(enabled, |ui| ui.checkbox(&mut running_free, "Run"));
@@ -696,7 +694,7 @@ impl EventHandler for MyMiniquadApp {
                                 }
                                 loaded.backup_world.tapes[arm_id] = loaded.base_world.tapes[arm_id].clone();
                                 if edit_step <= loaded.curr_time as usize {
-                                    if let RunState::Crashed(_) = loaded.run_state {
+                                    if let RunState::Crashed = loaded.run_state {
                                         loaded.run_state = RunState::Manual(loaded.curr_world.world.timestep as usize);
                                     }
                                     loaded.reset_to(edit_step as u64);

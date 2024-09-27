@@ -148,8 +148,8 @@ fn setup_textures(ctx: &mut dyn RenderingBackend) -> Vec<Bindings> {
         .iter()
         .enumerate()
         .map(|(id, byte_data)| -> Bindings {
-            use image::io::Reader as ImageReader;
             use image::ImageFormat::Png;
+            use image::ImageReader;
             use std::io::Cursor;
             let img = ImageReader::with_format(Cursor::new(byte_data), Png)
                 .decode()
