@@ -27,7 +27,7 @@ mod render_sim;
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod ui;
 
-use eyre::Result;
+use eyre::{eyre, Result};
 
 #[cfg(feature = "color_eyre")]
 use color_eyre::install;
@@ -45,39 +45,37 @@ fn main() -> Result<()> {
 
     let args: Vec<_> = std::env::args().collect();
 
-    if args.get(1).map(|x| x.as_str()) == Some("check") {
-        return check::main();
-    }
+    let subcommand = args.get(1).map(|x| x.as_str());
 
-    #[cfg(feature = "benchmark")]
-    if args.get(1).map(|x| x.as_str()) == Some("benchmark") {
-        return benchmark::main();
-    }
+    match subcommand {
+        Some("check") => check::main(),
 
-    #[cfg(feature = "nn")]
-    if args.get(1).map(|x| x.as_str()) == Some("solver") {
-        return solver::main();
-    }
+        #[cfg(feature = "benchmark")]
+        Some("benchmark") => benchmark::main(),
 
-    #[cfg(feature = "nn")]
-    if args.get(1).map(|x| x.as_str()) == Some("train") {
-        return train::main();
-    }
+        #[cfg(feature = "nn")]
+        Some("solver") => solver::main(),
 
-    #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
-    {
-        use miniquad::*;
-        let conf = conf::Conf {
-            fullscreen: false,
-            ..Default::default()
-        };
-        miniquad::start(conf, || Box::new(ui::MyMiniquadApp::new()));
+        #[cfg(feature = "nn")]
+        Some("train") => train::main(),
 
-        Ok(())
-    }
+        Some(subcommand) => Err(eyre!("unsupported subcommand {}", subcommand)),
 
-    #[cfg(not(any(feature = "editor_ui", feature = "display_ui",)))]
-    {
-        panic!("no command, and not compiled with support for the UI");
+        #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
+        None => {
+            use miniquad::*;
+            let conf = conf::Conf {
+                fullscreen: false,
+                ..Default::default()
+            };
+            miniquad::start(conf, || Box::new(ui::MyMiniquadApp::new()));
+
+            Ok(())
+        }
+
+        #[cfg(not(any(feature = "editor_ui", feature = "display_ui",)))]
+        None => {
+            panic!("no command, and not compiled with support for the UI");
+        }
     }
 }
