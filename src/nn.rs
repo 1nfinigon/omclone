@@ -612,6 +612,8 @@ pub mod features {
         pub fn shift_temporal(&mut self) {
             self.spatiotemporal
                 .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
+            self.temporal
+                .copy_within(0..(N_HISTORY_CYCLES - 1), 1);
             self.clear_temporal(0);
         }
 
