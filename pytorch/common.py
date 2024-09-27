@@ -3,9 +3,9 @@
 import torch
 
 def device():
-    if torch.backends.mps.is_available():
-        print("Using MPS")
-        return torch.device('mps')
+    #if torch.backends.mps.is_available():
+    #    print("Using MPS")
+    #    return torch.device('mps')
     if torch.cuda.is_available():
         print("Using CUDA")
         min_i, min_w = None, None

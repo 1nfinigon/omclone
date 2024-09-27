@@ -30,8 +30,9 @@ fn write_npz_files(
     (x, y): (usize, usize),
     loss_weights: [f32; 3],
 ) -> Result<()> {
-    let (spatial_input, spatiotemporal_input, temporal_input) =
-        features.to_tensor(tch::Device::Cpu)?;
+    let spatial_input = features.spatial.to_tensors_for_serializing()?;
+    let spatiotemporal_input = features.spatiotemporal.to_tensors_for_serializing()?;
+    let temporal_input = features.temporal.to_tensors_for_serializing()?;
     let value_output = tch::Tensor::f_from_slice(&[value, 1. - value])?;
     let policy_output = tch::Tensor::f_from_slice(&visits[..])?.f_softmax(0, None)?;
     let pos = tch::Tensor::f_from_slice(&[x as i64, y as i64])?;
@@ -39,9 +40,18 @@ fn write_npz_files(
 
     tch::Tensor::write_npz(
         &[
-            ("spatial_input", &spatial_input),
-            ("spatiotemporal_input", &spatiotemporal_input),
-            ("temporal_input", &temporal_input),
+            ("spatial_input_indices", &spatial_input.indices),
+            ("spatial_input_values", &spatial_input.values),
+            ("spatial_input_size", &spatial_input.size),
+            (
+                "spatiotemporal_input_indices",
+                &spatiotemporal_input.indices,
+            ),
+            ("spatiotemporal_input_values", &spatiotemporal_input.values),
+            ("spatiotemporal_input_size", &spatiotemporal_input.size),
+            ("temporal_input_indices", &temporal_input.indices),
+            ("temporal_input_values", &temporal_input.values),
+            ("temporal_input_size", &temporal_input.size),
             ("value_output", &value_output),
             ("policy_output", &policy_output),
             ("pos", &pos),

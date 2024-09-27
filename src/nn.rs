@@ -316,21 +316,22 @@ pub struct SparseCoo<const N: usize> {
     /// flattened representation; indices.len() == nonzero_count * N
     indices: Vec<i64>,
     values: Vec<f32>,
-    size: [usize; N],
+    size: [i64; N],
 }
 
 impl<const N: usize> SparseCoo<N> {
     fn new(size: [usize; N]) -> Self {
+        let size: Vec<_> = size.iter().map(|s| *s as i64).collect();
         Self {
             indices: Vec::new(),
             values: Vec::new(),
-            size,
+            size: size.try_into().unwrap(),
         }
     }
 
     fn set(&mut self, coord: &[usize; N], value: f32) {
         for i in 0..N {
-            assert!(coord[i] < self.size[i]);
+            assert!(coord[i] < self.size[i] as usize);
             self.indices.push(coord[i].try_into().unwrap());
         }
         self.values.push(value);
@@ -370,21 +371,48 @@ impl<const N: usize> SparseCoo<N> {
         }
     }
 
-    pub fn to_dense_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
-        let indices = tch::Tensor::f_from_slice(&self.indices[..])?
+    fn indices_tensor(&self) -> Result<tch::Tensor> {
+        Ok(tch::Tensor::f_from_slice(&self.indices[..])?
             .f_view([-1, N as i64])?
-            .f_t_()?;
-        let values = tch::Tensor::f_from_slice(&self.values[..])?;
-        let size: Vec<_> = self.size.iter().map(|s| *s as i64).collect();
+            .f_t_()?)
+    }
+
+    fn values_tensor(&self) -> Result<tch::Tensor> {
+        Ok(tch::Tensor::f_from_slice(&self.values[..])?)
+    }
+
+    fn size_tensor(&self) -> Result<tch::Tensor> {
+        Ok(tch::Tensor::f_from_slice(&self.size[..])?)
+    }
+
+    pub fn to_dense_tensor(&self, options: (tch::Kind, tch::Device)) -> Result<tch::Tensor> {
+        let indices = self.indices_tensor()?;
+        let values = self.values_tensor()?;
         let tensor = tch::Tensor::f_sparse_coo_tensor_indices_size(
             &indices,
             &values,
-            &size[..],
+            &self.size[..],
             options,
             true,
         )?
         .f_to_dense(None, false)?;
         Ok(tensor)
+    }
+}
+
+pub struct SparseCooTensorsForSerializing {
+    pub indices: tch::Tensor,
+    pub values: tch::Tensor,
+    pub size: tch::Tensor,
+}
+
+impl<const N: usize> SparseCoo<N> {
+    pub fn to_tensors_for_serializing(&self) -> Result<SparseCooTensorsForSerializing> {
+        Ok(SparseCooTensorsForSerializing {
+            indices: self.indices_tensor()?,
+            values: self.values_tensor()?,
+            size: self.size_tensor()?,
+        })
     }
 }
 
