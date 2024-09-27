@@ -9,7 +9,6 @@ mod test;
 mod utils;
 
 use rand::prelude::*;
-use rayon::prelude::*;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -21,7 +20,6 @@ use color_eyre::{eyre::Result, install};
 use simple_eyre::{eyre::Result, install};
 
 fn solve_one_puzzle_seeded(
-    print_buffer: &mut Vec<String>,
     puzzle_fpath: impl AsRef<Path>,
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
@@ -38,11 +36,11 @@ fn solve_one_puzzle_seeded(
         }
     }
 
-    print_buffer.push(format!(
+    println!(
         "====== starting {:?}, seeding with {:?}",
         puzzle_fpath.as_ref(),
         solution_fpath.as_ref()
-    ));
+    );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
     if let Some((min, max)) = seed_init.bounding_box() {
@@ -52,10 +50,10 @@ fn solve_one_puzzle_seeded(
         );
         let seed_wh = max - min;
         if seed_wh.x >= nn_wh.x || seed_wh.y >= nn_wh.y {
-            print_buffer.push(format!(
+            println!(
                 "skipping because solution footprint is too big: {} vs max {}",
                 seed_wh, nn_wh
-            ));
+            );
             return Ok(());
         }
         let delta = (nn_wh - (max + min)) / 2;
@@ -85,13 +83,13 @@ fn solve_one_puzzle_seeded(
     // make some pre-moves from the seed solution
 
     let n_premoves = n_moves.saturating_sub(n_moves_to_search);
-    print_buffer.push(format!(
+    println!(
         "making {} premoves ({} cycles + {}; {} short of seed solution)",
         n_premoves,
         n_premoves / n_arms,
         n_premoves % n_arms,
         n_moves_to_search
-    ));
+    );
 
     for _ in 0..n_premoves {
         let arm_index = search_state.next_arm_index();
@@ -108,7 +106,7 @@ fn solve_one_puzzle_seeded(
 
     let result_is_success = loop {
         if let Some(result) = search_state.evaluate_final_state() {
-            print_buffer.push(format!("done; result = {}", result));
+            println!("done; result = {}", result);
             break result > 0.;
         }
 
@@ -122,13 +120,13 @@ fn solve_one_puzzle_seeded(
 
         let stats = tree_search.next_updates_with_stats();
 
-        //print_buffer.push(format!!("{:?}", stats));
+        //println!("{:?}", stats);
 
         let instr = stats.best_update();
-        print_buffer.push(format!(
+        println!(
             "after searching {} playouts (value = {:.6}, depth = {}/{:.1}): {:?}",
             playouts, stats.root_value, stats.avg_depth, stats.max_depth, instr
-        ));
+        );
 
         tapes[search_state.next_arm_index()]
             .instructions
@@ -184,14 +182,14 @@ fn solve_one_puzzle_seeded(
 
     let out_solution_filename =
         PathBuf::from(format!("test/current-epoch/{}.solution", solution_name));
-    print_buffer.push(format!("saving solution to {:?}", out_solution_filename));
+    println!("saving solution to {:?}", out_solution_filename);
     let mut f_out_solution = BufWriter::new(File::create(&out_solution_filename)?);
     parser::write_solution(&mut f_out_solution, &out_solution)?;
     std::mem::drop(f_out_solution);
 
     let out_history_filename =
         PathBuf::from(format!("test/current-epoch/{}.history", solution_name));
-    print_buffer.push(format!("saving history to {:?}", out_history_filename));
+    println!("saving history to {:?}", out_history_filename);
     let mut f_out_history = BufWriter::new(File::create(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
     std::mem::drop(f_out_history);
@@ -215,7 +213,6 @@ fn main() -> Result<()> {
     );
 
     let model = nn::Model::load()?;
-
     //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
     let mut rng = rand::thread_rng();
     let rng = &mut rng;
@@ -236,40 +233,20 @@ fn main() -> Result<()> {
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
-    seed_solution_paths.par_iter().for_each(|solution_fpath| {
-        //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
-        let mut rng = rand::thread_rng();
-        let rng = &mut rng;
-
-        let mut print_buffer = Vec::new();
-
+    for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
 
-            let result = solve_one_puzzle_seeded(
-                &mut print_buffer,
+            solve_one_puzzle_seeded(
                 puzzle_fpath,
                 seed_puzzle,
                 solution_fpath,
                 &seed_solution,
                 &model,
                 rng,
-            );
-
-            let output = print_buffer.join("\n");
-            match result {
-                Ok(()) => {
-                    if !print_buffer.is_empty() {
-                        println!("{}", output);
-                    }
-                }
-                Err(e) => {
-                    // TODO: figure out where these errors are coming from???????
-                    println!("{}\nignoring error for {:?}: {}", output, solution_fpath, e)
-                }
-            }
+            )?;
         }
-    });
+    }
 
     Ok(())
 }
