@@ -781,7 +781,7 @@ pub mod model {
     use eyre;
     use tch;
 
-    const MODEL_FILENAME: &'static str = "pytorch/model.pt";
+    const MODEL_FILENAME: &str = "pytorch/model.pt";
 
     pub struct Model {
         module: tch::CModule,

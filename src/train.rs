@@ -13,7 +13,6 @@ use sim::BasicInstr;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use tch;
 
 fn write_npz_files(
     file_basename: &str,

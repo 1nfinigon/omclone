@@ -60,8 +60,8 @@ pub enum BasicInstr {
 
 impl BasicInstr {
     pub const N_TYPES: usize = 11;
-    pub fn to_u8(&self) -> u8 {
-        <Self as num_traits::ToPrimitive>::to_u8(self).unwrap()
+    pub fn to_u8(self) -> u8 {
+        <Self as num_traits::ToPrimitive>::to_u8(&self).unwrap()
     }
     pub fn from_u8(value: u8) -> Option<Self> {
         <Self as num_traits::FromPrimitive>::from_u8(value)
@@ -91,8 +91,8 @@ impl BasicInstr {
             _ => None,
         }
     }
-    pub fn to_char(&self) -> char {
-        let instr: Instr = (*self).into();
+    pub fn to_char(self) -> char {
+        let instr: Instr = self.into();
         instr.to_char()
     }
 }
@@ -159,7 +159,7 @@ impl TryFrom<Instr> for BasicInstr {
 }
 
 impl Instr {
-    pub fn to_byte(&self) -> u8 {
+    pub fn to_byte(self) -> u8 {
         use Instr::*;
         match self {
             RotateClockwise => b'R',
@@ -198,7 +198,7 @@ impl Instr {
             _ => None,
         }
     }
-    pub fn to_char(&self) -> char {
+    pub fn to_char(self) -> char {
         use Instr::*;
         match self {
             RotateClockwise => 'd',
@@ -219,18 +219,18 @@ impl Instr {
     }
 }
 
-pub trait InstrToChar {
-    fn to_char(&self) -> char;
+pub trait InstrToChar: Copy {
+    fn to_char(self) -> char;
 }
 
 impl InstrToChar for BasicInstr {
-    fn to_char(&self) -> char {
+    fn to_char(self) -> char {
         self.to_char()
     }
 }
 
 impl InstrToChar for Instr {
-    fn to_char(&self) -> char {
+    fn to_char(self) -> char {
         self.to_char()
     }
 }
@@ -241,7 +241,7 @@ pub struct Tape<InstrT> {
     pub instructions: Vec<InstrT>,
 }
 
-pub fn compute_tape_repeat_length<T>(tapes: &Vec<Tape<T>>) -> usize {
+pub fn compute_tape_repeat_length<T>(tapes: &[Tape<T>]) -> usize {
     tapes
         .iter()
         .map(|tape| tape.instructions.len())
@@ -249,7 +249,7 @@ pub fn compute_tape_repeat_length<T>(tapes: &Vec<Tape<T>>) -> usize {
         .unwrap_or(0)
 }
 
-pub fn compute_tape_instruction_count(tapes: &Vec<Tape<BasicInstr>>) -> usize {
+pub fn compute_tape_instruction_count(tapes: &[Tape<BasicInstr>]) -> usize {
     tapes
         .iter()
         .map(|tape| {
@@ -383,10 +383,7 @@ pub enum AtomType {
 impl AtomType {
     pub fn is_element(&self) -> bool {
         use AtomType::*;
-        match &self {
-            Air | Earth | Fire | Water => true,
-            _ => false,
-        }
+        matches!(&self, Air | Earth | Fire | Water)
     }
     pub fn promotable_metal(&self) -> Option<AtomType> {
         use AtomType::*;
@@ -1207,7 +1204,7 @@ impl World {
                 Movement::HeldStill => (),
             }
             let current = self.atoms.locs.insert(atom.pos, atom_key);
-            if current != None {
+            if current.is_some() {
                 let error_str = &"Multiple atoms in same hex!";
                 return Err(sim_error_pos(error_str, atom.pos));
             }

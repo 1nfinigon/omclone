@@ -562,7 +562,7 @@ fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     let mut rep_offset = None;
     for atom in input {
         if atom.atom_type == AtomType::RepeatingOutputMarker {
-            ensure!(rep_offset == None, "Multiple repeating atom markers!");
+            ensure!(rep_offset.is_none(), "Multiple repeating atom markers!");
             rep_offset = Some(atom.pos);
         }
     }

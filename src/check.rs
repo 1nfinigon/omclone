@@ -16,14 +16,14 @@ pub enum CheckResult {
 }
 
 pub fn check_solution(sol: &FullSolution, puzzle: &FullPuzzle, skip_overlap: bool) -> CheckResult {
-    let init = match puzzle_prep(&puzzle, &sol) {
+    let init = match puzzle_prep(puzzle, sol) {
         Err(e) => {
             return CheckResult::FailedPrep(e.to_string());
         }
         Ok(s) => s,
     };
     if skip_overlap && init.has_overlap() {
-        return CheckResult::Skipped(format!("has overlap"));
+        return CheckResult::Skipped("has overlap".to_string());
     }
     let mut world = match WorldWithTapes::setup_sim(&init) {
         Err(e) => {
@@ -68,7 +68,7 @@ pub fn main() -> Result<()> {
         let print_err = |kind: &str, details: &str| {
             println!("{}: {:?} / {:?}: {}", kind, puzzle_fpath, fpath, details);
         };
-        match check_solution(&solution, &puzzle, false) {
+        match check_solution(&solution, puzzle, false) {
             CheckResult::Skipped(_s) => {
                 return;
             }
