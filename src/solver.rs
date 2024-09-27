@@ -111,10 +111,6 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        if search_state.next_arm_index() == 0 {
-            println!("");
-        }
-
         let mut tree_search = search::TreeSearch::new(search_state.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 500 };
@@ -129,10 +125,24 @@ fn solve_one_puzzle_seeded(
 
         let instr = stats.best_update();
         println!(
-            "{:<23} #={} (v={:.3} (raw {:.3}) d={:>2.2}/{:>2}) {}",
-            format!("{:?}", instr), playouts, stats.root_value, stats.root_raw_utility, stats.avg_depth, stats.max_depth,
+            "{}{:<23} #={} (v={:.3} (raw {:.3}) d={:>5.2}/{:>2}) {}",
+            if search_state.next_arm_index() == 0 {
+                "*"
+            } else {
+                " "
+            },
+            format!("{:?}", instr),
+            playouts,
+            stats.root_value,
+            stats.root_raw_utility,
+            stats.avg_depth,
+            stats.max_depth,
             {
-                let v: Vec<_> = stats.updates_with_stats.iter().map(|u| format!("[{}]:{:>3}", u.instr.to_char(), u.visits)).collect();
+                let v: Vec<_> = stats
+                    .updates_with_stats
+                    .iter()
+                    .map(|u| format!("[{}{:>3}]", u.instr.to_char(), u.visits * 100 / playouts))
+                    .collect();
                 v.join(" ")
             }
         );
