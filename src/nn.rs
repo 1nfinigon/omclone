@@ -395,7 +395,8 @@ impl<const N: usize> SparseCoo<N> {
             options,
             true,
         )?
-        .f_to_dense(None, false)?;
+        .f_to_dense(None, false)?
+        .f_to(options.1)?;
         Ok(tensor)
     }
 }
