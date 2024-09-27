@@ -22,9 +22,9 @@ fn solve_one_puzzle_seeded(
     model: &nn::Model,
     rng: &mut impl Rng,
 ) -> Result<()> {
-    let mut seed_init = parser::puzzle_prep(&seed_puzzle, &seed_solution)?;
+    let mut seed_init = parser::puzzle_prep(seed_puzzle, seed_solution)?;
 
-    match check::check_solution(&seed_solution, seed_puzzle, true) {
+    match check::check_solution(seed_solution, seed_puzzle, true) {
         check::CheckResult::Ok => (),
         _ => {
             return Ok(());
@@ -110,7 +110,7 @@ fn solve_one_puzzle_seeded(
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
         for _ in 0..playouts {
-            tree_search.search_once(rng, &model)?;
+            tree_search.search_once(rng, model)?;
         }
 
         let stats = tree_search.next_updates_with_stats();

@@ -235,7 +235,7 @@ impl TreeSearch {
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
                             .ok_or_eyre("arm out of nn bounds")?;
 
-                        let eval = model.forward(&*state.nn_features, x, y, is_root)?;
+                        let eval = model.forward(&state.nn_features, x, y, is_root)?;
 
                         let mut real_node = RealNode::new();
                         real_node.policy = eval.policy;

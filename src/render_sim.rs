@@ -15,7 +15,7 @@ pub fn rot_to_angle(r: Rot) -> f32 {
 
 //note: 1 hex has inner radius of 1 (width of 2).
 //hex height, 3 tiles tip-to-tip=sqrt(3)*5/6
-const Y_FACTOR: f32 = 1.7320508075688772935274463415;
+const Y_FACTOR: f32 = 1.7320508;
 fn setup_arms(ctx: &mut dyn RenderingBackend) -> Bindings {
     const ARM_VERT_BUF: [Vert; 14] = [
         //Arm Base
@@ -155,13 +155,11 @@ fn setup_textures(ctx: &mut dyn RenderingBackend) -> Vec<Bindings> {
                 .decode()
                 .unwrap()
                 .into_rgba8();
-            let width = img.width().try_into().unwrap();
-            let height = img.height().try_into().unwrap();
             let params = TextureParams {
                 format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Repeat,
-                width,
-                height,
+                width: img.width(),
+                height: img.height(),
                 ..Default::default()
             };
             let texture = ctx.new_texture_from_data_and_format(&img, params);

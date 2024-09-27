@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 #[derive(Primitive)]
 pub enum Kind {
-    MCTS = 0,
+    Mcts = 0,
     FromOptimalSolution = 1,
 }
 
@@ -37,7 +37,7 @@ impl History {
     pub fn append_mcts(&mut self, stats: &search::NextUpdatesWithStats) {
         let playouts: Vec<u32> = stats.updates_with_stats.iter().map(|s| s.visits).collect();
         let item = Item {
-            kind: Kind::MCTS,
+            kind: Kind::Mcts,
             playouts: playouts.try_into().unwrap(),
         };
         self.0.push(item);
@@ -78,8 +78,8 @@ impl HistoryFile {
                 for _ in 0..len {
                     let mut playouts = [0u32; BasicInstr::N_TYPES];
                     let kind = Kind::from_u32(read_u32_le(r)?).unwrap();
-                    for instr in 0..BasicInstr::N_TYPES {
-                        playouts[instr] = read_u32_le(r)?;
+                    for x in playouts.iter_mut() {
+                        *x = read_u32_le(r)?;
                     }
                     history.push(Item { kind, playouts });
                 }

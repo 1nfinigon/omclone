@@ -332,14 +332,10 @@ impl<const N: usize> SparseCoo<N> {
         self.values.truncate(new_i);
     }
 
-    fn slice_all_but_one_dim<'a>(
-        &mut self,
-        dim: usize,
-        other_coords: &[usize],
-    ) -> SparseCoo1DSlice {
+    fn slice_all_but_one_dim(&mut self, dim: usize, other_coords: &[usize]) -> SparseCoo1DSlice {
         assert_eq!(other_coords.len(), N - 1);
         SparseCoo1DSlice {
-            underlying: Box::new(self),
+            underlying: self,
             dim,
             other_coords: other_coords.to_owned(),
         }
@@ -398,7 +394,7 @@ impl<const N: usize> SparseCooAsSlice for SparseCoo<N> {
 }
 
 struct SparseCoo1DSlice<'a> {
-    underlying: Box<&'a mut dyn SparseCooAsSlice>,
+    underlying: &'a mut dyn SparseCooAsSlice,
     dim: usize,
     other_coords: Vec<usize>,
 }
@@ -407,8 +403,8 @@ impl<'a> SparseCoo1DSlice<'a> {
     fn set(&mut self, this_coord: usize, value: f32) {
         let n_dims = self.other_coords.len() + 1;
         let mut coord = vec![0usize; n_dims];
-        for i in 0..n_dims {
-            coord[i] = match i.cmp(&self.dim) {
+        for (i, coord_elt) in coord.iter_mut().enumerate() {
+            *coord_elt = match i.cmp(&self.dim) {
                 std::cmp::Ordering::Less => self.other_coords[i],
                 std::cmp::Ordering::Equal => this_coord,
                 std::cmp::Ordering::Greater => self.other_coords[i - 1],
@@ -856,11 +852,11 @@ pub mod model {
                 )
             );
             let mut policy_sum = 0.;
-            for i_instr in 0..BasicInstr::N_TYPES {
+            for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
                 let this_policy =
                     policy_tensor.f_double_value(&[0, i_instr as i64, y as i64, x as i64])? as f32;
                 assert!(this_policy >= 0.);
-                policy[i_instr] = this_policy;
+                *policy_elt = this_policy;
                 policy_sum += this_policy;
             }
             assert!((policy_sum - 1.).abs() < 1e-6);

@@ -1277,9 +1277,12 @@ impl World {
                     for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
                         let grab_pos = arm.pos + (rot_dist_to_pos(arm.len, arm.rot + r));
                         let null_key = AtomKey::null();
-                        let current = self.atoms.locs.get(&grab_pos).filter(|&key| {
-                            !self.atoms.atom_map[*key].is_berlo
-                        }).unwrap_or(&null_key);
+                        let current = self
+                            .atoms
+                            .locs
+                            .get(&grab_pos)
+                            .filter(|&key| !self.atoms.atom_map[*key].is_berlo)
+                            .unwrap_or(&null_key);
                         arm.atoms_grabbed[r as usize] = *current;
                     }
                 }

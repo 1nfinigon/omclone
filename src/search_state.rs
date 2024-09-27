@@ -38,7 +38,7 @@ impl State {
         let n_arms = self.world.arms.len();
         assert!(self.instr_buffer.len() < n_arms, "instr_buffer should have been committed to the world already, if all arms have instructions");
         self.nn_features
-            .set_temporal_instr(0, &*self.world, self.instr_buffer.len(), update);
+            .set_temporal_instr(0, &self.world, self.instr_buffer.len(), update);
         self.instr_buffer.push(update);
         if self.instr_buffer.len() == n_arms {
             // commit buffer

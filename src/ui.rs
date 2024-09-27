@@ -437,9 +437,7 @@ impl EventHandler for MyMiniquadApp {
                     egui::Window::new("World loaded").default_pos((0.,0.)).show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
                         let mut target_time = loaded.curr_time.floor() as usize;
-                        if loaded.max_timestep < target_time{
-                            loaded.max_timestep = target_time;
-                        }
+                        loaded.max_timestep = loaded.max_timestep.max(target_time);
                         ui.horizontal(|ui| {
                             ui.add(egui::Slider::new(&mut target_time, 0..=loaded.max_timestep)
                                 .show_value(false));
@@ -450,12 +448,10 @@ impl EventHandler for MyMiniquadApp {
                         });
                         ui.horizontal(|ui| {
                             if ui.button("-1").clicked() {
-                                if target_time > 0 {
-                                    target_time -= 1;
-                                }
+                                target_time = target_time.saturating_sub(1);
                             }
                             if ui.button("+1").clicked() {
-                                target_time += 1;
+                                target_time = target_time.saturating_add(1);
                             }
                             ui.label("Max Timestep:");
                             ui.add(egui::DragValue::new(&mut loaded.max_timestep)

@@ -117,7 +117,7 @@ fn process_one_solution(
                     ));
                 }
             }
-            search_history::Kind::MCTS => {
+            search_history::Kind::Mcts => {
                 // For now, basically don't use these to train the policy head
                 // because they're bad quality. (?)
                 let loss_weights = [1.0, 0.2, 1.0];
