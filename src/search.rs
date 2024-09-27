@@ -4,9 +4,7 @@ use crate::search_state::State;
 use crate::sim::BasicInstr;
 use eyre::{OptionExt, Result};
 use rand::prelude::*;
-use std::borrow::BorrowMut;
-use std::collections::{hash_map, HashMap};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ChildId(u32);
@@ -200,10 +198,13 @@ impl TreeSearch {
                                 .policy
                                 .iter()
                                 .enumerate()
-                                .filter(|(i, p)| {
-                                    self.get_child(real_node, ChildId(*i as u32)).visits() > 0
+                                .filter_map(|(i, p)| {
+                                    if self.get_child(real_node, ChildId(i as u32)).visits() > 0 {
+                                        Some(p)
+                                    } else {
+                                        None
+                                    }
                                 })
-                                .map(|(_, p)| p)
                                 .sum::<f32>()
                                 .sqrt()
                         };

@@ -1,16 +1,6 @@
 use crate::sim::*;
 
-#[cfg(feature = "color_eyre")]
-use color_eyre::{
-    eyre::{bail, ensure, eyre},
-    Result,
-};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{
-    eyre::{bail, ensure, eyre},
-    Result,
-};
-
+use eyre::{bail, ensure, eyre, Result};
 use num_traits::FromPrimitive;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -18,7 +8,7 @@ use std::io::{Read, Write};
 use bitflags::bitflags;
 bitflags! {
     #[repr(transparent)]
-    struct AllowedParts: u64 {
+    pub struct AllowedParts: u64 {
         const ALLOW_ARM                  = 1<<0 ;
         const ALLOW_MULTIARM_EQUILIBRIUM = 1<<1 ;
         const ALLOW_PISTON               = 1<<2 ;
@@ -626,6 +616,7 @@ pub fn parse_puzzle(f: &mut impl Read) -> Result<FullPuzzle> {
     Ok(puzzle_output)
 }
 
+#[allow(dead_code)]
 pub fn write_puzzle(f: &mut impl Write, puzzle: &FullPuzzle) -> Result<()> {
     let FullPuzzle {
         puzzle_name,

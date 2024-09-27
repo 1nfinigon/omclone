@@ -69,7 +69,7 @@ pub fn main() -> Result<()> {
             println!("{}: {:?} / {:?}: {}", kind, puzzle_fpath, fpath, details);
         };
         match check_solution(&solution, &puzzle, false) {
-            CheckResult::Skipped(s) => {
+            CheckResult::Skipped(_s) => {
                 return;
             }
             CheckResult::FailedPrep(e) => {

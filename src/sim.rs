@@ -1,18 +1,8 @@
-#![allow(unused_parens)]
 use bitflags::bitflags;
-#[cfg(feature = "color_eyre")]
-use color_eyre::{
-    eyre::{bail, ensure},
-    Result,
-};
 use enum_primitive_derive::Primitive;
+use eyre::{ensure, Result};
 pub use nalgebra::{Point2, Vector2};
 use rustc_hash::{FxHashMap, FxHashSet};
-#[cfg(not(feature = "color_eyre"))]
-use simple_eyre::{
-    eyre::{bail, ensure},
-    Result,
-};
 use slotmap::{new_key_type, Key, SecondaryMap, SlotMap};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
@@ -1040,7 +1030,7 @@ fn xy_to_pos(input: XYPos) -> Pos {
 
     // same sign, but which end of the parallelogram are we?
     let sign = lambda.signum();
-    let candidate = if (lambda.abs() > mu.abs()) {
+    let candidate = if lambda.abs() > mu.abs() {
         (p + sign, q)
     } else {
         (p, q + sign)
@@ -1424,7 +1414,7 @@ impl World {
                     .atom_map
                     .get_disjoint_mut([key1, key2])
                     .expect("Inconsistent atoms!");
-                if (atom1.is_berlo || atom2.is_berlo) {
+                if atom1.is_berlo || atom2.is_berlo {
                     return;
                 }
                 let bond1 = atom1.connections[rot];
@@ -1446,10 +1436,10 @@ impl World {
                     .atom_map
                     .get_disjoint_mut([key1, key2])
                     .expect("Inconsistent atoms!");
-                if (atom1.is_berlo || atom2.is_berlo) {
+                if atom1.is_berlo || atom2.is_berlo {
                     return;
                 }
-                if (atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire) {
+                if atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire {
                     return;
                 }
                 let bond1 = atom1.connections[rot];
@@ -1969,9 +1959,9 @@ impl World {
         let mut all_outputs_full = true;
         for g in &self.glyphs {
             if let GlyphType::Output(_, i, _) = g.glyph_type {
-                all_outputs_full &= (i == 0);
+                all_outputs_full &= i == 0;
             } else if let GlyphType::OutputRepeating(_, i, _) = g.glyph_type {
-                all_outputs_full &= (i == 0);
+                all_outputs_full &= i == 0;
             }
         }
         all_outputs_full

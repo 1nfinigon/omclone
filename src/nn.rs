@@ -1,32 +1,13 @@
 use crate::sim;
 use eyre::Result;
-use smallvec::SmallVec;
 
 pub mod constants {
 
     pub const N_WIDTH: usize = 16;
     pub const N_HEIGHT: usize = 16;
-    pub const N_INPUTS: usize = 4;
-    pub const N_OUTPUTS: usize = 4;
-    pub const N_ARMS: usize = 12;
-    pub const N_TRACKS: usize = 6;
     pub const N_HISTORY_CYCLES: usize = 4;
-    pub const N_MAX_CYCLES: usize = 500;
     pub const N_MAX_PRODUCTS: usize = 7;
 
-    /*
-    pub const N_WIDTH: usize = 32;
-    pub const N_HEIGHT: usize = 32;
-    pub const N_INPUTS: usize = 10;
-    pub const N_OUTPUTS: usize = 10;
-    pub const N_ARMS: usize = 16;
-    pub const N_TRACKS: usize = 8;
-    pub const N_HISTORY_CYCLES: usize = 4;
-    pub const N_MAX_CYCLES: usize = 1000;
-    pub const N_MAX_PRODUCTS: usize = 6;
-    */
-
-    pub const N_MAX_AREA: usize = N_WIDTH * N_HEIGHT;
     pub const N_ORIENTATIONS: usize = 6;
 
     pub const N_BOND_TYPES: usize = 4;
@@ -37,9 +18,7 @@ use constants::*;
 
 pub mod feature_offsets {
     use super::constants::*;
-    use crate::sim;
     use crate::sim::BasicInstr;
-    use num_traits::ToPrimitive;
 
     #[derive(Copy, Clone, Debug)]
     pub struct Float {
@@ -337,11 +316,6 @@ impl<const N: usize> SparseCoo<N> {
         self.values.push(value);
     }
 
-    fn clear(&mut self) {
-        self.indices.clear();
-        self.values.clear()
-    }
-
     fn retain_coords_mut<F: FnMut(&mut [i64]) -> bool>(&mut self, mut f: F) {
         let mut new_i = 0;
         for old_i in 0..self.values.len() {
@@ -447,7 +421,6 @@ impl<'a> SparseCoo1DSlice<'a> {
 pub mod features {
     use super::feature_offsets::*;
     use super::*;
-    use eyre::Result;
 
     pub fn normalize_position(pos: sim::Pos) -> Option<(usize, usize)> {
         if 0 <= pos.x && (pos.x as usize) < N_WIDTH && 0 <= pos.y && (pos.y as usize) < N_HEIGHT {
@@ -500,7 +473,7 @@ pub mod features {
             offset_atom_is_berlo: Option<Binary>,
         ) {
             let sim::Atom {
-                pos,
+                pos: _,
                 atom_type,
                 connections,
                 is_berlo,
@@ -825,7 +798,7 @@ pub mod model {
 
         /// Softmaxed outcome prediction from value head
         pub win: f32,
-        pub loss_by_cycles: f32,
+        //pub loss_by_cycles: f32,
         //loss_by_area: f32,
 
         //cycles_left: f32, -- think about making this N(0, 1) in the raw output. Maybe interpret this as scaled relative to the given cycle limit?
@@ -847,8 +820,6 @@ pub mod model {
             y: usize,
             is_root: bool,
         ) -> eyre::Result<Evaluation> {
-            use tch::IndexOp;
-
             assert!(x < constants::N_WIDTH);
             assert!(y < constants::N_HEIGHT);
 
@@ -905,11 +876,10 @@ pub mod model {
             Ok(Evaluation {
                 policy,
                 win,
-                loss_by_cycles,
+                //loss_by_cycles,
             })
         }
     }
 }
 
-pub use model::Evaluation;
 pub use model::Model;

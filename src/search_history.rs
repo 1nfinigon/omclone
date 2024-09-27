@@ -75,7 +75,7 @@ impl HistoryFile {
                 let len = read_u32_le(r)? as usize;
                 assert!(len < 100000, "unreasonable len");
                 let mut history = Vec::with_capacity(len);
-                for i in 0..len {
+                for _ in 0..len {
                     let mut playouts = [0u32; BasicInstr::N_TYPES];
                     let kind = Kind::from_u32(read_u32_le(r)?).unwrap();
                     for instr in 0..BasicInstr::N_TYPES {

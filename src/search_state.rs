@@ -1,6 +1,5 @@
 use crate::nn;
 use crate::sim::*;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct State {
