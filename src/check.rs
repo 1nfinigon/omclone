@@ -1,11 +1,8 @@
 use crate::parser::*;
 use crate::sim::*;
 use crate::utils::*;
-use std::collections::HashMap;
-use std::fs;
-use std::fs::File;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use eyre::Result;
+use std::path::PathBuf;
 const CHECK_AREA: bool = false;
 
 #[derive(Debug)]
@@ -60,9 +57,7 @@ pub fn check_solution(sol: &FullSolution, puzzle: &FullPuzzle, skip_overlap: boo
     }
 }
 
-#[test]
-fn check_all() {
-    std::env::set_var("RUST_BACKTRACE", "full");
+pub fn main() -> Result<()> {
     let mut puzzle_map = PuzzleMap::new();
     read_puzzle_recurse(&mut puzzle_map, PUZZLE_DIR);
     let mut stats = (0, 0);
@@ -105,4 +100,5 @@ fn check_all() {
     read_solution_recurse(&mut cb, &puzzle_map, "test/solution");
     read_solution_recurse(&mut cb, &puzzle_map, "test/om-leaderboard-master");
     println!("final score = {}/{}", stats.0, stats.1);
+    Ok(())
 }

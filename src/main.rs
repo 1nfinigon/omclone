@@ -10,13 +10,13 @@ mod benchmark;
 #[cfg(feature = "nn")]
 mod nn;
 #[cfg(feature = "nn")]
-mod solver;
-#[cfg(feature = "nn")]
 mod search;
 #[cfg(feature = "nn")]
 mod search_history;
 #[cfg(feature = "nn")]
 mod search_state;
+#[cfg(feature = "nn")]
+mod solver;
 #[cfg(feature = "nn")]
 mod train;
 
@@ -35,13 +35,19 @@ use color_eyre::install;
 use simple_eyre::install;
 
 fn main() -> Result<()> {
+    /*
     #[cfg(not(target_arch = "wasm32"))]
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "full");
     }
+    */
     install()?;
 
     let args: Vec<_> = std::env::args().collect();
+
+    if args.get(1).map(|x| x.as_str()) == Some("check") {
+        return check::main();
+    }
 
     #[cfg(feature = "benchmark")]
     if args.get(1).map(|x| x.as_str()) == Some("benchmark") {

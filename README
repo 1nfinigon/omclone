@@ -1,7 +1,7 @@
 ```
 $ cargo run
 $ cargo run benchmark
-$ cargo test -- --nocapture
+$ cargo run check
 
 
 $ export LIBTORCH_USE_PYTORCH=1

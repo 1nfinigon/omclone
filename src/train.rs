@@ -99,7 +99,11 @@ fn process_one_solution(
                 // from MCTS
                 let loss_weights = [0.00001, 0.8, 1.0];
 
-                if rng.gen_bool(if instr == BasicInstr::Empty { 0.05 } else { 0.5 }) {
+                if rng.gen_bool(if instr == BasicInstr::Empty {
+                    0.05
+                } else {
+                    0.5
+                }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
                     // it certainly gets us more data quicker though.
