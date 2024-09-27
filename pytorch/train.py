@@ -6,6 +6,7 @@ import numpy as np
 from pathlib import Path
 import os
 import datetime
+import multiprocessing
 
 import model
 from common import *
@@ -44,6 +45,9 @@ class NPZDataset(torch.utils.data.Dataset):
         return data
 
 if __name__ == "__main__":
+    # https://pytorch.org/docs/main/notes/multiprocessing.html#cuda-in-multiprocessing
+    multiprocessing.set_start_method('spawn')
+
     device = device()
 
     full_set = NPZDataset('test/next-training', device=device)
