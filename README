@@ -18,11 +18,24 @@ $ cargo run --features color_eyre,nn --bin solver
 -   When training on samples derived from MCTS where we start the search from
     a-few-moves-from-the-end, the network very quickly overspecializes to spam
     "Drop"
+-   Training both value and policy on a mix of human solutions (weight) +
+    weak MCTS solutions, I attempted to weight the loss scale to significantly
+    (x0.00001) shrink the impact of value loss for human solutions. This has
+    caused the value head to become extremely sharp for MCTS solutions, even
+    though the contribution of the value loss to the overall loss is very
+    small (0.006 vs 2.0).
+    -   Actually, why _is_ the value loss so low here? Is it just predicting
+        "cycles left until cycle limit > some small number"? I think so...
+    -   Solution: Generate solutions that have higher cycles-left but still
+        succeed, and lower cycles-left but still fail
 
 # Future work
 
 Technical/impl work:
 
+-   Generate solutions that have low cycles-left but still fail
+    -    ...because the layout is bad
+    -    ...because the layout is good but there's just not enough cycles left
 -   Train a timesteps-left head on existing solutions
 -   sparse tensors forfeatures and training data (right now bottlenecked on disk
     read speed, ~500MB/s)

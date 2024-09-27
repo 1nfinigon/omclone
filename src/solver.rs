@@ -69,7 +69,7 @@ fn solve_one_puzzle_seeded(
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        first_timestep + (n_moves + n_moves_to_search + n_arms - 1) / n_arms,
+        first_timestep + (n_moves + rng.gen_range(1..=16) + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
