@@ -21,20 +21,27 @@ $ cargo run --features color_eyre,nn --bin solver
 
 # Future work
 
+Technical/impl work:
+
 -   Train a timesteps-left head on existing solutions
--   Lean on existing solutions more, but be careful mixing them in with
-    MCTS-generated solutions. They are from different domains; try having them
-    train on non-overlapping outputs, to avoid the model overspecializing on
-    "source"
+-   sparse tensors forfeatures and training data (right now bottlenecked on disk
+    read speed, ~500MB/s)
 -   Parallelise MCTS, batch NN evaluations
 -   Make net/eval/training board size agnostic
 -   use symmetries to generate more data
 -   network/code for generating layouts
+-   better logging, saving intermediate layer outputs / residuals
+
+Science-y investigation work:
+
+-   Lean on existing solutions more, but be careful mixing them in with
+    MCTS-generated solutions. They are from different domains; try having them
+    train on non-overlapping outputs, to avoid the model overspecializing on
+    "source"
 -   weight and neuron activation visualization
     -   mean/stdev/activation-proportion per layer / per history
     -   max abs gradient
 -   find/monitor dead neurons
--   better logging, saving intermediate layer outputs / residuals
 -   keep more notes/observations for experiments, be more scientific about this
 -   run same NN several times to get an idea of consistency
 -   validation set in addition to training set

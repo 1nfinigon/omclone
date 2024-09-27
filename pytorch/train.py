@@ -11,7 +11,7 @@ import model
 from common import *
 
 BATCH_SIZE = 128
-EPOCHS = 5
+EPOCHS = 50
 
 class NPZDataset(torch.utils.data.Dataset):
     def __init__(self, path, device):
@@ -29,8 +29,8 @@ device = device()
 
 full_set = NPZDataset('test/next-training', device=device)
 training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
-training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True)
-validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True)
+training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
+validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
 
 filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
 model = torch.jit.load(filename, map_location=device)
@@ -44,7 +44,7 @@ def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs
     l2_penalty = 3e-5 * torch.stack([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad]).sum().expand(B)
     return torch.stack([value_error, policy_error, l2_penalty], dim=1)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+optimizer = torch.optim.AdamW(model.parameters(), lr=4e-4)
 
 print('Model has {} trainable parameters'.format(sum(p.numel() for p in model.parameters())))
 
