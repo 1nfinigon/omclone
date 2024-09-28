@@ -47,6 +47,8 @@ class NPZDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     device = device()
 
+    torch.manual_seed(0)
+
     model_name = sys.argv[1]
     print("Using model name {}".format(model_name))
 
