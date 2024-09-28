@@ -24,6 +24,10 @@ class NPZDataset(torch.utils.data.Dataset):
         self.zipfile = zipfile.ZipFile(self.zip_path)
         self.zipfp = open(self.zip_path, 'rb')
 
+    def _zip_unload(self):
+        self.zipfile = None
+        self.zipfp = None
+
     def _npz_get(self, inner_path):
         """
         A faster alternative to using NpzFile, using mmapping
@@ -52,19 +56,18 @@ class NPZDataset(torch.utils.data.Dataset):
         self.device = device
         self._zip_load()
         self.sample_names = list(set((s.split('/')[0] for s in self.zipfile.namelist())))
-
-    def __getstate__(self):
-        # don't include npz_data in the pickle because it contains an open file
-        return (self.zip_path, self.device, self.sample_names)
-
-    def __setstate__(self, state):
-        self.zip_path, self.device, self.sample_names = state
-        self._zip_load()
+        # unload for 2 reasons:
+        # 1) pickle doesn't support sending open files;
+        # 2) save memory in the main process, which doesn't need the full zipfile object
+        self._zip_unload()
 
     def __len__(self):
         return len(self.sample_names)
 
     def __getitem__(self, item):
+        if self.zipfile is None:
+            self._zip_load()
+
         sample_name = self.sample_names[item]
         def parse_sparse(prefix):
             indices = torch.from_numpy(self._npz_get('{}/{}/indices'.format(sample_name, prefix)))
