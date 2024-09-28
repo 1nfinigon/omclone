@@ -111,11 +111,45 @@ Notes:
 
 -   This training data set still suffers from value loss being small
     relative to policy loss, this time it's more like a factor of 100x
--   L2 regularization penalty scales with # params! The current setup
-    effectively means Model B is being regularised less than A (as the other
-    loss terms do not scale). (And it also means that you can't directly
-    compare the total loss numbers between different-sized networks.
-    Although with the current L2 penalty coeff this is a negligible effect.)
+-   The randomly-initialized Model A had double the L2 penalty of Model B. This
+    makes sense, given that L2 norm scales with # params (if each param is drawn
+    from the same distribution to start with).
+    -   It seems that this means L2 penalty loss (and hence the total loss) is
+        not directly comparable between different-sized networks. The other loss
+        terms do not scale with # params, and are directly comparable. Although
+        with the current tiny loss coeff on L2 penalty this is a negligible
+        effect.
+    -   I think I want to conclude that Model B is _not_ being regularised
+        less than A, and that this is just an initialization effect. Here are
+        two different ways of thinking about this:
+        -   Consider that Model B can be embedded entirely inside Model A, by
+            making the other 48 channels in A "zero channels", which incur zero
+            L2 loss. So, two models of different sizes can have "the same
+            functionality" with the same L2 loss.
+        -   Consider an extremely simplified model of a neural network layer, as
+            a function R^n -> R^n which is a composition of a linear function L
+            and a nonlinear function N. Assume the input vector is either zero
+            or of unit length, and assume that N preserves this property
+            property (this is not true for ReLU, but whatever). I think we'd
+            like L to preserve this property as well, which means that L should
+            be a rotation matrix. The Frobenius norm for a rotation matrix is n,
+            the number of dimensions. However, we _can_ still reduce the norm
+            whilst still preserving the property, by reducing the number of
+            dimensions being rotated (and setting the other dimensions to zero)!
+            (Such dimensionality reduction is akin to reducing the number of
+            channels. Which is kinda what the previous bullet point was
+            illustrating by way of explicit construction.) Handwaving even more,
+            this suggests that the L2 penalty loss is pressuring the network
+            overall to stray from the above property at most k*l2_loss_coeff
+            times, for some constant k. And if we assume that the number of
+            times to "stray" is a function of the problem to be solved (and how
+            "badly behaved" the nonlinear functions are, summed across the whole
+            of the network evaluation), then indeed the loss coeff should be
+            fixed even as the number of channels changes (and we'd expect the
+            L2 number itself to be comparable eventually as well, assuming the
+            two networks are doing equivalent work). This is a horrible
+            hand-wavey analogy but intuitively it feels to have somewhat
+            satisfying explaining power.
 -   Both networks train at the same speed, indicating the python dataloader or
     disk->sparse->dense->GPU or loss-computation overheads dominate. The GPU is
     not hitting power usage limits (avg 100W for A and 50W for B), further
