@@ -53,7 +53,7 @@ if __name__ == "__main__":
     print("Using model name {}".format(model_name))
 
     full_set = NPZDataset('test/next-training', device=device)
-    training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
+    training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25], generator=torch.Generator().manual_seed(42))
     training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
     validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
 
