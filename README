@@ -33,15 +33,27 @@ $ cargo run train
 -   Probe/visualise the feature inputs and network to make sure everything's
     working as I expected
 
-# Observations
+# Experiment 0 (2024-09-27): just playing around
 
--   Seed-solver: When training on samples derived from MCTS where we start the
-    search from only a few moves from the end, the network very quickly
-    overspecializes to spam "Drop"
-    -   This was partially just because I forgot to clear the input between
-        timesteps, meaning the input contained very little usable data, which
-        meant the best the network could do is to blindly spam the most likely
-        instruction
+-   Training data: epoch-v1-n seeded ~100-1000hum:1mcts, later w/ split loss
+    weight
+-   Optimizer: AdamW lr between 4e-5 and 3e-3
+-   Batch size: 128
+-   Model: model v1 7 layer ch=96 (~2000k params)
+
+Running the seed solver training on samples derived from MCTS where we start the
+search from only a small number (x) of moves from the end, then training a new
+network on the result; rinse and repeat. Increasing x gradually as the network
+gets better. No systematic analysis or probing, just manually black-box
+inspecting solver output and generated solutions to gain a bit of intuition and
+spot obvious issues.
+
+Notes:
+    
+-   The network very quickly overspecializes to spam "Drop"
+    -   This was just because I forgot to clear the input between timesteps,
+        meaning the input contained very little usable data, which meant the
+        best the network could do is to blindly spam the most likely instruction
     -   In response to this observation I also tweaked the loss-weight for
         samples that come from human solutions (which ~only sees policy loss) vs
         those that come from MCTS (which ~only sees value loss)
@@ -83,6 +95,36 @@ $ cargo run train
     -   Proposed solution: taper off the human training and generate more MCTS
         data
 
+# Experiment 1 (2024-09-28): effect of varying #channels
+
+-   Training/validation data:
+    -   epoch-v1-1 (seeded ~100hum:1mcts)
+    -   w/ split loss weight (hum -> policy loss only, mcts -> value loss only)
+    -   831k samples from 2.3k games
+    -   75/25 training/validation split
+-   Optimizer: AdamW lr=4e-4
+-   Batch size: 128
+-   Model A: model96_20240928_112658 v1 7 layer ch=96 (2048k params)
+-   Model B: model48_20240928_112943 v1 7 layer ch=48 (764k params)
+
+Notes:
+
+-   This training data set still suffers from value loss being small
+    relative to policy loss, this time it's more like a factor of 100x
+-   L2 regularization penalty scales with # params! The current setup
+    effectively means Model B is being regularised less than A (as the other
+    loss terms do not scale). (And it also means that you can't directly
+    compare the total loss numbers between different-sized networks.
+    Although with the current L2 penalty coeff this is a negligible effect.)
+-   Both networks train at the same speed, indicating the python dataloader or
+    disk->sparse->dense->GPU or loss-computation overheads dominate. The GPU is
+    not hitting power usage limits (avg 100W for A and 50W for B), further
+    indicating that some time spent optimizing pytorch/train.py would be
+    fruitful.
+-   I neglected to set a seed, so the random training/validation split is
+    different, making validation results hard to compare between the two. This
+    is fixed for future experiments.
+
 # Future work
 
 Technical/impl work:
@@ -115,7 +157,6 @@ Science-y investigation work:
 -   find/monitor dead neurons
 -   keep more notes/observations for experiments, be more scientific about this
 -   run same NN several times to get an idea of consistency
--   validation set in addition to training set
 -   Batch size? https://arxiv.org/pdf/1812.06162
 
 # idk
