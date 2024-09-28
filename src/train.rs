@@ -5,17 +5,26 @@ use crate::search_state;
 use crate::sim;
 use crate::utils;
 
+use eyre::OptionExt;
 use eyre::{eyre, Result};
 use num_traits::ToPrimitive;
 use rand::prelude::*;
 use rayon::prelude::*;
 use sim::BasicInstr;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::{BufReader, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use zip::{read::ZipArchive, write::ZipWriter};
 
-fn write_npz_files(
-    file_basename: &str,
+fn write_npz_files<W: Write + Seek>(
+    npz_writer: &Mutex<ZipWriter<W>>,
+    // needs to be a path that's guaranteed not to collide with any other
+    // threads; it is used temporarily, and cleaned up in this function
+    tmp_path: impl AsRef<Path>,
+    // parent path inside the .npz archive for these tensors
+    sample_name: &str,
     features: Box<nn::Features>,
     value: f32,
     visits: [f32; BasicInstr::N_TYPES],
@@ -30,32 +39,39 @@ fn write_npz_files(
     let pos = tch::Tensor::f_from_slice(&[x as i64, y as i64])?;
     let loss_weights = tch::Tensor::f_from_slice(&loss_weights)?;
 
-    tch::Tensor::write_npz(
-        &[
-            ("spatial_input_indices", &spatial_input.indices),
-            ("spatial_input_values", &spatial_input.values),
-            ("spatial_input_size", &spatial_input.size),
-            (
-                "spatiotemporal_input_indices",
-                &spatiotemporal_input.indices,
-            ),
-            ("spatiotemporal_input_values", &spatiotemporal_input.values),
-            ("spatiotemporal_input_size", &spatiotemporal_input.size),
-            ("temporal_input_indices", &temporal_input.indices),
-            ("temporal_input_values", &temporal_input.values),
-            ("temporal_input_size", &temporal_input.size),
-            ("value_output", &value_output),
-            ("policy_output", &policy_output),
-            ("pos", &pos),
-            ("loss_weights", &loss_weights),
-        ],
-        format!("test/next-training/{}.npz", file_basename),
-    )?;
+    let mut npz_entries = Vec::new();
+    let mut add_entry =
+        |name, tensor| npz_entries.push((format!("{}/{}", sample_name, name), tensor));
+    for (sparse_name, sparse_tensors) in [
+        ("spatial_input", &spatial_input),
+        ("spatiotemporal_input", &spatiotemporal_input),
+        ("temporal_input", &temporal_input),
+    ] {
+        add_entry(format!("{}/indices", sparse_name), &sparse_tensors.indices);
+        add_entry(format!("{}/values", sparse_name), &sparse_tensors.values);
+        add_entry(format!("{}/size", sparse_name), &sparse_tensors.size);
+    }
+    add_entry("value_output".to_string(), &value_output);
+    add_entry("policy_output".to_string(), &policy_output);
+    add_entry("pos".to_string(), &pos);
+    add_entry("loss_weights".to_string(), &loss_weights);
+    tch::Tensor::write_npz(&npz_entries, tmp_path.as_ref())?;
+
+    {
+        let tmp_zip_archive = ZipArchive::new(BufReader::new(File::open(tmp_path.as_ref())?))?;
+        let mut npz_writer = npz_writer
+            .lock()
+            .ok()
+            .ok_or_eyre("can't lock npz writer mutex")?;
+        npz_writer.merge_archive(tmp_zip_archive)?;
+    }
+    std::fs::remove_file(tmp_path)?;
 
     Ok(())
 }
 
-fn process_one_solution(
+fn process_one_solution<W: Write + Seek>(
+    npz_writer: &Mutex<ZipWriter<W>>,
     fpath: impl AsRef<Path>,
     rng: &mut impl Rng,
     puzzle_map: &utils::PuzzleMap,
@@ -157,8 +173,15 @@ fn process_one_solution(
 
     let n_tensors = tensors.len();
     for (i, (features, visits, pos, loss_weights)) in tensors.into_iter().enumerate() {
+        let sample_name = format!("{}_{}", solution.solution_name, i);
+        let tmp_path = std::env::temp_dir().join(format!(
+            "ae98c2fd-4926-4c37-a654-daacf787e462_{}.zip",
+            sample_name
+        ));
         write_npz_files(
-            &format!("{}_{}", solution.solution_name, i),
+            npz_writer,
+            &tmp_path,
+            &sample_name,
             features,
             final_result,
             visits,
@@ -183,22 +206,27 @@ pub fn main() -> Result<()> {
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/current-epoch");
 
     let i = std::sync::atomic::AtomicUsize::new(0);
-    let n_files_written = std::sync::atomic::AtomicUsize::new(0);
+    let n_samples_written = std::sync::atomic::AtomicUsize::new(0);
+    let npz_writer = Arc::new(Mutex::new(ZipWriter::new(BufWriter::new(
+        File::create_new("test/next-training.npz")?,
+    ))));
     solution_paths.par_iter().for_each(|fpath| {
         //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
         let mut rng = rand::thread_rng();
         let rng = &mut rng;
 
+        let npz_writer = Arc::clone(&npz_writer);
+
         println!(
-            "{}/{} ({} files written so far)",
+            "{}/{} ({} samples written so far)",
             i.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             solution_paths.len(),
-            n_files_written.load(std::sync::atomic::Ordering::SeqCst),
+            n_samples_written.load(std::sync::atomic::Ordering::SeqCst),
         );
-        let result = process_one_solution(fpath, rng, &puzzle_map);
+        let result = process_one_solution(&npz_writer, fpath, rng, &puzzle_map);
         match result {
             Ok(n) => {
-                n_files_written.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+                n_samples_written.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
             }
             Err(e) => {
                 // TODO: figure out where these errors are coming from???????
@@ -206,6 +234,8 @@ pub fn main() -> Result<()> {
             }
         }
     });
+
+    println!("{} total samples", n_samples_written.into_inner());
 
     Ok(())
 }

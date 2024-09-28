@@ -19,29 +19,43 @@ EPOCHS = 50
 NPZData = namedtuple('NPZData', 'spatial_inputs spatiotemporal_inputs temporal_inputs value_outputs policy_outputs pos loss_weights')
 
 class NPZDataset(torch.utils.data.Dataset):
+    def _npz_load(self):
+        self.npz_data = np.load(self.path, mmap_mode='r', allow_pickle=False)
+
     def __init__(self, path, device):
         self.path = path
         self.device = device
-        self.files = list(Path(path).glob('*.npz'))
+        self._npz_load()
+        self.sample_names = list(set((s.split('/')[0] for s in self.npz_data.files)))
+
+    def __getstate__(self):
+        # don't include npz_data in the pickle because it contains an open file
+        return (self.path, self.device, self.sample_names)
+
+    def __setstate__(self, state):
+        self.path, self.device, self.sample_names = state
+        self._npz_load()
 
     def __len__(self):
-        return len(self.files)
+        return len(self.sample_names)
 
     def __getitem__(self, item):
-        npz_data = np.load(str(self.files[item]))
+        sample_name = self.sample_names[item]
         def parse_sparse(prefix):
-            indices = torch.from_numpy(npz_data['{}_indices'.format(prefix)])
-            values = torch.from_numpy(npz_data['{}_values'.format(prefix)])
-            size = torch.Size(npz_data['{}_size'.format(prefix)])
+            indices = torch.from_numpy(self.npz_data['{}/{}/indices'.format(sample_name, prefix)])
+            values = torch.from_numpy(self.npz_data['{}/{}/values'.format(sample_name, prefix)])
+            size = torch.Size(self.npz_data['{}/{}/size'.format(sample_name, prefix)])
             return torch.sparse_coo_tensor(indices, values, size, is_coalesced=True).to_dense()
+        def parse_tensor(name):
+            return torch.from_numpy(self.npz_data['{}/{}'.format(sample_name, name)])
         data = NPZData(
             spatial_inputs        = parse_sparse('spatial_input'),
             spatiotemporal_inputs = parse_sparse('spatiotemporal_input'),
             temporal_inputs       = parse_sparse('temporal_input'),
-            value_outputs         = torch.from_numpy(npz_data['value_output']),
-            policy_outputs        = torch.from_numpy(npz_data['policy_output']),
-            pos                   = torch.from_numpy(npz_data['pos']),
-            loss_weights          = torch.from_numpy(npz_data['loss_weights']),
+            value_outputs         = parse_tensor('value_output'),
+            policy_outputs        = parse_tensor('policy_output'),
+            pos                   = parse_tensor('pos'),
+            loss_weights          = parse_tensor('loss_weights'),
         )
         return data
 
@@ -53,7 +67,7 @@ if __name__ == "__main__":
     model_name = sys.argv[1]
     print("Using model name {}".format(model_name))
 
-    full_set = NPZDataset('test/next-training', device=device)
+    full_set = NPZDataset('test/next-training.npz', device=device)
     training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25], generator=torch.Generator().manual_seed(42))
     training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
     validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
