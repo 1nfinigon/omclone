@@ -9,10 +9,27 @@ $ cargo run solver
 $ cargo run train
 ```
 
+# Done
+
+-   Simple MCTS solver (without transpositions), choosing actions for a single
+    arm at a time in order
+-   ResNet network architecture and basic training loop, with win-probability
+    and policy heads
+-   Seed-solver that plays games starting from a human "seed solution",
+    following human moves until a few moves from the end, and then uses the MCTS
+    solver to play out the rest
+-   Training data generator from partially-seeded games, generating two types of 
+    input: human and MCTS
+    -    Initially I used human inputs to train policy and MCTS inputs to train
+         win-rate. This did okay but ran into two problems: not enough diverse
+         training data and overfitting to blind repetitions of arm patterns
+         ("fard", "faar", see observations below)
+
 # In progress
 
--   Actions for a single arm at a time (in order)
--   Simple MCTS without graph search
+-   Generate synthetic random problems by iterating backwards
+-   Probe/visualise the feature inputs and network to make sure everything's
+    working as I expected
 
 # Observations
 
@@ -47,6 +64,7 @@ $ cargo run train
 
 Technical/impl work:
 
+-   Seed-solver: print
 -   Generate solutions that have low cycles-left but still fail
     -   ...because the layout is bad
     -   ...because the layout is good but there's just not enough cycles left
