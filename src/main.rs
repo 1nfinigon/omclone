@@ -16,7 +16,7 @@ mod search_history;
 #[cfg(feature = "nn")]
 mod search_state;
 #[cfg(feature = "nn")]
-mod solver;
+mod seed_solver;
 #[cfg(feature = "nn")]
 mod train;
 
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
         Some("benchmark") => benchmark::main(),
 
         #[cfg(feature = "nn")]
-        Some("solver") => solver::main(),
+        Some("seed-solver") => seed_solver::main(),
 
         #[cfg(feature = "nn")]
         Some("train") => train::main(),
@@ -62,16 +62,7 @@ fn main() -> Result<()> {
         Some(subcommand) => Err(eyre!("unsupported subcommand {}", subcommand)),
 
         #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
-        None => {
-            use miniquad::*;
-            let conf = conf::Conf {
-                fullscreen: false,
-                ..Default::default()
-            };
-            miniquad::start(conf, || Box::new(ui::MyMiniquadApp::new()));
-
-            Ok(())
-        }
+        None => ui::main(),
 
         #[cfg(not(any(feature = "editor_ui", feature = "display_ui",)))]
         None => {

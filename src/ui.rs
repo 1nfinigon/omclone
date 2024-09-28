@@ -855,3 +855,13 @@ impl EventHandler for MyMiniquadApp {
         self.egui_mq.key_up_event(keycode, keymods);
     }
 }
+
+pub fn main() -> Result<()> {
+    let conf = conf::Conf {
+        fullscreen: false,
+        ..Default::default()
+    };
+    start(conf, || Box::new(MyMiniquadApp::new()));
+
+    Ok(())
+}

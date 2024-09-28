@@ -35,32 +35,38 @@ $ cargo run train
 
 # Observations
 
--   When training on samples derived from MCTS where we start the search from
-    a-few-moves-from-the-end, the network very quickly overspecializes to spam
-    "Drop"
+-   Seed-solver: When training on samples derived from MCTS where we start the
+    search from only a few moves from the end, the network very quickly
+    overspecializes to spam "Drop"
     -   This was partially just because I forgot to clear the input between
-        timesteps, meaning it was completely useless, which meant the best the
-        network could do is to blindly spam the most likely instruction
-    -   In response I also tweaked the loss-weight for samples that come from
-        human solutions (which ~only sees policy loss) vs those that come from
-        MCTS (which ~only sees value loss)
+        timesteps, meaning the input contained very little usable data, which
+        meant the best the network could do is to blindly spam the most likely
+        instruction
+    -   In response to this observation I also tweaked the loss-weight for
+        samples that come from human solutions (which ~only sees policy loss) vs
+        those that come from MCTS (which ~only sees value loss)
 -   Training both value and policy on a mix of human solutions (weight) +
-    weak MCTS solutions, I attempted to weight the loss scale to significantly
-    (x0.00001) shrink the impact of value loss for human solutions. This has
-    caused the value head to become extremely sharp for MCTS solutions, even
-    though the contribution of the value loss to the overall loss is very
-    small (0.006 vs 2.0).
+    weak seeded MCTS solutions, I attempted to weight the loss scale to
+    significantly (x0.00001) shrink the impact of value loss for human
+    solutions. This has caused the value head to become extremely sharp (always
+    outputting 0 or 1, no in-between) for MCTS solutions, even though the
+    contribution of the value loss to the overall loss is very small (0.006 vs
+    2.0).
     -   Actually, why _is_ the value loss so low here? Is it just predicting
         "cycles left until cycle limit > some small number"? I think so...
-    -   Solution: Generate solutions that have higher cycles-left but still
-        succeed, and lower cycles-left but still fail
+    -   Proposed solution: Generate solutions that have higher cycles-left but
+        still succeed, and lower cycles-left but still fail
+    -   After I increased the cycle-window for seeded solutions, and started
+        generating solutions that have higher cycles-left but still succeed, the
+        value loss was still extremely small. Why?? TODO
 -   Starting to see forms of overfitting, from training on limited numbers of
     human solutions.  In a particular solution to OM2021_W0, an arm has learnt
     to "fard" repeatedly, and another "faar", all the way to the end, even
     though this isn't actually the shortest/most optimal sequence -- it's just
     learned behaviour from the fact that this instruction-count solution repeats
     those motifs a lot.
-    -   Solution: taper off the human training and generate more MCTS data?
+    -   Proposed solution: taper off the human training and generate more MCTS
+        data
 
 # Future work
 
