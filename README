@@ -58,7 +58,22 @@ $ cargo run train
         still succeed, and lower cycles-left but still fail
     -   After I increased the cycle-window for seeded solutions, and started
         generating solutions that have higher cycles-left but still succeed, the
-        value loss was still extremely small. Why?? TODO
+        value loss was still extremely small. Why??
+    -   It's because I have 100x the number of human-solution samples than MCTS
+        samples (for a given seed game, the ratio is currently approx 1k-2k
+        human samples vs 10 MCTS samples)
+    -   I could compensate for this by increasing the importance weighting by a
+        factor of ~100x, but that effectively 100x's my learning rate (TODO:
+        apparently this is only true for SGD optimizer, but not quite true for
+        AdamW optimizer? Figure out why), which my previous rudimentary
+        experiments around lr has already shown to completely throw off the
+        training stability.
+    -   So, I just need to generate more, and more diverse data...
+        -   Right now I have 1 GPU for training and 1 GPU for game-playing; it's
+            looking like I want a ratio of 1:10 instead. Which is also approx
+            the ratio the KataGo paper used, interestingly.
+        -   As for more diverse data... working on generating synthetic random
+            problems by iterating backwards from the final state.
 -   Starting to see forms of overfitting, from training on limited numbers of
     human solutions.  In a particular solution to OM2021_W0, an arm has learnt
     to "fard" repeatedly, and another "faar", all the way to the end, even
