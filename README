@@ -15,6 +15,8 @@ $ cargo run train
     arm at a time in order
 -   ResNet network architecture and basic training loop, with win-probability
     and policy heads
+    -   Input features use sparse tensors for evaluation and training, to save
+        bandwidth/space
 -   Seed-solver that plays games starting from a human "seed solution",
     following human moves until a few moves from the end, and then uses the MCTS
     solver to play out the rest
@@ -52,35 +54,33 @@ $ cargo run train
         "cycles left until cycle limit > some small number"? I think so...
     -   Solution: Generate solutions that have higher cycles-left but still
         succeed, and lower cycles-left but still fail
--   Starting to see forms of overfitting, from training on limited numbers of human solutions.
-    In a particular solution to OM2021_W0, an arm has learnt to "fard"
-    repeatedly, and another "faar", all the way to the end, even though this
-    isn't actually the shortest/most optimal sequence -- it's just learned
-    behaviour from the fact that this instruction-count solution repeats those
-    motifs a lot.
+-   Starting to see forms of overfitting, from training on limited numbers of
+    human solutions.  In a particular solution to OM2021_W0, an arm has learnt
+    to "fard" repeatedly, and another "faar", all the way to the end, even
+    though this isn't actually the shortest/most optimal sequence -- it's just
+    learned behaviour from the fact that this instruction-count solution repeats
+    those motifs a lot.
     -   Solution: taper off the human training and generate more MCTS data?
 
 # Future work
 
 Technical/impl work:
 
--   Seed-solver: print
--   Generate solutions that have low cycles-left but still fail
+-   Seed-solver: Generate solutions that have low cycles-left but still fail
     -   ...because the layout is bad
     -   ...because the layout is good but there's just not enough cycles left
--   Randomly generate some training samples that have no history
--   Evaluate and monitor
+-   Seed-solver: Randomly generate some training samples that have no history
+-   Seed-solver: Evaluate and monitor
     -   proportion of successful solves (where it had to find _n_ moves,
         as a function of _n_?)
     -   how well does it solve with no history?
 -   Train a timesteps-left head on existing solutions
--   sparse tensors forfeatures and training data (right now bottlenecked on disk
-    read speed, ~500MB/s)
--   Parallelise MCTS, batch NN evaluations
+-   Search: Parallelise MCTS, batch NN evaluations
 -   Make net/eval/training board size agnostic
 -   use symmetries to generate more data
--   network/code for generating layouts
--   better logging, saving intermediate layer outputs / residuals
+-   Network/code for generating and estimating winrate for layouts
+-   Solvers: Better logging, saving intermediate layer outputs / residuals
+-   Policy network visualisation
 
 Science-y investigation work:
 
