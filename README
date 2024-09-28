@@ -150,6 +150,14 @@ Notes:
             two networks are doing equivalent work). This is a horrible
             hand-wavey analogy but intuitively it feels to have somewhat
             satisfying explaining power.
+        -   Interestingly, this means that I do expect L2 norm to scale with
+            number of layers, but in a different way to scaling with number of
+            channels. It is _not_ possible to embed a shallow model inside a
+            deep model whilst keeping L2 loss the same, as the extra layers
+            still need identity matrices simply to propagate c channels of data
+            (with Frobenius norm equal to c). So, I think I do expect L2 norm to
+            increase proportionally with depth, and I want to adjust the L2 loss
+            penalty coefficient accordingly. But, not for #channels!
 -   Both networks train at the same speed, indicating the python dataloader or
     disk->sparse->dense->GPU or loss-computation overheads dominate. The GPU is
     not hitting power usage limits (avg 100W for A and 50W for B), further
