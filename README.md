@@ -184,15 +184,15 @@ Notes:
     half the lr. Coincidence or no? Not sure.
 -   Loss curve for both track identically trendwise (but higher variance) until
     I killed the run after 15 epochs (75k batches).
--   Not sure I learnt much of use from this. Still TODO to learn how AdamW
-    actually works / what lr rate means there.
+-   Not sure I learnt anything from this. Still TODO to learn how AdamW actually
+    works / what lr rate means there.
 
 # Experiment 3 (2024-09-29): AdamW vs SGD
 
 -   Model: v1 7 layer ch=48 (764k params)
 -   Run A: model48_20240928_112943
     -   Optimizer: AdamW lr=4e-4
--   Run B: model48_20240928_200924
+-   Run B: model48_20240929_002831
     -   Optimizer: SGD lr=4e-4 momentum=0.9
 -   Other details same as experiment 1
 
