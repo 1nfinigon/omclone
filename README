@@ -49,7 +49,7 @@ inspecting solver output and generated solutions to gain a bit of intuition and
 spot obvious issues.
 
 Notes:
-    
+
 -   The network very quickly overspecializes to spam "Drop"
     -   This was just because I forgot to clear the input between timesteps,
         meaning the input contained very little usable data, which meant the
