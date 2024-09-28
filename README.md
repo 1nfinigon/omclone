@@ -172,10 +172,30 @@ Notes:
 
 -   Model: v1 7 layer ch=48 (764k params)
 -   Run A: model48_20240928_112943
-    -   LR = 4e-8
+    -   LR = 4e-4
 -   Run B: model48_20240928_200924
-    -   LR = 8e-8
+    -   LR = 8e-4
 -   Other details same as experiment 1
+
+Notes:
+
+-   The L2 norm for run B grows ~2x as fast. Looks like same trajectory as
+    experiment 1 run A, interestingly -- that run had double the channels but
+    half the lr. Coincidence or no? Not sure.
+-   Loss curve for both track identically trendwise (but higher variance) until
+    I killed the run after 15 epochs (75k batches).
+-   Not sure I learnt much of use from this. Still TODO to learn how AdamW
+    actually works / what lr rate means there.
+
+# Experiment 3 (2024-09-29): AdamW vs SGD
+
+-   Model: v1 7 layer ch=48 (764k params)
+-   Run A: model48_20240928_112943
+    -   Optimizer: AdamW lr=4e-4
+-   Run B: model48_20240928_200924
+    -   Optimizer: SGD lr=4e-4 momentum=0.9
+-   Other details same as experiment 1
+
 
 # Future work
 
