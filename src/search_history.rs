@@ -78,8 +78,8 @@ impl HistoryFile {
                 for _ in 0..len {
                     let mut playouts = [0u32; BasicInstr::N_TYPES];
                     let kind = Kind::from_u32(read_u32_le(r)?).unwrap();
-                    for x in playouts.iter_mut() {
-                        *x = read_u32_le(r)?;
+                    for playout_elt in playouts.iter_mut() {
+                        *playout_elt = read_u32_le(r)?;
                     }
                     history.push(Item { kind, playouts });
                 }
