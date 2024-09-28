@@ -56,13 +56,13 @@ if __name__ == "__main__":
     model = torch.jit.load(filename, map_location=device)
     model.to(device)
 
-    def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs, policy_outputs):
+    def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs, policy_outputs, loss_weights):
         value_error = 1.5 * torch.nn.functional.cross_entropy(model_value_outputs, value_outputs, reduction='none')
         B = model_policy_outputs.size()[0]
         model_policy_outputs = torch.stack([model_policy_outputs[b, :, pos[b, 0], pos[b, 1]] for b in range(B)])
         policy_error = 1.0 * torch.nn.functional.cross_entropy(model_policy_outputs, policy_outputs, reduction='none')
         l2_penalty = 3e-5 * torch.stack([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad]).sum().expand(B)
-        return torch.stack([value_error, policy_error, l2_penalty], dim=1)
+        return torch.stack([value_error, policy_error, l2_penalty], dim=1) * loss_weights
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=4e-4)
 
@@ -87,13 +87,13 @@ if __name__ == "__main__":
                 policy_softmax_temperature)
 
             # Compute the loss and its gradients
-            losses = (loss_fn(model,
-                              data.pos.to(device, non_blocking=True),
-                              model_value_outputs,
-                              model_policy_outputs,
-                              data.value_outputs.to(device, non_blocking=True),
-                              data.policy_outputs.to(device, non_blocking=True))
-                      * data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
+            losses = loss_fn(model,
+                             data.pos.to(device, non_blocking=True),
+                             model_value_outputs,
+                             model_policy_outputs,
+                             data.value_outputs.to(device, non_blocking=True),
+                             data.policy_outputs.to(device, non_blocking=True),
+                             data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
             loss = losses.sum()
             loss.backward()
 
@@ -143,13 +143,13 @@ if __name__ == "__main__":
                     data.temporal_inputs.to(device, non_blocking=True),
                     policy_softmax_temperature)
 
-                losses = (loss_fn(model,
-                                data.pos.to(device, non_blocking=True),
-                                model_value_outputs,
-                                model_policy_outputs,
-                                data.value_outputs.to(device, non_blocking=True),
-                                data.policy_outputs.to(device, non_blocking=True))
-                        * data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
+                losses = loss_fn(model,
+                                 data.pos.to(device, non_blocking=True),
+                                 model_value_outputs,
+                                 model_policy_outputs,
+                                 data.value_outputs.to(device, non_blocking=True),
+                                 data.policy_outputs.to(device, non_blocking=True),
+                                 data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
 
                 loss = losses.sum()
                 running_vloss += loss
