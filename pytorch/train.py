@@ -20,54 +20,45 @@ EPOCHS = 50
 NPZData = namedtuple('NPZData', 'spatial_inputs spatiotemporal_inputs temporal_inputs value_outputs policy_outputs pos loss_weights')
 
 class NPZDataset(torch.utils.data.Dataset):
-    def _zip_load(self):
-        self.zipfile = zipfile.ZipFile(self.zip_path)
-        self.zipfp = open(self.zip_path, 'rb')
-
-    def _zip_unload(self):
-        self.zipfile = None
-        self.zipfp = None
-
     def _npz_get(self, inner_path):
         """
         A faster alternative to using NpzFile, using mmapping
         See: https://github.com/numpy/numpy/issues/5976
         """
 
-        info = self.zipfile.getinfo(inner_path + '.npy')
-        assert info.compress_type == 0
-        with self.zipfile.open(info) as f:
-            offset = f._orig_compress_start
-
-        self.zipfp.seek(offset)
-        version = np.lib.format.read_magic(self.zipfp)
-        assert version in [(1,0), (2,0)]
-        if version == (1,0):
-            shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(self.zipfp)
-        elif version == (2,0):
-            shape, fortran_order, dtype = np.lib.format.read_array_header_2_0(self.zipfp)
-        data_offset = self.zipfp.tell()
-        return np.memmap(self.zip_path, dtype=dtype, shape=shape,
-                        order='F' if fortran_order else 'C', mode='c',
-                        offset=data_offset)
+        with open(self.zip_path, 'rb') as zipfp:
+            zipfp.seek(self.offsets[inner_path])
+            version = np.lib.format.read_magic(zipfp)
+            assert version in [(1,0), (2,0)]
+            if version == (1,0):
+                shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(zipfp)
+            elif version == (2,0):
+                shape, fortran_order, dtype = np.lib.format.read_array_header_2_0(zipfp)
+            data_offset = zipfp.tell()
+            return np.memmap(zipfp, dtype=dtype, shape=shape,
+                            order='F' if fortran_order else 'C', mode='c',
+                            offset=data_offset)
 
     def __init__(self, zip_path, device):
         self.zip_path = zip_path
         self.device = device
-        self._zip_load()
-        self.sample_names = list(set((s.split('/')[0] for s in self.zipfile.namelist())))
-        # unload for 2 reasons:
-        # 1) pickle doesn't support sending open files;
-        # 2) save memory in the main process, which doesn't need the full zipfile object
-        self._zip_unload()
+        self.sample_names = set()
+        self.offsets = dict()
+        self.zipfp = None
+
+        zf = zipfile.ZipFile(self.zip_path)
+        for info in zf.infolist():
+            assert info.compress_type == 0
+            self.sample_names.add(info.filename.split('/')[0])
+            with zf.open(info) as f:
+                assert(info.filename[-4:] == ".npy")
+                self.offsets[info.filename[:-4]] = f._orig_compress_start
+        self.sample_names = list(self.sample_names)
 
     def __len__(self):
         return len(self.sample_names)
 
     def __getitem__(self, item):
-        if self.zipfile is None:
-            self._zip_load()
-
         sample_name = self.sample_names[item]
         def parse_sparse(prefix):
             indices = torch.from_numpy(self._npz_get('{}/{}/indices'.format(sample_name, prefix)))
