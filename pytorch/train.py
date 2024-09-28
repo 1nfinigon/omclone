@@ -47,12 +47,15 @@ class NPZDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     device = device()
 
+    model_name = sys.argv[1]
+    print("Using model name {}".format(model_name))
+
     full_set = NPZDataset('test/next-training', device=device)
     training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25])
     training_loader = torch.utils.data.DataLoader(training_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
     validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
 
-    filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
+    filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), '{}.pt'.format(model_name))
     model = torch.jit.load(filename, map_location=device)
     model.to(device)
 
@@ -117,7 +120,7 @@ if __name__ == "__main__":
         return last_losses.sum().item()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    writer = tensorboard.SummaryWriter('runs/{}'.format(timestamp))
+    writer = tensorboard.SummaryWriter('runs/{}_{}'.format(model_name, timestamp))
     epoch_number = 0
 
     best_vloss = 1_000_000.
@@ -167,7 +170,7 @@ if __name__ == "__main__":
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'model_{}_{}'.format(timestamp, epoch_number)
+            model_path = '{}_{}_{}'.format(model_name, timestamp, epoch_number)
             torch.save(model.state_dict(), model_path)
 
         epoch_number += 1
