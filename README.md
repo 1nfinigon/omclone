@@ -168,6 +168,15 @@ Notes:
     different, making validation results hard to compare between the two. This
     is fixed for future experiments.
 
+# Experiment 2 (2024-09-28): effect of varying lr
+
+-   Model: v1 7 layer ch=48 (764k params)
+-   Run A: model48_20240928_112943
+    -   LR = 4e-8
+-   Run B: model48_20240928_200924
+    -   LR = 8e-8
+-   Other details same as experiment 1
+
 # Future work
 
 Technical/impl work:
