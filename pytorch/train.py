@@ -51,7 +51,11 @@ if __name__ == "__main__":
     torch.manual_seed(0)
 
     model_name = sys.argv[1]
-    print("Using model name {}".format(model_name))
+    print("Using model name: {}".format(model_name))
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    training_run_name = '{}_{}'.format(model_name, timestamp)
+    print("Training run name: {}".format(training_run_name))
 
     full_set = NPZDataset('test/next-training', device=device)
     training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25], generator=torch.Generator().manual_seed(42))
@@ -135,8 +139,7 @@ if __name__ == "__main__":
 
         return sum(last_losses)
 
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    writer = tensorboard.SummaryWriter('runs/{}_{}'.format(model_name, timestamp))
+    writer = tensorboard.SummaryWriter('runs/{}'.format(training_run_name))
     epoch_number = 0
 
     best_vloss = 1_000_000.
