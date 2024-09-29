@@ -208,6 +208,17 @@ Notes:
     after several epochs the loss did not change.
 -   Something's going wrong, needs more investigation.
 
+# Experiment 4 (2024-09-29): rerun of experiment 3 with gradient logging
+
+-   Run A: model48_20240929_024745
+    -   Optimizer: AdamW lr=4e-4
+-   Run B: model48_20240929_024923
+    -   Optimizer: SGD lr=4e-4 momentum=0.9
+
+Notes:
+
+-   Run A is a rerun of experiment 1 run A, this time with gradient logging
+
 # Future work
 
 Technical/impl work:
