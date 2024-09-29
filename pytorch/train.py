@@ -123,13 +123,13 @@ if __name__ == "__main__":
                     grads_mean, grads_std, grads_max,
                 ))
                 tb_x = epoch_index * len(training_loader) + i + 1
-                tb_writer.add_scalar('Gradient/mean/train', grads_mean, tb_x)
-                tb_writer.add_scalar('Gradient/stdev/train', grads_std, tb_x)
-                tb_writer.add_scalar('Gradient/max/train', grads_max, tb_x)
-                tb_writer.add_scalar('Value loss/train', last_value_loss, tb_x)
-                tb_writer.add_scalar('Policy loss/train', last_policy_loss, tb_x)
-                tb_writer.add_scalar('L2 penalty/train', last_l2_loss, tb_x)
-                tb_writer.add_scalar('Total loss/train', sum(last_losses), tb_x)
+                tb_writer.add_scalar('Gradient/Mean/train', grads_mean, tb_x)
+                tb_writer.add_scalar('Gradient/Std/train', grads_std, tb_x)
+                tb_writer.add_scalar('Gradient/Max/train', grads_max, tb_x)
+                tb_writer.add_scalar('Loss/Value/train', last_value_loss, tb_x)
+                tb_writer.add_scalar('Loss/Policy/train', last_policy_loss, tb_x)
+                tb_writer.add_scalar('Loss/L2 penalty/train', last_l2_loss, tb_x)
+                tb_writer.add_scalar('Loss/Total/train', sum(last_losses), tb_x)
                 running_losses *= 0.
                 n_iterations_since_stats_printed = 0
 
