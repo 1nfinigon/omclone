@@ -248,9 +248,26 @@ Notes:
 -   Runs E and G had some clear "phase changes" in change in L2 norm; Run A was
     completely smooth.
 
-# Experiment 5
+# Experiment 5 - PyTorch 2.0.1 optimizer/hyperparameter search
 
 These were run on PyTorch 2.0.1 instead of 2.4.1.
+
+-   All other details same as experiment 1
+-   Run A: model48_20240929_112814
+    -   Optimizer: AdamW lr=4e-4
+-   Run B: model48_20240929_112858
+    -   Optimizer: AdamW lr=8e-4
+-   Run C: model48_20240929_112915
+    -   Optimizer: AdamW lr=2e-4
+-   Run D: model48_20240929_112952
+    -   Optimizer: SGD lr=4e-4 momentum=0.999
+-   Run F: model48_20240929_113011
+    -   Optimizer: SGD lr=2e-4 momentum=0.999
+-   Run G: model48_20240929_113027
+    -   Optimizer: SGD lr=1e-4 momentum=0.999
+-   Run H: model48_20240929_113059
+    -   Optimizer: SGD lr=5e-5 momentum=0.999
+
 
 # Future work
 
