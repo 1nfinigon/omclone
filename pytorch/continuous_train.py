@@ -39,7 +39,7 @@ class NPZDataset(torch.utils.data.Dataset):
             indices = torch.from_numpy(npz_data['{}_indices'.format(prefix)])
             values = torch.from_numpy(npz_data['{}_values'.format(prefix)])
             size = torch.Size(npz_data['{}_size'.format(prefix)])
-            return torch.sparse_coo_tensor(indices, values, size, is_coalesced=True).to_dense()
+            return torch.sparse_coo_tensor(indices, values, size).to_dense()
         data = NPZData(
             spatial_inputs        = parse_sparse('spatial_input'),
             spatiotemporal_inputs = parse_sparse('spatiotemporal_input'),
