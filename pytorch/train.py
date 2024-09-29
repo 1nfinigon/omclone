@@ -116,16 +116,16 @@ if __name__ == "__main__":
                 grads = torch.cat([p.grad.flatten() for p in model.parameters() if p.requires_grad])
                 grads_mean = grads.mean().item()
                 grads_std = grads.std().item()
-                grads_max = grads.max().item()
+                grads_absmax = grads.abs().max().item()
                 print('  batch {}/{}   loss: {:.3f} = {:.3f}+{:.3f}+{:.3f}  grad mu={:.2e} sd={:.2e} max={:.2e}'.format(
                     i + 1, len(training_loader),
                     sum(last_losses), last_value_loss, last_policy_loss, last_l2_loss,
-                    grads_mean, grads_std, grads_max,
+                    grads_mean, grads_std, grads_absmax,
                 ))
                 tb_x = epoch_index * len(training_loader) + i + 1
                 tb_writer.add_scalar('Gradient/Mean/train', grads_mean, tb_x)
                 tb_writer.add_scalar('Gradient/Std/train', grads_std, tb_x)
-                tb_writer.add_scalar('Gradient/Max/train', grads_max, tb_x)
+                tb_writer.add_scalar('Gradient/Max/train', grads_absmax, tb_x)
                 tb_writer.add_scalar('Loss/Value/train', last_value_loss, tb_x)
                 tb_writer.add_scalar('Loss/Policy/train', last_policy_loss, tb_x)
                 tb_writer.add_scalar('Loss/L2 penalty/train', last_l2_loss, tb_x)
