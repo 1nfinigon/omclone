@@ -19,3 +19,6 @@ rm src/default_paths.txt
 echo "$this_path" >> src/default_paths.txt
 echo "" >> src/default_paths.txt
 echo "" >> src/default_paths.txt
+
+mkdir models
+mkdir runs

@@ -8,3 +8,6 @@ src/default_paths.txt
 
 pytorch/model.pt
 **/__pycache__
+
+/models
+/runs

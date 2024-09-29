@@ -248,6 +248,10 @@ Notes:
 -   Runs E and G had some clear "phase changes" in change in L2 norm; Run A was
     completely smooth.
 
+# Experiment 5
+
+These were run on PyTorch 2.0.1 instead of 2.4.1.
+
 # Future work
 
 Technical/impl work:
