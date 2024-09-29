@@ -1,6 +1,6 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
-set -x
+set -e -u -x -o pipefail
 
 pushd ..
 git clone https://github.com/F43nd1r/om-leaderboard.git
