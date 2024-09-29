@@ -245,6 +245,8 @@ Notes:
 -   Run F clearly had too high of an lr rate; at batch 9k diverged to a spot
     with zero gradient and then couldn't get out (What would cause this?  Dead
     ReLU neuron? Not digging into this for now.)
+-   Runs E and G had some clear "phase changes" in change in L2 norm; Run A was
+    completely smooth.
 
 # Future work
 
