@@ -222,10 +222,29 @@ Notes:
 -   Run D: model48_20240929_031121
     -   Optimizer: SGD lr=4e-5 momentum=0.0
     -   Batch size: 16
+-   Run E: model48_20240929_032818
+    -   Optimizer: SGD lr=4e-4 momentum=0.999
+    -   Batch size: 128
+-   Run F: model48_20240929_034011
+    -   Optimizer: SGD lr=8e-4 momentum=0.999
+    -   Batch size: 128
+-   Run G: model48_20240929_040550
+    -   Optimizer: SGD lr=2e-4 momentum=0.999
+    -   Batch size: 128
 
 Notes:
 
 -   Run A is a rerun of experiment 1 run A, this time with gradient logging
+-   SGD runs with 0.0 and 0.9 momentum failed to make any progress at all
+-   The AdamW run had increasing L2 norm in weights immediately, but no change
+    in L2 norm in the failed SGD runs. I think this points towards bad weight
+    initializations.
+    -   https://www.cs.toronto.edu/~fritz/absps/momentum.pdf
+    -   This suggests that 0.999 momentum is reasonable to try
+-   TODO: rerun 0.9 momentum experiment after I have better weights init.
+-   Run F clearly had too high of an lr rate; at batch 9k diverged to a spot
+    with zero gradient and then couldn't get out (What would cause this?  Dead
+    ReLU neuron? Not digging into this for now.)
 
 # Future work
 
@@ -249,6 +268,7 @@ Technical/impl work:
 
 Science-y investigation work:
 
+-   Explicit weights init
 -   Lean on existing solutions more, but be careful mixing them in with
     MCTS-generated solutions. They are from different domains; try having them
     train on non-overlapping outputs, to avoid the model overspecializing on
