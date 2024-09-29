@@ -194,8 +194,19 @@ Notes:
     -   Optimizer: AdamW lr=4e-4
 -   Run B: model48_20240929_002831
     -   Optimizer: SGD lr=4e-4 momentum=0.9
+-   Run C: model48_20240929_011754
+    -   Optimizer: SGD lr=8e-4 momentum=0.9
+-   Run D: model48_20240929_012537
+    -   Optimizer: SGD lr=2e-5 momentum=0.9
 -   Other details same as experiment 1
 
+Notes:
+
+-   Run B hit a plateau in loss very quickly, at batch 3k
+-   Run C hit a plateau in loss even more quickly, at batch 2k
+-   Run D loss never changed. I then tried again with only 32 samples, and even
+    after several epochs the loss did not change.
+-   Something's going wrong, needs more investigation.
 
 # Future work
 
