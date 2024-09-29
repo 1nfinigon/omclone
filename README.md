@@ -208,12 +208,20 @@ Notes:
     after several epochs the loss did not change.
 -   Something's going wrong, needs more investigation.
 
-# Experiment 4 (2024-09-29): rerun of experiment 3 with gradient logging
+# Experiment 4 (2024-09-29): gradient logging
 
 -   Run A: model48_20240929_024745
     -   Optimizer: AdamW lr=4e-4
+    -   Batch size: 128
 -   Run B: model48_20240929_024923
     -   Optimizer: SGD lr=4e-4 momentum=0.9
+    -   Batch size: 128
+-   Run C: model48_20240929_025707
+    -   Optimizer: SGD lr=4e-4 momentum=0.0
+    -   Batch size: 16
+-   Run D: model48_20240929_031121
+    -   Optimizer: SGD lr=4e-5 momentum=0.0
+    -   Batch size: 16
 
 Notes:
 
