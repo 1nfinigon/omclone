@@ -431,7 +431,6 @@ impl<const N: usize> SparseCoo<N> {
                 &all_values,
                 &size_with_batch_dim,
                 options,
-                true,
             )?
         };
         let tensor = {
@@ -444,7 +443,7 @@ impl<const N: usize> SparseCoo<N> {
             let _span = tracy_client
                 .clone()
                 .span(tracy_client::span_location!("to_dense"), 0);
-            tensor.f_to_dense(None, false)?
+            tensor.f_to_dense(None)?
         };
         Ok(tensor)
     }
