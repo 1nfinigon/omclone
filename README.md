@@ -247,6 +247,9 @@ Notes:
     ReLU neuron? Not digging into this for now.)
 -   Runs E and G had some clear "phase changes" in change in L2 norm; Run A was
     completely smooth.
+-   Run E L2 norm started exploding around 170k, loss started getting affected
+    around 200k, and then completely diverged by 240k. So, lr=4e-4 was still too
+    high.
 
 # Experiment 5 - PyTorch 2.0.1 optimizer/hyperparameter search
 
