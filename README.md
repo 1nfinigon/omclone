@@ -250,6 +250,10 @@ Notes:
 -   Run E L2 norm started exploding around 170k, loss started getting affected
     around 200k, and then completely diverged by 240k. So, lr=4e-4 was still too
     high.
+-   Run G L2 norm started exploding around 340k and completely diverged by 600k.
+    So it seems that 0.999 momentum is too high for the long-term, and needs
+    reducing according to a schedule. (Or perhaps with better init we can start
+    with something lower).
 
 # Experiment 5 - PyTorch 2.0.1 optimizer/hyperparameter search
 

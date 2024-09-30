@@ -46,10 +46,6 @@ pub mod feature_offsets {
             self.offset + i
         }
 
-        pub fn get_offsets(&self) -> std::ops::Range<usize> {
-            self.offset..(self.offset + N)
-        }
-
         const fn assign(offset: usize) -> (usize, Self) {
             (offset + N, Self { offset })
         }

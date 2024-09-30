@@ -284,13 +284,6 @@ impl TreeSearch {
     pub fn max_depth(&self) -> u32 {
         self.max_depth
     }
-
-    pub fn win(&self) -> f32 {
-        match self.node(NodeId(0)) {
-            Node::Real(real_node) => real_node.value(),
-            _ => panic!("Need tree to be expanded at least once to get win rate"),
-        }
-    }
 }
 
 #[derive(Debug)]

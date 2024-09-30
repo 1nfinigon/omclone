@@ -60,16 +60,11 @@ pub enum BasicInstr {
 
 impl BasicInstr {
     pub const N_TYPES: usize = 11;
-    pub fn to_u8(self) -> u8 {
-        <Self as num_traits::ToPrimitive>::to_u8(&self).unwrap()
-    }
-    pub fn from_u8(value: u8) -> Option<Self> {
-        <Self as num_traits::FromPrimitive>::from_u8(value)
-    }
 }
 
 #[test]
 fn basic_instr_len() {
+    use num_traits::FromPrimitive;
     assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_none());
     assert!(BasicInstr::from_u8((BasicInstr::N_TYPES - 1).try_into().unwrap()).is_some());
 }
@@ -747,6 +742,7 @@ impl InitialWorld {
             arm.pos += pos;
         }
     }
+
     pub fn rot_by(&mut self, rot: Rot) {
         for glyph in self.glyphs.iter_mut() {
             glyph.rot_by(rot);
@@ -767,15 +763,6 @@ impl InitialWorld {
         let min_y = area_touched.iter().map(|p| p.y).min().unwrap();
         let max_y = area_touched.iter().map(|p| p.y).max().unwrap();
         Some((Pos::new(min_x, min_y), Pos::new(max_x, max_y)))
-    }
-
-    /// Recentres the solution so that the bounding box is centred around (0, 0)
-    pub fn centre(&mut self) {
-        if let Some((min, max)) = self.bounding_box() {
-            let centre_x = (max.x + min.x) / 2;
-            let centre_y = (max.y + min.y) / 2;
-            self.move_by(Pos::new(-centre_x, -centre_y));
-        }
     }
 }
 
