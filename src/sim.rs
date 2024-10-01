@@ -37,7 +37,8 @@ fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError {
         location: pos_to_xy(location),
     }
 }
-pub type Rot = i32;
+
+/// Convention: +x right, +y up
 pub type Pos = Vector2<i32>;
 
 /// A basic instruction that can be executed in one timestep (i.e. no Repeat,
@@ -295,37 +296,189 @@ impl<InstrT: Eq + From<BasicInstr> + InstrToChar> Tape<InstrT> {
     }
 }
 
-pub fn normalize_dir(r: Rot) -> Rot {
-    r.rem_euclid(6)
+/// A rotation. Positive is CCW. Not normalized.
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct RawRot(pub i32);
+
+impl RawRot {
+    pub fn normalize(self) -> Rot {
+        Rot::from_i32(self.0)
+    }
 }
 
-pub fn pos_to_rot(input: Pos) -> Option<Rot> {
-    match (input.x, input.y) {
-        (1, 0) => Some(0),
-        (0, 1) => Some(1),
-        (-1, 1) => Some(2),
-        (-1, 0) => Some(3),
-        (0, -1) => Some(4),
-        (1, -1) => Some(5),
-        _ => None,
+impl std::ops::Neg for RawRot {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self(-self.0)
     }
 }
-pub fn rot_dist_to_pos(n: i32, angle: Rot) -> Pos {
-    match normalize_dir(angle) {
-        0 => Pos::new(n, 0),
-        1 => Pos::new(0, n),
-        2 => Pos::new(-n, n),
-        3 => Pos::new(-n, 0),
-        4 => Pos::new(0, -n),
-        5 => Pos::new(n, -n),
-        _ => panic!("Invalid Rotation"),
+
+impl std::ops::Add for RawRot {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
     }
 }
-pub fn rot_to_pos(angle: Rot) -> Pos {
-    rot_dist_to_pos(1, angle)
+
+impl std::ops::AddAssign for RawRot {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
 }
+
+impl std::ops::Sub for RawRot {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl std::ops::SubAssign for RawRot {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+impl std::ops::Add<i32> for RawRot {
+    type Output = Self;
+    fn add(self, rhs: i32) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl std::ops::AddAssign<i32> for RawRot {
+    fn add_assign(&mut self, rhs: i32) {
+        self.0 += rhs;
+    }
+}
+
+/// +ve CCW. Guaranteed to be normalized to 0..6
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct Rot(i8);
+
+impl Rot {
+    pub const ALL: [Rot; 6] = {
+        let mut r = [Rot(0); 6];
+        let mut i = 0;
+        while i < 6 {
+            r[i].0 = i as i8;
+            i += 1;
+        }
+        r
+    };
+
+    pub fn opp(self) -> Self {
+        Self::from_i8(self.0 + 3)
+    }
+
+    pub fn step_by(step: usize) -> impl Iterator<Item = Self> {
+        (0..6).step_by(step).map(Rot)
+    }
+
+    pub fn raw(self) -> RawRot {
+        RawRot(self.0 as i32)
+    }
+
+    pub fn from_i8(value: i8) -> Self {
+        Self(value.rem_euclid(6))
+    }
+
+    pub fn from_i32(value: i32) -> Self {
+        Self(value.rem_euclid(6) as i8)
+    }
+
+    /// Returns a value in the range -2..=3
+    pub fn to_i32_minabs(self) -> i32 {
+        if self.0 > 3 {
+            (self.0 - 6).into()
+        } else {
+            self.0.into()
+        }
+    }
+
+    pub fn to_usize(self) -> usize {
+        self.0
+            .try_into()
+            .expect("Rot should have been normalized to range 0..6")
+    }
+
+    pub fn from_unit_pos(input: Pos) -> Option<Rot> {
+        match (input.x, input.y) {
+            (1, 0) => Some(Rot(0)),
+            (0, 1) => Some(Rot(1)),
+            (-1, 1) => Some(Rot(2)),
+            (-1, 0) => Some(Rot(3)),
+            (0, -1) => Some(Rot(4)),
+            (1, -1) => Some(Rot(5)),
+            _ => None,
+        }
+    }
+
+    pub fn dist_to_pos(self, n: i32) -> Pos {
+        match self.0 {
+            0 => Pos::new(n, 0),
+            1 => Pos::new(0, n),
+            2 => Pos::new(-n, n),
+            3 => Pos::new(-n, 0),
+            4 => Pos::new(0, -n),
+            5 => Pos::new(n, -n),
+            _ => panic!("Invalid Rotation"),
+        }
+    }
+
+    pub fn to_pos(self) -> Pos {
+        self.dist_to_pos(1)
+    }
+}
+
+impl std::ops::Neg for Rot {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self::from_i8(-self.0)
+    }
+}
+
+impl std::ops::Add for Rot {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::from_i8(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::AddAssign for Rot {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub for Rot {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::from_i8(self.0 - rhs.0)
+    }
+}
+
+impl std::ops::SubAssign for Rot {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
+impl std::ops::Add<i8> for Rot {
+    type Output = Self;
+    fn add(self, rhs: i8) -> Self::Output {
+        Self::from_i8(self.0 + rhs)
+    }
+}
+
+impl std::ops::AddAssign<i8> for Rot {
+    fn add_assign(&mut self, rhs: i8) {
+        *self = *self + rhs;
+    }
+}
+
 pub fn rotate(pos: Pos, angle: Rot) -> Pos {
-    match normalize_dir(angle) {
+    match angle.0 {
         0 => pos, //  ( pos.x      ,       pos.y)
         1 => Pos::new(-pos.y, pos.x + pos.y),
         2 => Pos::new(-pos.x - pos.y, pos.x),
@@ -462,8 +615,8 @@ impl Atom {
     }
     pub fn rotate_connections(&mut self, r: Rot) {
         let mut new_connections = [Bonds::NO_BOND; 6];
-        for i in 0..6 {
-            new_connections[normalize_dir(i + r) as usize] = self.connections[i as usize];
+        for i in Rot::ALL {
+            new_connections[(i + r).to_usize()] = self.connections[i.to_usize()];
         }
         self.connections = new_connections;
     }
@@ -544,7 +697,7 @@ impl GlyphType {
             }
         }
     }
-    pub fn rot_by(&mut self, rot: Rot) {
+    pub fn rot_by(&mut self, rot: RawRot) {
         use GlyphType::*;
         match self {
             Calcification | Animismus | Projection | Dispersion | Purification | Duplication
@@ -552,13 +705,13 @@ impl GlyphType {
             | Equilibrium => (),
             Track(locs) | Conduit(locs, _) => {
                 for a in locs {
-                    *a = rotate(*a, rot);
+                    *a = rotate(*a, rot.normalize());
                 }
             }
             Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
                 for a in pattern {
-                    a.pos = rotate(a.pos, rot);
-                    a.rotate_connections(rot);
+                    a.pos = rotate(a.pos, rot.normalize());
+                    a.rotate_connections(rot.normalize());
                 }
             }
         }
@@ -625,7 +778,7 @@ pub enum ArmType {
 }
 
 impl ArmType {
-    pub fn angles_between_arm(self) -> Rot {
+    pub fn angles_between_arm(self) -> usize {
         match self {
             Self::PlainArm => 6,
             Self::DoubleArm => 3,
@@ -640,20 +793,28 @@ impl ArmType {
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub pos: Pos,
-    pub rot: Rot,
+    pub rot: RawRot,
     pub glyph_type: GlyphType,
 }
 impl Glyph {
+    pub fn new(glyph_type: GlyphType) -> Self {
+        Self {
+            glyph_type,
+            pos: Pos::zeros(),
+            rot: RawRot(0),
+        }
+    }
+
     pub fn move_by(&mut self, pos: Pos) {
         self.pos += pos;
         self.glyph_type.move_by(pos);
     }
-    pub fn rot_by(&mut self, rot: Rot) {
-        self.rot = normalize_dir(self.rot + rot);
+    pub fn rot_by(&mut self, rot: RawRot) {
+        self.rot += rot;
         self.glyph_type.rot_by(rot);
     }
     pub fn absolute_position(&self, rel_pos: Pos) -> Pos {
-        self.pos + rotate(rel_pos, self.rot)
+        self.pos + rotate(rel_pos, self.rot.normalize())
     }
     pub fn positions(&self) -> SmallVec<[Pos; 7]> {
         let pos = self.pos; //primary position
@@ -707,7 +868,7 @@ impl Glyph {
 #[derive(Debug, Clone)]
 pub struct Arm {
     pub pos: Pos,
-    pub rot: Rot,
+    pub rot: RawRot,
     pub len: i32,
     pub arm_type: ArmType,
     pub grabbing: bool,
@@ -715,7 +876,7 @@ pub struct Arm {
 }
 
 impl Arm {
-    pub fn new(pos: Pos, rot: Rot, len: i32, arm_type: ArmType) -> Self {
+    pub fn new(pos: Pos, rot: RawRot, len: i32, arm_type: ArmType) -> Self {
         Arm {
             pos,
             rot,
@@ -730,7 +891,7 @@ impl Arm {
         use Movement::*;
         match action {
             Move(Linear(p)) => self.pos += p,
-            Move(Rotation(r, _)) => self.rot += r,
+            Move(Rotation(r, _)) => self.rot += r.to_i32_minabs(),
             LengthAdjust(a) => self.len += a,
             Move(HeldStill) | Pivot(_) => {}
         }
@@ -772,8 +933,8 @@ impl InitialWorld {
 
         for arm in self.arms.iter() {
             for n in 1..=arm.len {
-                for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
-                    area_touched.insert(arm.pos + rot_dist_to_pos(n, arm.rot + r));
+                for r in Rot::step_by(arm.arm_type.angles_between_arm()) {
+                    area_touched.insert(arm.pos + (arm.rot.normalize() + r).dist_to_pos(n));
                 }
             }
         }
@@ -795,13 +956,13 @@ impl InitialWorld {
         }
     }
 
-    pub fn rot_by(&mut self, rot: Rot) {
+    pub fn rot_by(&mut self, rot: RawRot) {
         for glyph in self.glyphs.iter_mut() {
             glyph.rot_by(rot);
         }
         for arm in self.arms.iter_mut() {
-            arm.pos = rotate(arm.pos, rot);
-            arm.rot = normalize_dir(arm.rot + rot);
+            arm.pos = rotate(arm.pos, rot.normalize());
+            arm.rot += rot;
         }
     }
 
@@ -830,7 +991,7 @@ pub struct TrackMaps {
 pub struct ConduitInfo {
     pub vecids: (usize, usize),
     pub offset_pos: Pos,
-    pub offset_rot: Rot,
+    pub offset_rot: RawRot,
 }
 #[derive(Debug, Clone)]
 pub struct World {
@@ -997,6 +1158,7 @@ pub struct SolutionStats {
     pub instructions: i32,
 }
 
+/// Convention: +x right, +y up
 pub type XYPos = Point2<f32>;
 pub type XYVec = Vector2<f32>;
 
@@ -1040,9 +1202,13 @@ fn pos_to_xy(input: Pos) -> XYPos {
     let b = input.y as f32;
     XYPos::new(a * 2. + b, b * f32::sqrt(3.))
 }
-fn rot_to_angle(r: Rot) -> f32 {
-    (r as f32) * PI / 3.
+
+/// Taking a `RawRot` instead of a `Rot` is deliberate here; this is the source
+/// of the "overclocking" bugs in the original name.
+fn rot_to_angle(r: RawRot) -> f32 {
+    (r.0 as f32) * PI / 3.
 }
+
 fn xy_to_simple_pos(input: XYPos) -> Pos {
     let b = input.y / f32::sqrt(3.);
     let a = (input.x - b) / 2.;
@@ -1108,7 +1274,7 @@ impl FloatWorld {
                 Rotation(r, pivot) => {
                     let pivot_xy = pos_to_xy(pivot);
                     let offset = xy - pivot_xy;
-                    let rot = rot_to_angle(r) * amount;
+                    let rot = rot_to_angle(r.raw()) * amount;
                     (pivot_xy + (nalgebra::Rotation2::new(rot) * offset), rot)
                 }
                 HeldStill => (xy, 0.),
@@ -1202,9 +1368,9 @@ impl World {
             } else {
                 motion.atoms.insert(this_key, movement);
                 let atom = &self.atoms.atom_map[this_key];
-                for dir in 0..6 {
-                    if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
-                        let newpos = atom.pos + rot_to_pos(dir);
+                for dir in Rot::ALL {
+                    if atom.connections[dir.to_usize()].intersects(Bonds::DYNAMIC_BOND) {
+                        let newpos = atom.pos + dir.to_pos();
                         let newkey = *self
                             .atoms
                             .locs
@@ -1293,14 +1459,14 @@ impl World {
                     return Err(sim_error_pos("Retract on non-piston arm", arm.pos));
                 }
             }
-            RotateCounterClockwise => Move(Rotation(1, arm.pos)),
-            RotateClockwise => Move(Rotation(-1, arm.pos)),
-            PivotCounterClockwise => Pivot(1),
-            PivotClockwise => Pivot(-1),
+            RotateCounterClockwise => Move(Rotation(Rot::from_i8(1), arm.pos)),
+            RotateClockwise => Move(Rotation(Rot::from_i8(-1), arm.pos)),
+            PivotCounterClockwise => Pivot(Rot::from_i8(1)),
+            PivotClockwise => Pivot(Rot::from_i8(-1)),
             Drop => {
                 if arm_type != VanBerlo {
-                    for r in 0..6 {
-                        let grabbed_atom = arm.atoms_grabbed[r];
+                    for r in Rot::ALL {
+                        let grabbed_atom = arm.atoms_grabbed[r.to_usize()];
                         if !grabbed_atom.is_null() {
                             motion.drop_conduit_check.insert(grabbed_atom);
                         }
@@ -1313,8 +1479,8 @@ impl World {
             Grab => {
                 if !arm.grabbing && arm_type != VanBerlo {
                     arm.grabbing = true;
-                    for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
-                        let grab_pos = arm.pos + (rot_dist_to_pos(arm.len, arm.rot + r));
+                    for r in Rot::step_by(arm.arm_type.angles_between_arm()) {
+                        let grab_pos = arm.pos + ((arm.rot.normalize() + r).dist_to_pos(arm.len));
                         let null_key = AtomKey::null();
                         let current = self
                             .atoms
@@ -1322,7 +1488,7 @@ impl World {
                             .get(&grab_pos)
                             .filter(|&key| !self.atoms.atom_map[*key].is_berlo)
                             .unwrap_or(&null_key);
-                        arm.atoms_grabbed[r as usize] = *current;
+                        arm.atoms_grabbed[r.to_usize()] = *current;
                     }
                 }
                 STILL
@@ -1366,7 +1532,7 @@ impl World {
                 let atom_movement = match action {
                     ArmMovement::Pivot(r) => Movement::Rotation(r, self.atoms.atom_map[atom].pos),
                     ArmMovement::Move(m) => m,
-                    ArmMovement::LengthAdjust(a) => Linear(rot_to_pos(rotation_store) * a),
+                    ArmMovement::LengthAdjust(a) => Linear(rotation_store.normalize().to_pos() * a),
                 };
                 match motion.atoms.insert(atom, atom_movement) {
                     Some(x) if x != atom_movement => {
@@ -1443,7 +1609,7 @@ impl World {
 
     fn process_glyphs(&mut self, motion: &mut WorldStepInfo, first_half: bool) -> SimResult<()> {
         fn try_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos) {
-            let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
+            let rot = Rot::from_unit_pos(loc2 - loc1).unwrap();
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
                 let [atom1, atom2] = atoms
                     .atom_map
@@ -1452,20 +1618,20 @@ impl World {
                 if atom1.is_berlo || atom2.is_berlo {
                     return;
                 }
-                let bond1 = atom1.connections[rot];
+                let bond1 = atom1.connections[rot.to_usize()];
                 assert_eq!(
-                    atom2.connections[(rot + 3) % 6],
+                    atom2.connections[rot.opp().to_usize()],
                     bond1,
                     "Inconsistent bonds"
                 );
                 if bond1 == Bonds::NO_BOND {
-                    atom1.connections[rot] = Bonds::NORMAL;
-                    atom2.connections[(rot + 3) % 6] = Bonds::NORMAL;
+                    atom1.connections[rot.to_usize()] = Bonds::NORMAL;
+                    atom2.connections[rot.opp().to_usize()] = Bonds::NORMAL;
                 }
             }
         }
         fn try_triplex_bond(atoms: &mut WorldAtoms, loc1: &Pos, loc2: &Pos, bond_type: Bonds) {
-            let rot = pos_to_rot(loc2 - loc1).unwrap() as usize;
+            let rot = Rot::from_unit_pos(loc2 - loc1).unwrap();
             if let (Some(&key1), Some(&key2)) = (atoms.locs.get(loc1), atoms.locs.get(loc2)) {
                 let [atom1, atom2] = atoms
                     .atom_map
@@ -1477,15 +1643,15 @@ impl World {
                 if atom1.atom_type != AtomType::Fire || atom2.atom_type != AtomType::Fire {
                     return;
                 }
-                let bond1 = atom1.connections[rot];
+                let bond1 = atom1.connections[rot.to_usize()];
                 assert_eq!(
-                    atom2.connections[(rot + 3) % 6],
+                    atom2.connections[rot.opp().to_usize()],
                     bond1,
                     "Inconsistent bonds"
                 );
                 if (bond1 & !Bonds::TRIPLEX).is_empty() {
-                    atom1.connections[rot] |= bond_type;
-                    atom2.connections[(rot + 3) % 6] |= bond_type;
+                    atom1.connections[rot.to_usize()] |= bond_type;
+                    atom2.connections[rot.opp().to_usize()] |= bond_type;
                 }
             }
         }
@@ -1493,7 +1659,7 @@ impl World {
         use GlyphType::*;
         for (id, glyph) in self.glyphs.iter_mut().enumerate() {
             let atoms = &mut self.atoms;
-            let rot = normalize_dir(glyph.rot) as usize;
+            let rot = glyph.rot.normalize();
 
             let pos = glyph.pos; //primary position
             let pos_bi = glyph.absolute_position(Pos::new(1, 0)); //position for all 2-sized glyphs
@@ -1664,15 +1830,15 @@ impl World {
                     if let (Some(&key1), Some(&key2)) =
                         (atoms.locs.get(&pos), atoms.locs.get(&pos_bi))
                     {
-                        let bond1 = atoms.atom_map[key1].connections[rot];
+                        let bond1 = atoms.atom_map[key1].connections[rot.to_usize()];
                         assert_eq!(
-                            atoms.atom_map[key2].connections[(rot + 3) % 6],
+                            atoms.atom_map[key2].connections[rot.opp().to_usize()],
                             bond1,
                             "Inconsistent bonds"
                         );
                         if bond1.intersects(Bonds::DYNAMIC_BOND) {
-                            atoms.atom_map[key1].connections[rot] = Bonds::NO_BOND;
-                            atoms.atom_map[key2].connections[(rot + 3) % 6] = Bonds::NO_BOND;
+                            atoms.atom_map[key1].connections[rot.to_usize()] = Bonds::NO_BOND;
+                            atoms.atom_map[key2].connections[rot.opp().to_usize()] = Bonds::NO_BOND;
                             motion.recent_bonds.insert(key1);
                             motion.recent_bonds.insert(key2);
                         }
@@ -1728,10 +1894,10 @@ impl World {
         let mut check_atoms = VecDeque::<AtomKey>::new();
 
         let mut offset_pos = conduit_info.offset_pos;
-        let mut offset_rot = conduit_info.offset_rot;
+        let mut offset_rot = conduit_info.offset_rot.normalize();
         if conduit_info.vecids.0 == glyph_id {
             offset_pos *= -1;
-            offset_rot = normalize_dir(-offset_rot);
+            offset_rot = -offset_rot;
         } else {
             assert!(conduit_info.vecids.1 == glyph_id, "Conduit invalid vec id");
         }
@@ -1751,9 +1917,9 @@ impl World {
                         viewed_atoms.insert(this_key);
 
                         let atom = &atoms.atom_map[this_key];
-                        for dir in 0..6 {
-                            if atom.connections[dir as usize].intersects(Bonds::DYNAMIC_BOND) {
-                                let newpos = atom.pos + rot_to_pos(dir);
+                        for dir in Rot::ALL {
+                            if atom.connections[dir.to_usize()].intersects(Bonds::DYNAMIC_BOND) {
+                                let newpos = atom.pos + dir.to_pos();
                                 if !positions.contains(&newpos) {
                                     return false;
                                 }
@@ -1869,8 +2035,8 @@ impl World {
                 ATOM_ARM_RADIUS_SQUARED,
                 "atom/arm collision!",
             )?;
-            for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
-                let angle = arm.rot + rot_to_angle(r);
+            for r in Rot::step_by(arm.arm_type.angles_between_arm()) {
+                let angle = arm.rot + rot_to_angle(r.raw());
                 let offset = nalgebra::Rotation2::new(angle) * XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos + offset);
                 //arm lengths are doubled in floatworld
@@ -2018,7 +2184,7 @@ impl World {
         let last = *track_pos.last().unwrap();
         let offset = first - last;
         //check for looping on first/last
-        if track_pos.len() > 2 && pos_to_rot(offset).is_some() {
+        if track_pos.len() > 2 && Rot::from_unit_pos(offset).is_some() {
             track_maps.minus.entry(first).or_insert(-offset);
             track_maps.plus.entry(last).or_insert(offset);
         } else {
@@ -2081,15 +2247,15 @@ impl World {
                 use AtomType::*;
                 a.grabbing = true;
                 const ATOM_SETUP: [AtomType; 6] = [Salt, Water, Air, Salt, Fire, Earth];
-                for (i, &atom_type) in ATOM_SETUP.iter().enumerate() {
-                    let pos = a.pos + rot_to_pos((i as Rot) + a.rot);
+                for (r, &atom_type) in Rot::ALL.into_iter().zip(ATOM_SETUP.iter()) {
+                    let pos = a.pos + (r + a.rot.normalize()).to_pos();
                     let key = world.atoms.create_atom(Atom {
                         pos,
                         atom_type,
                         connections: [Bonds::NO_BOND; 6],
                         is_berlo: true,
                     })?;
-                    a.atoms_grabbed[i] = key;
+                    a.atoms_grabbed[r.to_usize()] = key;
                 }
             }
         }
@@ -2115,7 +2281,7 @@ impl World {
                     pair_data.vecids.1 = id;
                     unfinished_conduit_count -= 1;
                     pair_data.offset_pos -= glyph.pos;
-                    pair_data.offset_rot = normalize_dir(pair_data.offset_rot - glyph.rot);
+                    pair_data.offset_rot = (pair_data.offset_rot - glyph.rot).normalize().raw();
                 } else {
                     let conduit_info = ConduitInfo {
                         vecids: (id, id),
@@ -2433,18 +2599,18 @@ mod tests {
     use super::*;
     #[test]
     fn rotation_tests() {
-        for r in 0..6 {
-            assert_eq!(rot_dist_to_pos(1, r), rotate(Pos::new(1, 0), r));
-            assert_eq!(rot_dist_to_pos(2, r), rotate(Pos::new(2, 0), r));
+        for r in Rot::ALL {
+            assert_eq!(r.dist_to_pos(1), rotate(Pos::new(1, 0), r));
+            assert_eq!(r.dist_to_pos(2), rotate(Pos::new(2, 0), r));
             assert_eq!(rotate(Pos::new(3, 1), r + 1), rotate(Pos::new(-1, 4), r));
         }
 
         let p = Pos::new(1, 0);
         let fp = pos_to_xy(p);
-        let r: Rot = 1;
+        let r = Rot(1);
         let rp = rotate(p, r);
         let frp = pos_to_xy(rp);
-        let rfp = nalgebra::Rotation2::new(rot_to_angle(r)) * fp;
+        let rfp = nalgebra::Rotation2::new(rot_to_angle(r.raw())) * fp;
         assert!(nalgebra::distance(&frp, &rfp) < 1e-6);
     }
 }

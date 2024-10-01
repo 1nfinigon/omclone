@@ -62,8 +62,8 @@ fn gen_molecule(rng: &mut impl Rng, size: usize) -> AtomPattern {
             let prev = self.occupied.insert(pos, pattern_idx);
             assert!(prev.is_none());
             self.adjacencies.swap_remove(&pos);
-            for r in 0..6 {
-                let pos = pos + rot_to_pos(r);
+            for r in Rot::ALL {
+                let pos = pos + r.to_pos();
                 if let Some(other_idx) = self.occupied.get(&pos).copied() {
                     self.possible_bonds.push((pattern_idx, other_idx));
                 } else {
@@ -116,11 +116,11 @@ fn gen_molecule(rng: &mut impl Rng, size: usize) -> AtomPattern {
             continue;
         }
         let delta_1to2 = gen.pattern[idx2].pos - gen.pattern[idx1].pos;
-        let r_1to2 = pos_to_rot(delta_1to2).unwrap();
-        let r_2to1 = pos_to_rot(-delta_1to2).unwrap();
+        let r_1to2 = Rot::from_unit_pos(delta_1to2).unwrap();
+        let r_2to1 = r_1to2.opp();
         let bonds = gen_nonempty_bonds(rng);
-        gen.pattern[idx1].connections[r_1to2 as usize] = bonds;
-        gen.pattern[idx2].connections[r_2to1 as usize] = bonds;
+        gen.pattern[idx1].connections[r_1to2.to_usize()] = bonds;
+        gen.pattern[idx2].connections[r_2to1.to_usize()] = bonds;
         atom_disjoint_sets.union(idx1, idx2);
     }
 

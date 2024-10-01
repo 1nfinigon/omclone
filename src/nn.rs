@@ -411,6 +411,8 @@ impl<'a> SparseCoo1DSlice<'a> {
 }
 
 pub mod features {
+    use sim::Rot;
+
     use super::feature_offsets::*;
     use super::*;
 
@@ -530,8 +532,7 @@ pub mod features {
                 for (i, position) in positions.iter().enumerate() {
                     if let Some(mut features) = self.get_spatial_mut(*position) {
                         features.set(
-                            glyph_orientation
-                                .get_onehot_offset(sim::normalize_dir(glyph.rot) as usize),
+                            glyph_orientation.get_onehot_offset(glyph.rot.normalize().to_usize()),
                             1.,
                         );
                         use sim::GlyphType;
@@ -579,15 +580,15 @@ pub mod features {
                                 assert!(pos_list[i] == *position);
                                 if i >= 1 {
                                     let other_pos = positions[i - 1];
-                                    let rot = sim::pos_to_rot(other_pos - position).unwrap();
+                                    let rot = Rot::from_unit_pos(other_pos - position).unwrap();
                                     features
-                                        .set(track_minus_dir.get_onehot_offset(rot as usize), 1.);
+                                        .set(track_minus_dir.get_onehot_offset(rot.to_usize()), 1.);
                                 }
                                 if i + 1 < positions.len() {
                                     let other_pos = positions[i + 1];
-                                    let rot = sim::pos_to_rot(other_pos - position).unwrap();
+                                    let rot = Rot::from_unit_pos(other_pos - position).unwrap();
                                     features
-                                        .set(track_plus_dir.get_onehot_offset(rot as usize), 1.);
+                                        .set(track_plus_dir.get_onehot_offset(rot.to_usize()), 1.);
                                 }
                             }
                             GlyphType::Conduit(_, _) => unimplemented!(),
@@ -678,13 +679,13 @@ pub mod features {
                     if *arm_type == sim::ArmType::VanBerlo {
                         features.set(arm_base_is_berlo.get_offset(), 1.);
                     }
-                    for rel_r in (0..6).step_by(arm_type.angles_between_arm() as usize) {
-                        let abs_r = sim::normalize_dir(rel_r + rot);
-                        features.set(arm_in_orientation[abs_r as usize].get_offset(), 1.);
+                    for rel_r in Rot::step_by(arm_type.angles_between_arm()) {
+                        let abs_r = rel_r + rot.normalize();
+                        features.set(arm_in_orientation[abs_r.to_usize()].get_offset(), 1.);
                         use slotmap::Key;
-                        if !atoms_grabbed[rel_r as usize].is_null() {
+                        if !atoms_grabbed[rel_r.to_usize()].is_null() {
                             features.set(
-                                arm_in_orientation_and_holding_atom[abs_r as usize].get_offset(),
+                                arm_in_orientation_and_holding_atom[abs_r.to_usize()].get_offset(),
                                 1.,
                             );
                         }

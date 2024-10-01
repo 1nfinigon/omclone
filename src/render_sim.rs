@@ -9,8 +9,8 @@ pub fn pos_to_xy(input: &Pos) -> GFXPos {
     let b = input.y as f32;
     [a * 2. + b, b * f32::sqrt(3.)]
 }
-pub fn rot_to_angle(r: Rot) -> f32 {
-    (r as f32) * PI / 3.
+pub fn rot_to_angle(r: RawRot) -> f32 {
+    (r.0 as f32) * PI / 3.
 }
 
 //note: 1 hex has inner radius of 1 (width of 2).
@@ -431,7 +431,7 @@ impl RenderDataBase {
                 let bond = atom.connections[r];
                 for (bondtype, bindtype) in matches {
                     if bond.intersects(bondtype) {
-                        let angle = rot_to_angle(r as Rot) + atom.rot;
+                        let angle = rot_to_angle(RawRot(r as i32)) + atom.rot;
                         ctx.apply_bindings(bindtype);
                         ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
                             offset,
@@ -626,8 +626,8 @@ impl RenderDataBase {
             let color = [0., 0., 0.];
             let offset = [f_arm.pos.x, f_arm.pos.y];
             let triangles_drawn = if f_arm.grabbing { 6 } else { 3 };
-            for r in (0..6).step_by(f_arm.arm_type.angles_between_arm() as usize) {
-                let angle = f_arm.rot + rot_to_angle(r);
+            for r in Rot::step_by(f_arm.arm_type.angles_between_arm()) {
+                let angle = f_arm.rot + rot_to_angle(r.raw());
                 ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
                     color,
                     offset,

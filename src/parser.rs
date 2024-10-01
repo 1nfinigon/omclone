@@ -207,7 +207,7 @@ struct Part {
     part_type: PartType,
     pos: Pos,
     arm_size: i32,
-    rot: i32,
+    rot: RawRot,
     input_output_index: i32,
     instructions: Vec<(i32, Instr)>,
     tracks: Option<Vec<Pos>>,
@@ -291,7 +291,7 @@ pub fn parse_solution(f: &mut impl Read) -> Result<FullSolution> {
         expect_u8(f, 1)?;
         let pos = parse_pos(f)?;
         let arm_size = parse_i32(f)?;
-        let rot = parse_i32(f)?;
+        let rot = RawRot(parse_i32(f)?);
         let input_output_index = parse_i32(f)?;
         let instruction_count = parse_i32(f)?;
         let mut instructions = Vec::new();
@@ -358,12 +358,17 @@ pub fn create_solution(
         let arm_size = 0;
         let arm_index = 0;
         let instructions = Vec::new();
-        //Clone and return points to relative position (absolute position done in setup_sim/reposition_glyph)
+        //Clone and return points to relative position (absolute position done in puzzle_prep)
         let (part_type, input_output_index, tracks, conduit) = match &glyph.glyph_type {
             GlyphType::Track(track) => (
                 PartType::Track,
                 0,
-                Some(track.iter().map(|x| rotate(x - pos, -rot)).collect()),
+                Some(
+                    track
+                        .iter()
+                        .map(|x| rotate(x - pos, -rot.normalize()))
+                        .collect(),
+                ),
                 None,
             ),
             GlyphType::Input(_, id) => (PartType::Input, *id, None, None),
@@ -373,7 +378,13 @@ pub fn create_solution(
                 PartType::Conduit,
                 *id,
                 None,
-                Some((*id, conduit.iter().map(|x| rotate(x - pos, -rot)).collect())),
+                Some((
+                    *id,
+                    conduit
+                        .iter()
+                        .map(|x| rotate(x - pos, -rot.normalize()))
+                        .collect(),
+                )),
             ),
             basic_glyph_type => (
                 PartType::Glyph(basic_glyph_type.try_into().unwrap()),
@@ -447,7 +458,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
         write_u8(f, 1)?;
         write_pos(f, part.pos)?;
         write_i32(f, part.arm_size)?;
-        write_i32(f, part.rot)?;
+        write_i32(f, part.rot.0)?;
         write_i32(f, part.input_output_index)?;
         write_i32(f, part.instructions.len() as i32)?;
         for (instr_pos, instr) in &part.instructions {
@@ -512,10 +523,10 @@ fn parse_molecule(f: &mut impl Read) -> Result<AtomPattern> {
         let atom2 = *atom_locs
             .get(&to_pos)
             .ok_or(eyre!("bond2 to nonatom position"))?;
-        let rot =
-            pos_to_rot(pattern[atom2].pos - pattern[atom1].pos).ok_or(eyre!("nonadjacent bond"))?;
-        pattern[atom1].connections[rot as usize] = bond_type;
-        pattern[atom2].connections[normalize_dir(rot + 3) as usize] = bond_type;
+        let rot = Rot::from_unit_pos(pattern[atom2].pos - pattern[atom1].pos)
+            .ok_or(eyre!("nonadjacent bond"))?;
+        pattern[atom1].connections[rot.to_usize()] = bond_type;
+        pattern[atom2].connections[rot.opp().to_usize()] = bond_type;
     }
     Ok(pattern)
 }
@@ -530,17 +541,15 @@ fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
     }
     let mut bonds: HashMap<(Pos, Pos), Bonds> = HashMap::new();
     for atom1_idx in 0..pattern.len() {
-        for angle in 0..6 {
-            let bond_type = pattern[atom1_idx].connections[angle as usize];
+        for angle in Rot::ALL {
+            let bond_type = pattern[atom1_idx].connections[angle.to_usize()];
             if !bond_type.is_empty() {
                 let mut from_pos = pattern[atom1_idx].pos;
-                let mut to_pos = pattern[atom1_idx].pos + rot_to_pos(angle);
+                let mut to_pos = pattern[atom1_idx].pos + angle.to_pos();
                 let atom2_idx = *atom_locs
                     .get(&to_pos)
                     .ok_or(eyre!("bond to nonatom position"))?;
-                ensure!(
-                    pattern[atom2_idx].connections[normalize_dir(angle + 3) as usize] == bond_type
-                );
+                ensure!(pattern[atom2_idx].connections[angle.opp().to_usize()] == bond_type);
                 if (from_pos.x, from_pos.y) > (to_pos.x, to_pos.y) {
                     std::mem::swap(&mut from_pos, &mut to_pos);
                 }
@@ -561,7 +570,7 @@ fn write_molecule(f: &mut impl Write, pattern: &AtomPattern) -> Result<()> {
 }
 
 /// `input` needs to be in relative space (i.e. call this before
-/// `reposition_pattern`).
+/// `glyph.rot_by`, `glyph.move_by` etc).
 fn process_repeats(input: &Vec<Atom>, reps: i32) -> Result<AtomPattern> {
     let mut rep_offset = None;
     for atom in input {
@@ -709,11 +718,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     puzzle.inputs.len()
                 ))?;
                 let input_glyph = GlyphType::Input(pattern.clone(), p.input_output_index);
-                let mut glyph = Glyph {
-                    glyph_type: input_glyph,
-                    pos: Pos::zeros(),
-                    rot: 0,
-                };
+                let mut glyph = Glyph::new(input_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
@@ -730,11 +735,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     6 * puzzle.output_multiplier,
                     p.input_output_index,
                 );
-                let mut glyph = Glyph {
-                    glyph_type: output_glyph,
-                    pos: Pos::zeros(),
-                    rot: 0,
-                };
+                let mut glyph = Glyph::new(output_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
@@ -752,11 +753,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     6 * puzzle.output_multiplier,
                     p.input_output_index,
                 );
-                let mut glyph = Glyph {
-                    glyph_type: output_glyph,
-                    pos: Pos::zeros(),
-                    rot: 0,
-                };
+                let mut glyph = Glyph::new(output_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
@@ -766,11 +763,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     .tracks
                     .clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
-                let mut glyph = Glyph {
-                    glyph_type: GlyphType::Track(track_locs),
-                    pos: Pos::zeros(),
-                    rot: 0,
-                };
+                let mut glyph = Glyph::new(GlyphType::Track(track_locs));
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
@@ -780,11 +773,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     .conduit
                     .clone()
                     .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
-                let mut glyph = Glyph {
-                    glyph_type: GlyphType::Conduit(conduit_locs, conduit_id),
-                    pos: Pos::zeros(),
-                    rot: 0,
-                };
+                let mut glyph = Glyph::new(GlyphType::Conduit(conduit_locs, conduit_id));
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
