@@ -10,7 +10,7 @@ pub fn pos_to_xy(input: &Pos) -> GFXPos {
     [a * 2. + b, b * f32::sqrt(3.)]
 }
 pub fn rot_to_angle(r: Rot) -> f32 {
-    (-r as f32) * PI / 3.
+    (r as f32) * PI / 3.
 }
 
 //note: 1 hex has inner radius of 1 (width of 2).

@@ -1041,7 +1041,7 @@ fn pos_to_xy(input: Pos) -> XYPos {
     XYPos::new(a * 2. + b, b * f32::sqrt(3.))
 }
 fn rot_to_angle(r: Rot) -> f32 {
-    (-r as f32) * PI / 3.
+    (r as f32) * PI / 3.
 }
 fn xy_to_simple_pos(input: XYPos) -> Pos {
     let b = input.y / f32::sqrt(3.);
@@ -1109,7 +1109,7 @@ impl FloatWorld {
                     let pivot_xy = pos_to_xy(pivot);
                     let offset = xy - pivot_xy;
                     let rot = rot_to_angle(r) * amount;
-                    (pivot_xy + (nalgebra::Rotation2::new(-rot) * offset), rot)
+                    (pivot_xy + (nalgebra::Rotation2::new(rot) * offset), rot)
                 }
                 HeldStill => (xy, 0.),
             }
@@ -1871,15 +1871,15 @@ impl World {
             )?;
             for r in (0..6).step_by(arm.arm_type.angles_between_arm() as usize) {
                 let angle = arm.rot + rot_to_angle(r);
-                let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(arm.len, 0.);
+                let offset = nalgebra::Rotation2::new(angle) * XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos + offset);
                 //arm lengths are doubled in floatworld
                 if arm.len > 3.0 {
-                    let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(2., 0.);
+                    let offset = nalgebra::Rotation2::new(angle) * XYVec::new(2., 0.);
                     mark_point(&mut self.area_touched, arm.pos + offset);
                 }
                 if arm.len > 5.0 {
-                    let offset = nalgebra::Rotation2::new(-angle) * XYVec::new(4., 0.);
+                    let offset = nalgebra::Rotation2::new(angle) * XYVec::new(4., 0.);
                     mark_point(&mut self.area_touched, arm.pos + offset);
                 }
             }
@@ -2438,5 +2438,13 @@ mod tests {
             assert_eq!(rot_dist_to_pos(2, r), rotate(Pos::new(2, 0), r));
             assert_eq!(rotate(Pos::new(3, 1), r + 1), rotate(Pos::new(-1, 4), r));
         }
+
+        let p = Pos::new(1, 0);
+        let fp = pos_to_xy(p);
+        let r: Rot = 1;
+        let rp = rotate(p, r);
+        let frp = pos_to_xy(rp);
+        let rfp = nalgebra::Rotation2::new(rot_to_angle(r)) * fp;
+        assert!(nalgebra::distance(&frp, &rfp) < 1e-6);
     }
 }
