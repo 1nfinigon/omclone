@@ -340,6 +340,29 @@ pub fn rotate_around(pos: Pos, angle: Rot, pivot: Pos) -> Pos {
     rotate(pos - pivot, angle) + pivot
 }
 
+/// aka "bestagon" metric
+pub fn hex_distance(pos: Pos) -> u32 {
+    let xy = pos.x + pos.y;
+    [pos.x.abs(), pos.y.abs(), xy.abs()]
+        .into_iter()
+        .max()
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+#[test]
+fn test_hex_distance() {
+    assert_eq!(hex_distance(Pos::new(0, 0)), 0);
+    assert_eq!(hex_distance(Pos::new(0, 3)), 3);
+    assert_eq!(hex_distance(Pos::new(0, -3)), 3);
+    assert_eq!(hex_distance(Pos::new(3, 0)), 3);
+    assert_eq!(hex_distance(Pos::new(-3, 0)), 3);
+    assert_eq!(hex_distance(Pos::new(3, -3)), 3);
+    assert_eq!(hex_distance(Pos::new(-3, 3)), 3);
+    assert_eq!(hex_distance(Pos::new(-3, 2)), 3);
+}
+
 bitflags! {
     #[derive(PartialEq, Eq, Debug, Clone, Copy)]
     pub struct Bonds: u8 {
@@ -375,7 +398,28 @@ pub enum AtomType {
     RepeatingOutputMarker = 15,
     Quintessence = 16,
 }
+
 impl AtomType {
+    pub const N_TYPES: usize = 17;
+
+    pub const ALL_DYNAMIC: [Self; 15] = [
+        Self::Salt,
+        Self::Air,
+        Self::Earth,
+        Self::Fire,
+        Self::Water,
+        Self::Quicksilver,
+        Self::Gold,
+        Self::Silver,
+        Self::Copper,
+        Self::Iron,
+        Self::Tin,
+        Self::Lead,
+        Self::Vitae,
+        Self::Mors,
+        Self::Quintessence,
+    ];
+
     pub fn is_element(&self) -> bool {
         use AtomType::*;
         matches!(&self, Air | Earth | Fire | Water)
@@ -392,6 +436,14 @@ impl AtomType {
         }
     }
 }
+
+#[test]
+fn atom_type_len() {
+    use num_traits::FromPrimitive;
+    assert!(AtomType::from_u8(AtomType::N_TYPES.try_into().unwrap()).is_none());
+    assert!(AtomType::from_u8((AtomType::N_TYPES - 1).try_into().unwrap()).is_some());
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atom {
     pub pos: Pos,

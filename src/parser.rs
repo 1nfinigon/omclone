@@ -375,7 +375,12 @@ pub fn create_solution(
                 None,
                 Some((*id, conduit.iter().map(|x| rotate(x - pos, -rot)).collect())),
             ),
-            basic_glyph_type => (PartType::Glyph(basic_glyph_type.try_into().unwrap()), 0, None, None),
+            basic_glyph_type => (
+                PartType::Glyph(basic_glyph_type.try_into().unwrap()),
+                0,
+                None,
+                None,
+            ),
         };
         part_list.push(Part {
             part_type,

@@ -1,6 +1,7 @@
 mod check;
 mod nonnan;
 mod parser;
+mod revgen;
 mod sim;
 mod utils;
 
@@ -58,6 +59,8 @@ fn main() -> Result<()> {
 
         #[cfg(feature = "nn")]
         Some("train") => train::main(),
+
+        Some("revgen") => revgen::main(),
 
         Some(subcommand) => Err(eyre!("unsupported subcommand {}", subcommand)),
 
