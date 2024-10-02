@@ -55,6 +55,10 @@ fn solve_one_puzzle_seeded(
         seed_init.move_by(delta);
     }
 
+    // TODO: randomly rotate the seed world, then check that the post-rotate
+    // world still passes checks
+    let _ = sim::InitialWorld::rot_by;
+
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
     let first_timestep = seed_world.world.timestep;

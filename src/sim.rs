@@ -553,8 +553,6 @@ pub enum AtomType {
 }
 
 impl AtomType {
-    pub const N_TYPES: usize = 17;
-
     pub const ALL_DYNAMIC: [Self; 15] = [
         Self::Salt,
         Self::Air,
@@ -1004,7 +1002,7 @@ pub struct World {
     pub cost: i32,
     pub conduit_pairs: ConduitPairMap,
 }
-type ConduitPairMap = FxHashMap<i32, ConduitInfo>;
+pub type ConduitPairMap = FxHashMap<i32, ConduitInfo>;
 new_key_type! { pub struct AtomKey; }
 #[derive(Debug, Clone)]
 pub struct WorldAtoms {
@@ -1012,17 +1010,17 @@ pub struct WorldAtoms {
     pub locs: FxHashMap<Pos, AtomKey>,
 }
 impl WorldAtoms {
-    fn new() -> WorldAtoms {
+    pub fn new() -> WorldAtoms {
         WorldAtoms {
             atom_map: SlotMap::with_key(),
             locs: Default::default(),
         }
     }
-    fn get_atom_mut(&mut self, loc: Pos) -> Option<&mut Atom> {
+    pub fn get_atom_mut(&mut self, loc: Pos) -> Option<&mut Atom> {
         let &key = self.locs.get(&loc)?;
         Some(&mut self.atom_map[key])
     }
-    fn get_type(&self, loc: Pos) -> Option<AtomType> {
+    pub fn get_type(&self, loc: Pos) -> Option<AtomType> {
         let &key = self.locs.get(&loc)?;
         let atom = self
             .atom_map
