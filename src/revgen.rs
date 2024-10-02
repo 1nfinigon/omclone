@@ -151,12 +151,17 @@ struct GenState {
     tapes: Vec<Tape<BasicInstr>>,
 }
 
+/// A spec for an arm, that might already exist or might have to be created.
 #[derive(Copy, Clone)]
 enum RevStepArmBase {
-    /// New(arm_pos)
-    New(Pos),
-    /// Existing(arm_idx)
-    Existing(usize),
+    New {
+        arm_pos: Pos,
+        arm_len: i32,
+        arm_rot: Rot,
+    },
+    Existing {
+        arm_idx: usize,
+    },
 }
 
 /// A type of "reverse step" that can be taken, i.e. an action that, given a
@@ -201,6 +206,7 @@ enum RevStep {
     /// - (if required) set arm type to piston
     /// - (if required) add to tape: rotate to rot
     /// - spawn a molecule at the given output
+    /// - increment output glyph count
     /// - add to tape: drop
     /// - set prev arm state to grabbed
     DropOutput {
@@ -216,7 +222,6 @@ enum RevStep {
     ///   orientation (or doesn't exist)
     RotateMolecule {
         arm_base: RevStepArmBase,
-        arm_len: i32,
         prev_arm_rot: Rot,
     },
     //PivotMolecule(Pos, usize, Rot, Rot),
@@ -230,29 +235,37 @@ enum RevStep {
     GrabInput { arm_idx: usize },
 }
 
-struct MoleculeInfoMolecule {
+struct WorldInfoMolecule {
     atom_pattern: Vec<AtomKey>,
     /// list of arm_idxs that grab this molecule
     grabbed_by: BTreeSet<usize>,
 }
 
-struct MoleculeInfo {
+/// Extra information that can be computed on a `World` for convenience/fast
+/// access.
+struct WorldInfo {
     /// map from atom_key to list of arm_idxs that grab it
     grab_map: SecondaryMap<AtomKey, Vec<usize>>,
     /// Vector of (atom_pattern, arm_idxs that grab this molecule)
-    molecule_map: Vec<MoleculeInfoMolecule>,
+    molecule_map: Vec<WorldInfoMolecule>,
     /// Map from position to molecule_map_idx
-    locs: FxHashMap<Pos, usize>,
+    molecule_locs: FxHashMap<Pos, usize>,
+    /// Map from position to glyph_idx
+    glyph_locs: FxHashMap<Pos, usize>,
+    /// Map from position to arm_idx
+    arm_locs: FxHashMap<Pos, usize>,
 }
 
-impl MoleculeInfo {
-    fn new(atoms: &WorldAtoms, arms: &[Arm]) -> Self {
+impl WorldInfo {
+    fn new(world: &World) -> Self {
         let mut self_ = Self {
             grab_map: SecondaryMap::new(),
             molecule_map: Vec::new(),
-            locs: FxHashMap::default(),
+            molecule_locs: FxHashMap::default(),
+            glyph_locs: FxHashMap::default(),
+            arm_locs: FxHashMap::default(),
         };
-        for (arm_idx, arm) in arms.iter().enumerate() {
+        for (arm_idx, arm) in world.arms.iter().enumerate() {
             for r in Rot::ALL {
                 let atom_key = arm.atoms_grabbed[r.to_usize()];
                 if atom_key.is_null() {
@@ -266,40 +279,29 @@ impl MoleculeInfo {
                     .push(arm_idx);
             }
         }
-        for atom_pattern in atoms.iter_molecules() {
+        for atom_pattern in world.atoms.iter_molecules() {
             let molecule_key = self_.molecule_map.len();
             let mut grabbed_by = BTreeSet::new();
             for atom_key in atom_pattern.iter().copied() {
-                let atom = atoms.atom_map.get(atom_key).unwrap();
-                let old_value = self_.locs.insert(atom.pos, molecule_key);
+                let atom = world.atoms.atom_map.get(atom_key).unwrap();
+                let old_value = self_.molecule_locs.insert(atom.pos, molecule_key);
                 assert!(old_value.is_none());
                 if let Some(arm_idxs) = self_.grab_map.get(atom_key) {
                     grabbed_by.extend(arm_idxs);
                 }
             }
-            self_.molecule_map.push(MoleculeInfoMolecule {
+            self_.molecule_map.push(WorldInfoMolecule {
                 atom_pattern,
                 grabbed_by,
             });
         }
-        self_
-    }
-}
-
-struct GlyphInfo {
-    /// Map from position to glyph_idx
-    locs: FxHashMap<Pos, usize>,
-}
-
-impl GlyphInfo {
-    fn new(glyphs: &[Glyph]) -> Self {
-        let mut self_ = Self {
-            locs: FxHashMap::default(),
-        };
-        for (glyph_idx, glyph) in glyphs.iter().enumerate() {
+        for (glyph_idx, glyph) in world.glyphs.iter().enumerate() {
             for pos in glyph.positions() {
-                self_.locs.insert(pos, glyph_idx);
+                self_.glyph_locs.insert(pos, glyph_idx);
             }
+        }
+        for (i, arm) in world.arms.iter().enumerate() {
+            self_.arm_locs.insert(arm.pos, i);
         }
         self_
     }
@@ -314,15 +316,11 @@ impl GenState {
                 area_touched: FxHashSet::default(),
                 glyphs: outputs
                     .into_iter()
-                    .enumerate()
-                    .map(|(i, (pattern, count))| {
+                    .map(|(pattern, count)| {
                         Glyph::new(GlyphType::Output {
                             pattern,
                             count,
-                            id: {
-                                unimplemented!();
-                                i as i32
-                            },
+                            id: -1,
                         })
                     })
                     .collect(),
@@ -346,22 +344,13 @@ impl GenState {
             })
     }
 
-    fn arms_by_pos(&self) -> FxHashMap<Pos, usize> {
-        self.world
-            .arms
-            .iter()
-            .enumerate()
-            .map(|(i, arm)| (arm.pos, i))
-            .collect()
-    }
-
     /// Returns revsteps with weight
-    fn all_eligible_revsteps(&self, input_weight: f32) -> Vec<(RevStep, f32)> {
+    fn all_eligible_revsteps(
+        &self,
+        world_info: &WorldInfo,
+        input_weight: f32,
+    ) -> Vec<(RevStep, f32)> {
         let mut revsteps = Vec::new();
-
-        let arms_by_pos = self.arms_by_pos();
-        let molecules = MoleculeInfo::new(&self.world.atoms, &self.world.arms);
-        let glyphs = GlyphInfo::new(&self.world.glyphs);
 
         {
             // DropOutput
@@ -389,19 +378,23 @@ impl GenState {
                             if self.world.atoms.get_type(atom.pos).is_some() {
                                 continue;
                             }
-                            if let Some(arm_idx) = arms_by_pos.get(&arm_pos).copied() {
+                            if let Some(arm_idx) = world_info.arm_locs.get(&arm_pos).copied() {
                                 if self.world.arms[arm_idx].grabbing {
                                     continue;
                                 }
                                 existing_arm.push(RevStep::DropOutput {
-                                    arm_base: RevStepArmBase::Existing(arm_idx),
+                                    arm_base: RevStepArmBase::Existing { arm_idx },
                                     arm_len,
                                     arm_rot,
                                     glyph_idx,
                                 });
                             } else {
                                 new_arm.push(RevStep::DropOutput {
-                                    arm_base: RevStepArmBase::New(arm_pos),
+                                    arm_base: RevStepArmBase::New {
+                                        arm_pos,
+                                        arm_len,
+                                        arm_rot,
+                                    },
                                     arm_len,
                                     arm_rot,
                                     glyph_idx,
@@ -423,7 +416,7 @@ impl GenState {
             // arm was a RotateMolecule; forbid if "and"
             let mut existing_arm = Vec::new();
             let mut new_arm = Vec::new();
-            for molecule in molecules.molecule_map.iter() {
+            for molecule in world_info.molecule_map.iter() {
                 for atom_key in molecule.atom_pattern.iter().copied() {
                     let atom = self.world.atoms.atom_map.get(atom_key).unwrap();
                     for arm_len in 1..3 {
@@ -433,19 +426,21 @@ impl GenState {
                                     break;
                                 }
                                 let arm_pos = atom.pos - cur_arm_rot.dist_to_pos(arm_len);
-                                if let Some(arm_idx) = arms_by_pos.get(&arm_pos).copied() {
+                                if let Some(arm_idx) = world_info.arm_locs.get(&arm_pos).copied() {
                                     if self.world.arms[arm_idx].grabbing {
                                         continue;
                                     }
                                     existing_arm.push(RevStep::RotateMolecule {
-                                        arm_base: RevStepArmBase::Existing(arm_idx),
-                                        arm_len,
+                                        arm_base: RevStepArmBase::Existing { arm_idx },
                                         prev_arm_rot,
                                     });
                                 } else {
                                     new_arm.push(RevStep::RotateMolecule {
-                                        arm_base: RevStepArmBase::New(arm_pos),
-                                        arm_len,
+                                        arm_base: RevStepArmBase::New {
+                                            arm_pos,
+                                            arm_len,
+                                            arm_rot: prev_arm_rot,
+                                        },
                                         prev_arm_rot,
                                     });
                                 }
@@ -462,10 +457,10 @@ impl GenState {
 
         {
             // GrabInput
-            for molecule in molecules.molecule_map.iter() {
+            for molecule in world_info.molecule_map.iter() {
                 if molecule.atom_pattern.iter().copied().any(|atom_key| {
                     let atom = self.world.atoms.atom_map.get(atom_key).unwrap();
-                    glyphs.locs.contains_key(&atom.pos)
+                    world_info.glyph_locs.contains_key(&atom.pos)
                 }) {
                     continue;
                 }
@@ -481,28 +476,24 @@ impl GenState {
         revsteps
     }
 
-    fn maybe_spawn_arm_base(
-        &mut self,
-        arm_base: RevStepArmBase,
-        default_len: i32,
-        default_rot: Rot,
-    ) -> usize {
+    fn maybe_spawn_arm_base(&mut self, arm_base: RevStepArmBase) -> usize {
         match arm_base {
-            RevStepArmBase::New(arm_base_pos) => {
+            RevStepArmBase::New {
+                arm_pos,
+                arm_len,
+                arm_rot,
+            } => {
                 let arm_idx = self.world.arms.len();
-                self.world.arms.push(Arm::new(
-                    arm_base_pos,
-                    default_rot.raw(),
-                    default_len,
-                    ArmType::PlainArm,
-                ));
+                self.world
+                    .arms
+                    .push(Arm::new(arm_pos, arm_rot.raw(), arm_len, ArmType::PlainArm));
                 self.tapes.push(Tape {
                     first: 0,
                     instructions: Vec::new(),
                 });
                 arm_idx
             }
-            RevStepArmBase::Existing(arm_idx) => arm_idx,
+            RevStepArmBase::Existing { arm_idx } => arm_idx,
         }
     }
 
@@ -550,7 +541,7 @@ impl GenState {
         Ok(())
     }
 
-    fn try_revstep(&self, revstep: &RevStep) -> Result<Self> {
+    fn try_revstep(&self, world_info: &WorldInfo, revstep: &RevStep) -> Result<Self> {
         let mut new = self.clone();
         let mut insns_to_prepend = Vec::new();
         match revstep {
@@ -560,7 +551,7 @@ impl GenState {
                 arm_rot,
                 glyph_idx,
             } => {
-                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *arm_rot);
+                let arm_idx = new.maybe_spawn_arm_base(*arm_base);
                 new.maybe_prepend_rotate(
                     &mut insns_to_prepend,
                     arm_idx,
@@ -579,36 +570,76 @@ impl GenState {
                         pattern: atom_pattern,
                         count: output_count,
                         ..
-                    } = &self.world.glyphs[*glyph_idx].glyph_type
+                    } = &mut new.world.glyphs[*glyph_idx].glyph_type
                     {
-                        (atom_pattern, output_count)
+                        (&*atom_pattern, output_count)
                     } else {
                         panic!("DropOutput but not an output glyph")
                     }
                 };
-                for atom in atom_pattern.iter() {}
-                unimplemented!()
+                for atom in atom_pattern {
+                    new.world.atoms.create_atom(atom.clone())?;
+                }
+                *output_count = *output_count + 1;
+
+                insns_to_prepend.push((arm_idx, BasicInstr::Drop));
+                new.world.arms[arm_idx].grabbing = true;
+                let grabbed_atom_pos = new.world.arms[arm_idx].pos + arm_rot.dist_to_pos(*arm_len);
+                new.world.arms[arm_idx].atoms_grabbed[arm_rot.to_usize()] =
+                    *new.world.atoms.locs.get(&grabbed_atom_pos).unwrap();
             }
             RevStep::RotateMolecule {
                 arm_base,
-                arm_len,
                 prev_arm_rot,
             } => {
-                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *prev_arm_rot);
-                unimplemented!()
+                let arm_idx = new.maybe_spawn_arm_base(*arm_base);
+                let cur_arm_rot = self.world.arms[arm_idx].rot.normalize();
+                assert!(*prev_arm_rot != cur_arm_rot);
+                new.maybe_prepend_rotate(
+                    &mut insns_to_prepend,
+                    arm_idx,
+                    *prev_arm_rot,
+                    cur_arm_rot,
+                );
             }
-            RevStep::GrabInput { arm_idx } => {
-                unimplemented!()
+            &RevStep::GrabInput { arm_idx } => {
+                let arm = &self.world.arms[arm_idx];
+                assert!(arm.grabbing);
+                for r in Rot::step_by(arm.arm_type.angles_between_arm()) {
+                    let r = r + arm.rot.normalize();
+                    let atom_key = arm.atoms_grabbed[r.to_usize()];
+                    if atom_key.is_null() {
+                        continue;
+                    }
+                    let atom_pos = arm.pos + r.dist_to_pos(arm.len);
+                    let molecule_idx = *world_info.molecule_locs.get(&atom_pos).unwrap();
+                    let molecule = &world_info.molecule_map[molecule_idx];
+                    new.world.glyphs.push(Glyph::new(GlyphType::Input {
+                        pattern: molecule
+                            .atom_pattern
+                            .iter()
+                            .map(|&atom_key| self.world.atoms.atom_map[atom_key].clone())
+                            .collect(),
+                        id: -1,
+                    }));
+                    unimplemented!()
+                }
+                insns_to_prepend.push((arm_idx, BasicInstr::Grab));
             }
         }
+
+        // now, actually prepend the instructions
+        unimplemented!();
+
+        Ok(new)
     }
 
-    pub fn revstep(&self, rng: &mut impl Rng) -> Result<Self> {
-        let revsteps = self.all_eligible_revsteps(10.);
+    pub fn revstep(&self, world_info: &WorldInfo, rng: &mut impl Rng) -> Result<Self> {
+        let revsteps = self.all_eligible_revsteps(world_info, 10.);
         let mut distr = WeightedIndex::new(revsteps.iter().map(|(_, w)| *w))?;
         loop {
             let revstep_idx = rng.sample(&distr);
-            match self.try_revstep(&revsteps[revstep_idx].0) {
+            match self.try_revstep(world_info, &revsteps[revstep_idx].0) {
                 Ok(new_self) => break Ok(new_self),
                 Err(err) => match distr.update_weights(&[(revstep_idx, &0.)]) {
                     Ok(()) => (),

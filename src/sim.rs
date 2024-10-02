@@ -1113,7 +1113,8 @@ impl WorldAtoms {
         }
         atom
     }
-    fn create_atom(&mut self, atom: Atom) -> SimResult<AtomKey> {
+
+    pub fn create_atom(&mut self, atom: Atom) -> SimResult<AtomKey> {
         let key = self.atom_map.insert(atom);
         let atom_ref = &self.atom_map[key];
         let output = self.locs.insert(atom_ref.pos, key);
