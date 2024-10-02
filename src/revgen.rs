@@ -193,7 +193,6 @@ enum RevStepArmBase {
 /// glyphs to match the new final state.
 /// TODO: this in't implemented yet.
 enum RevStep {
-    /// DropOutput(arm_base, arm_len, rot)
     /// Required current state:
     /// - new arm_base is empty, or existing arm_base is not grabbing
     /// - all output positions are empty
@@ -204,24 +203,31 @@ enum RevStep {
     /// - spawn a molecule at the given output
     /// - add to tape: drop
     /// - set prev arm state to grabbed
-    DropOutput(RevStepArmBase, i32, Rot),
-    /// RotateMolecule(arm_base, arm_len, prev_rot)
+    DropOutput {
+        arm_base: RevStepArmBase,
+        arm_len: i32,
+        arm_rot: Rot,
+        glyph_idx: usize,
+    },
     /// Reverse action:
     /// - rotate arm to prev_rot via shortest sequence
     /// Eligible arms:
     /// - current arm can reach an atom if it were at the given
     ///   orientation (or doesn't exist)
-    RotateMolecule(RevStepArmBase, i32, Rot),
+    RotateMolecule {
+        arm_base: RevStepArmBase,
+        arm_len: i32,
+        prev_arm_rot: Rot,
+    },
     //PivotMolecule(Pos, usize, Rot, Rot),
     //Piston(Pos, usize, usize),
     //TrackMolecule(Pos, Pos),
-    /// GrabInput(arm_idx)
     /// Reverse action:
     /// - spawn an input glyph
     /// - add to tape: grab
     /// Notes:
     /// - the input glyph _may_ have, but not
-    GrabInput(usize),
+    GrabInput { arm_idx: usize },
 }
 
 struct MoleculeInfoMolecule {
@@ -322,12 +328,13 @@ impl GenState {
         }
     }
 
-    fn outputs(&self) -> impl Iterator<Item = (&AtomPattern, i32)> {
+    fn outputs(&self) -> impl Iterator<Item = (usize, &AtomPattern, i32)> {
         self.world
             .glyphs
             .iter()
-            .filter_map(|glyph| match &glyph.glyph_type {
-                GlyphType::Output(pattern, count, _) => Some((pattern, *count)),
+            .enumerate()
+            .filter_map(|(glyph_idx, glyph)| match &glyph.glyph_type {
+                GlyphType::Output(pattern, count, _) => Some((glyph_idx, pattern, *count)),
                 _ => None,
             })
     }
@@ -353,7 +360,7 @@ impl GenState {
             // DropOutput
             let mut existing_arm = Vec::new();
             let mut new_arm = Vec::new();
-            for (pattern, output_count) in self.outputs() {
+            for (glyph_idx, pattern, output_count) in self.outputs() {
                 // current timestamp: output must have been output at least once
                 // (we're going to decrease this count when revstepping)
                 if output_count > 0 {
@@ -379,17 +386,19 @@ impl GenState {
                                 if self.world.arms[arm_idx].grabbing {
                                     continue;
                                 }
-                                existing_arm.push(RevStep::DropOutput(
-                                    RevStepArmBase::Existing(arm_idx),
+                                existing_arm.push(RevStep::DropOutput {
+                                    arm_base: RevStepArmBase::Existing(arm_idx),
                                     arm_len,
                                     arm_rot,
-                                ));
+                                    glyph_idx,
+                                });
                             } else {
-                                new_arm.push(RevStep::DropOutput(
-                                    RevStepArmBase::New(arm_pos),
+                                new_arm.push(RevStep::DropOutput {
+                                    arm_base: RevStepArmBase::New(arm_pos),
                                     arm_len,
                                     arm_rot,
-                                ));
+                                    glyph_idx,
+                                });
                             }
                         }
                     }
@@ -421,17 +430,17 @@ impl GenState {
                                     if self.world.arms[arm_idx].grabbing {
                                         continue;
                                     }
-                                    existing_arm.push(RevStep::RotateMolecule(
-                                        RevStepArmBase::Existing(arm_idx),
+                                    existing_arm.push(RevStep::RotateMolecule {
+                                        arm_base: RevStepArmBase::Existing(arm_idx),
                                         arm_len,
                                         prev_arm_rot,
-                                    ));
+                                    });
                                 } else {
-                                    new_arm.push(RevStep::RotateMolecule(
-                                        RevStepArmBase::New(arm_pos),
+                                    new_arm.push(RevStep::RotateMolecule {
+                                        arm_base: RevStepArmBase::New(arm_pos),
                                         arm_len,
                                         prev_arm_rot,
-                                    ));
+                                    });
                                 }
                             }
                         }
@@ -458,7 +467,7 @@ impl GenState {
                 }
                 let arm_idx = *molecule.grabbed_by.first().unwrap();
 
-                revsteps.push((RevStep::GrabInput(arm_idx), input_weight))
+                revsteps.push((RevStep::GrabInput { arm_idx }, input_weight))
             }
         }
 
@@ -538,7 +547,12 @@ impl GenState {
         let mut new = self.clone();
         let mut insns_to_prepend = Vec::new();
         match revstep {
-            RevStep::DropOutput(arm_base, arm_len, arm_rot) => {
+            RevStep::DropOutput {
+                arm_base,
+                arm_len,
+                arm_rot,
+                glyph_idx,
+            } => {
                 let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *arm_rot);
                 new.maybe_prepend_rotate(
                     &mut insns_to_prepend,
@@ -552,13 +566,28 @@ impl GenState {
                     *arm_len,
                     self.world.arms[arm_idx].len,
                 )?;
+
+                let (atom_pattern, output_count) = {
+                    if let GlyphType::Output(atom_pattern, output_count, _) =
+                        &self.world.glyphs[*glyph_idx].glyph_type
+                    {
+                        (atom_pattern, output_count)
+                    } else {
+                        panic!("DropOutput but not an output glyph")
+                    }
+                };
+                for atom in atom_pattern.iter() {}
                 unimplemented!()
             }
-            RevStep::RotateMolecule(arm_base, arm_len, arm_rot) => {
-                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *arm_rot);
+            RevStep::RotateMolecule {
+                arm_base,
+                arm_len,
+                prev_arm_rot,
+            } => {
+                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *prev_arm_rot);
                 unimplemented!()
             }
-            RevStep::GrabInput(arm_idx) => {
+            RevStep::GrabInput { arm_idx } => {
                 unimplemented!()
             }
         }
