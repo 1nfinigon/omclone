@@ -2,7 +2,7 @@ use crate::parser::*;
 use crate::sim::*;
 
 use indexmap::IndexSet;
-use rand::distributions::{WeightedIndex, WeightedError};
+use rand::distributions::{WeightedError, WeightedIndex};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use slotmap::Key;
 use slotmap::SecondaryMap;
@@ -145,11 +145,13 @@ struct GenStateOutput {
     output_count: i32,
 }
 
+#[derive(Clone, Debug)]
 struct GenState {
     world: World,
     tapes: Vec<Tape<BasicInstr>>,
 }
 
+#[derive(Copy, Clone)]
 enum RevStepArmBase {
     /// New(arm_pos)
     New(Pos),
@@ -175,10 +177,21 @@ enum RevStepArmBase {
 ///     -   repeatedly selects a random valid `RevStep` and attempts to `apply` it
 ///     -   potentially selects multiple independent `RevStep`s to execute in
 ///         parallel, if they involve distinct atoms and arms
-///     -   resolves any conflicts (collisions) that arise, by inserting pause
+///     -   resolves any errors (collisions) that arise, by inserting pause
 ///         frames or selecting a new parallel `RevStep` to affect the auxiliary
 ///         molecule in question
 /// TODO: parallelization and scheduling of RevSteps doesn't exist yet
+///
+/// Sometimes, after `apply` applies a `RevStep` successfully to generate a
+/// `GenState`, applying the same tape instructions from this new `GenState` to
+/// the end will cause a different final outcome. (For example, if the `RevStep`
+/// placed a glyph in a position which is passed over later in the tape.) Let's
+/// call this "collateral damage". If the simulation is able to continue to the
+/// end of the tape without errors, AND if each "drop" tape instruction that
+/// stemmed from a `RevStep::DropOutput` drops a molecule that is not over any
+/// other glyphs, then we'll just roll with it -- we'll just amend the output
+/// glyphs to match the new final state.
+/// TODO: this in't implemented yet.
 enum RevStep {
     /// DropOutput(arm_base, arm_len, rot)
     /// Required current state:
@@ -191,14 +204,14 @@ enum RevStep {
     /// - spawn a molecule at the given output
     /// - add to tape: drop
     /// - set prev arm state to grabbed
-    DropOutput(RevStepArmBase, usize, Rot),
+    DropOutput(RevStepArmBase, i32, Rot),
     /// RotateMolecule(arm_base, arm_len, prev_rot)
     /// Reverse action:
     /// - rotate arm to prev_rot via shortest sequence
     /// Eligible arms:
     /// - current arm can reach an atom if it were at the given
     ///   orientation (or doesn't exist)
-    RotateMolecule(RevStepArmBase, usize, Rot),
+    RotateMolecule(RevStepArmBase, i32, Rot),
     //PivotMolecule(Pos, usize, Rot, Rot),
     //Piston(Pos, usize, usize),
     //TrackMolecule(Pos, Pos),
@@ -239,7 +252,12 @@ impl MoleculeInfo {
                 if atom_key.is_null() {
                     continue;
                 }
-                self_.grab_map.entry(atom_key).unwrap().or_default().push(arm_idx);
+                self_
+                    .grab_map
+                    .entry(atom_key)
+                    .unwrap()
+                    .or_default()
+                    .push(arm_idx);
             }
         }
         for atom_pattern in atoms.iter_molecules() {
@@ -253,7 +271,10 @@ impl MoleculeInfo {
                     grabbed_by.extend(arm_idxs);
                 }
             }
-            self_.molecule_map.push(MoleculeInfoMolecule { atom_pattern, grabbed_by });
+            self_.molecule_map.push(MoleculeInfoMolecule {
+                atom_pattern,
+                grabbed_by,
+            });
         }
         self_
     }
@@ -360,13 +381,13 @@ impl GenState {
                                 }
                                 existing_arm.push(RevStep::DropOutput(
                                     RevStepArmBase::Existing(arm_idx),
-                                    arm_len as usize,
+                                    arm_len,
                                     arm_rot,
                                 ));
                             } else {
                                 new_arm.push(RevStep::DropOutput(
                                     RevStepArmBase::New(arm_pos),
-                                    arm_len as usize,
+                                    arm_len,
                                     arm_rot,
                                 ));
                             }
@@ -402,13 +423,13 @@ impl GenState {
                                     }
                                     existing_arm.push(RevStep::RotateMolecule(
                                         RevStepArmBase::Existing(arm_idx),
-                                        arm_len as usize,
+                                        arm_len,
                                         prev_arm_rot,
                                     ));
                                 } else {
                                     new_arm.push(RevStep::RotateMolecule(
                                         RevStepArmBase::New(arm_pos),
-                                        arm_len as usize,
+                                        arm_len,
                                         prev_arm_rot,
                                     ));
                                 }
@@ -444,8 +465,103 @@ impl GenState {
         revsteps
     }
 
+    fn maybe_spawn_arm_base(
+        &mut self,
+        arm_base: RevStepArmBase,
+        default_len: i32,
+        default_rot: Rot,
+    ) -> usize {
+        match arm_base {
+            RevStepArmBase::New(arm_base_pos) => {
+                let arm_idx = self.world.arms.len();
+                self.world.arms.push(Arm::new(
+                    arm_base_pos,
+                    default_rot.raw(),
+                    default_len,
+                    ArmType::PlainArm,
+                ));
+                self.tapes.push(Tape {
+                    first: 0,
+                    instructions: Vec::new(),
+                });
+                arm_idx
+            }
+            RevStepArmBase::Existing(arm_idx) => arm_idx,
+        }
+    }
+
+    fn maybe_prepend_rotate(
+        &mut self,
+        insns_to_prepend: &mut Vec<(usize, BasicInstr)>,
+        arm_idx: usize,
+        prev_arm_rot: Rot,
+        cur_arm_rot: Rot,
+    ) {
+        let delta_rot = (cur_arm_rot - prev_arm_rot).to_i32_minabs();
+        let rot_instruction = if delta_rot >= 0 {
+            BasicInstr::RotateCounterClockwise
+        } else {
+            BasicInstr::RotateClockwise
+        };
+        insns_to_prepend
+            .extend(std::iter::repeat((arm_idx, rot_instruction)).take(delta_rot.abs() as usize));
+    }
+
+    fn maybe_prepend_extend(
+        &mut self,
+        insns_to_prepend: &mut Vec<(usize, BasicInstr)>,
+        arm_idx: usize,
+        prev_arm_len: i32,
+        cur_arm_len: i32,
+    ) -> Result<()> {
+        let delta_len = cur_arm_len - prev_arm_len;
+        if delta_len == 0 {
+            return Ok(());
+        }
+        let extend_instruction = if delta_len >= 0 {
+            BasicInstr::Extend
+        } else {
+            BasicInstr::Retract
+        };
+        match &mut self.world.arms[arm_idx].arm_type {
+            arm_type @ ArmType::PlainArm => *arm_type = ArmType::Piston,
+            ArmType::Piston => (),
+            arm_type => return Err(eyre!("can't extend/retract this arm type: {:?}", arm_type)),
+        }
+        insns_to_prepend.extend(
+            std::iter::repeat((arm_idx, extend_instruction)).take(delta_len.abs() as usize),
+        );
+        Ok(())
+    }
+
     fn try_revstep(&self, revstep: &RevStep) -> Result<Self> {
-        unimplemented!()
+        let mut new = self.clone();
+        let mut insns_to_prepend = Vec::new();
+        match revstep {
+            RevStep::DropOutput(arm_base, arm_len, arm_rot) => {
+                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *arm_rot);
+                new.maybe_prepend_rotate(
+                    &mut insns_to_prepend,
+                    arm_idx,
+                    *arm_rot,
+                    self.world.arms[arm_idx].rot.normalize(),
+                );
+                new.maybe_prepend_extend(
+                    &mut insns_to_prepend,
+                    arm_idx,
+                    *arm_len,
+                    self.world.arms[arm_idx].len,
+                )?;
+                unimplemented!()
+            }
+            RevStep::RotateMolecule(arm_base, arm_len, arm_rot) => {
+                let arm_idx = new.maybe_spawn_arm_base(*arm_base, *arm_len, *arm_rot);
+                unimplemented!()
+            }
+            RevStep::GrabInput(arm_idx) => {
+                unimplemented!()
+            }
+        }
     }
 
     pub fn revstep(&self, rng: &mut impl Rng) -> Result<Self> {
@@ -455,14 +571,12 @@ impl GenState {
             let revstep_idx = rng.sample(&distr);
             match self.try_revstep(&revsteps[revstep_idx].0) {
                 Ok(new_self) => break Ok(new_self),
-                Err(err) => {
-                    match distr.update_weights(&[(revstep_idx, &0.)]) {
-                        Ok(()) => (),
-                        Err(WeightedError::AllWeightsZero) => {
-                            break Err(eyre!("none of the eligible revsteps worked"))
-                        },
-                        Err(err) => break Err(err.into()),
+                Err(err) => match distr.update_weights(&[(revstep_idx, &0.)]) {
+                    Ok(()) => (),
+                    Err(WeightedError::AllWeightsZero) => {
+                        break Err(eyre!("none of the eligible revsteps worked"))
                     }
+                    Err(err) => break Err(err.into()),
                 },
             }
             unimplemented!()
