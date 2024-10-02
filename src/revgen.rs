@@ -622,14 +622,33 @@ impl GenState {
                             .collect(),
                         id: -1,
                     }));
-                    unimplemented!()
                 }
                 insns_to_prepend.push((arm_idx, BasicInstr::Grab));
             }
         }
 
         // now, actually prepend the instructions
-        unimplemented!();
+        let mut insns_to_prepend_by_arm_idx = vec![Vec::new(); new.world.arms.len()];
+        for (arm_idx, insn) in insns_to_prepend {
+            insns_to_prepend_by_arm_idx[arm_idx].push(insn);
+        }
+        let n_insns_to_prepend = insns_to_prepend_by_arm_idx
+            .iter()
+            .map(|insns| insns.len())
+            .max()
+            .unwrap();
+        for arm_idx in 0..new.world.arms.len() {
+            let insns = &mut new.tapes[arm_idx].instructions;
+            insns.resize(insns.len() + n_insns_to_prepend, BasicInstr::Empty);
+            insns.rotate_right(n_insns_to_prepend);
+            for (i, insn) in insns_to_prepend_by_arm_idx[arm_idx]
+                .iter()
+                .copied()
+                .enumerate()
+            {
+                insns[i] = insn;
+            }
+        }
 
         Ok(new)
     }
@@ -640,7 +659,12 @@ impl GenState {
         loop {
             let revstep_idx = rng.sample(&distr);
             match self.try_revstep(world_info, &revsteps[revstep_idx].0) {
-                Ok(new_self) => break Ok(new_self),
+                Ok(new_self) => {
+                    // validate that this new_self works
+                    unimplemented!();
+
+                    break Ok(new_self);
+                }
                 Err(err) => match distr.update_weights(&[(revstep_idx, &0.)]) {
                     Ok(()) => (),
                     Err(WeightedError::AllWeightsZero) => {
@@ -649,7 +673,6 @@ impl GenState {
                     Err(err) => break Err(err.into()),
                 },
             }
-            unimplemented!()
         }
     }
 }
