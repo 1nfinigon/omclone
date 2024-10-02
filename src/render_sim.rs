@@ -480,7 +480,9 @@ impl RenderDataBase {
             use GlyphType::*;
             temp_atoms_vec.clear();
             match &glyph.glyph_type {
-                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+                Input { pattern, .. }
+                | Output { pattern, .. }
+                | OutputRepeating { pattern, .. } => {
                     for atom in pattern {
                         temp_atoms_vec.push(atom.into());
                     }
@@ -537,7 +539,9 @@ impl RenderDataBase {
                 TriplexBond => 10,
                 Unbonding => 11,
                 Unification => 12,
-                Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+                Input { pattern, .. }
+                | Output { pattern, .. }
+                | OutputRepeating { pattern, .. } => {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for atom in pattern {
                         //transparent cover
@@ -552,7 +556,7 @@ impl RenderDataBase {
                     }
                     continue;
                 }
-                Conduit(pos_vec, _) => {
+                Conduit { locs: pos_vec, .. } => {
                     ctx.apply_bindings(&self.shapes.texture_bindings[14]);
                     for p in pos_vec {
                         let offset = pos_to_xy(p);
@@ -566,7 +570,7 @@ impl RenderDataBase {
                     }
                     continue;
                 }
-                Track(_) => continue,
+                Track { .. } => continue,
             };
             ctx.apply_bindings(&self.shapes.texture_bindings[i]);
             ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
@@ -580,7 +584,7 @@ impl RenderDataBase {
         //Draw conduit numbers
         self.font.set_pipeline(ctx);
         for glyph in world.glyphs.iter() {
-            if let GlyphType::Conduit(_, id) = glyph.glyph_type {
+            if let GlyphType::Conduit { id, .. } = glyph.glyph_type {
                 let offset = pos_to_xy(&glyph.pos);
                 let string = id.to_string();
                 self.font

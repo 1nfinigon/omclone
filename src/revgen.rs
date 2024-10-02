@@ -316,7 +316,14 @@ impl GenState {
                     .into_iter()
                     .enumerate()
                     .map(|(i, (pattern, count))| {
-                        Glyph::new(GlyphType::Output(pattern, count, i as i32))
+                        Glyph::new(GlyphType::Output {
+                            pattern,
+                            count,
+                            id: {
+                                unimplemented!();
+                                i as i32
+                            },
+                        })
                     })
                     .collect(),
                 arms: Vec::new(),
@@ -334,7 +341,7 @@ impl GenState {
             .iter()
             .enumerate()
             .filter_map(|(glyph_idx, glyph)| match &glyph.glyph_type {
-                GlyphType::Output(pattern, count, _) => Some((glyph_idx, pattern, *count)),
+                GlyphType::Output { pattern, count, .. } => Some((glyph_idx, pattern, *count)),
                 _ => None,
             })
     }
@@ -568,8 +575,11 @@ impl GenState {
                 )?;
 
                 let (atom_pattern, output_count) = {
-                    if let GlyphType::Output(atom_pattern, output_count, _) =
-                        &self.world.glyphs[*glyph_idx].glyph_type
+                    if let GlyphType::Output {
+                        pattern: atom_pattern,
+                        count: output_count,
+                        ..
+                    } = &self.world.glyphs[*glyph_idx].glyph_type
                     {
                         (atom_pattern, output_count)
                     } else {

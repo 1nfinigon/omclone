@@ -576,7 +576,7 @@ pub mod features {
                                 }
                             }
                             GlyphType::Equilibrium => (),
-                            GlyphType::Track(pos_list) => {
+                            GlyphType::Track { locs: pos_list } => {
                                 assert!(pos_list[i] == *position);
                                 if i >= 1 {
                                     let other_pos = positions[i - 1];
@@ -591,8 +591,8 @@ pub mod features {
                                         .set(track_plus_dir.get_onehot_offset(rot.to_usize()), 1.);
                                 }
                             }
-                            GlyphType::Conduit(_, _) => unimplemented!(),
-                            GlyphType::Input(pattern, _id) => {
+                            GlyphType::Conduit { .. } => unimplemented!(),
+                            GlyphType::Input { pattern, .. } => {
                                 assert!(pattern[i].pos == *position);
                                 Self::set_atom(
                                     &pattern[i],
@@ -602,7 +602,11 @@ pub mod features {
                                     None,
                                 );
                             }
-                            GlyphType::Output(pattern, count_left, _id) => {
+                            GlyphType::Output {
+                                pattern,
+                                count: count_left,
+                                ..
+                            } => {
                                 assert!(pattern[i].pos == *position);
                                 Self::set_atom(
                                     &pattern[i],
@@ -620,7 +624,7 @@ pub mod features {
                                     );
                                 }
                             }
-                            GlyphType::OutputRepeating(_, _, _) => unimplemented!(),
+                            GlyphType::OutputRepeating { .. } => unimplemented!(),
                         };
                     }
                 }

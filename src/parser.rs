@@ -360,7 +360,7 @@ pub fn create_solution(
         let instructions = Vec::new();
         //Clone and return points to relative position (absolute position done in puzzle_prep)
         let (part_type, input_output_index, tracks, conduit) = match &glyph.glyph_type {
-            GlyphType::Track(track) => (
+            GlyphType::Track { locs: track } => (
                 PartType::Track,
                 0,
                 Some(
@@ -371,10 +371,10 @@ pub fn create_solution(
                 ),
                 None,
             ),
-            GlyphType::Input(_, id) => (PartType::Input, *id, None, None),
-            GlyphType::Output(_, _, id) => (PartType::Output, *id, None, None),
-            GlyphType::OutputRepeating(_, _, id) => (PartType::OutputRep, *id, None, None),
-            GlyphType::Conduit(conduit, id) => (
+            GlyphType::Input { id, .. } => (PartType::Input, *id, None, None),
+            GlyphType::Output { id, .. } => (PartType::Output, *id, None, None),
+            GlyphType::OutputRepeating { id, .. } => (PartType::OutputRep, *id, None, None),
+            GlyphType::Conduit { locs: conduit, id } => (
                 PartType::Conduit,
                 *id,
                 None,
@@ -717,7 +717,10 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     id,
                     puzzle.inputs.len()
                 ))?;
-                let input_glyph = GlyphType::Input(pattern.clone(), p.input_output_index);
+                let input_glyph = GlyphType::Input {
+                    pattern: pattern.clone(),
+                    id: p.input_output_index,
+                };
                 let mut glyph = Glyph::new(input_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
@@ -730,11 +733,11 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     id,
                     puzzle.outputs.len()
                 ))?;
-                let output_glyph = GlyphType::Output(
-                    pattern.clone(),
-                    6 * puzzle.output_multiplier,
-                    p.input_output_index,
-                );
+                let output_glyph = GlyphType::Output {
+                    pattern: pattern.clone(),
+                    count: 6 * puzzle.output_multiplier,
+                    id: p.input_output_index,
+                };
                 let mut glyph = Glyph::new(output_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
@@ -748,11 +751,11 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     puzzle.outputs.len()
                 ))?;
                 let pattern = process_repeats(pattern, 6)?;
-                let output_glyph = GlyphType::OutputRepeating(
+                let output_glyph = GlyphType::OutputRepeating {
                     pattern,
-                    6 * puzzle.output_multiplier,
-                    p.input_output_index,
-                );
+                    count: 6 * puzzle.output_multiplier,
+                    id: p.input_output_index,
+                };
                 let mut glyph = Glyph::new(output_glyph);
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
@@ -763,7 +766,7 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     .tracks
                     .clone()
                     .ok_or(eyre!("Track data not found on track glyph"))?;
-                let mut glyph = Glyph::new(GlyphType::Track(track_locs));
+                let mut glyph = Glyph::new(GlyphType::Track { locs: track_locs });
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);
@@ -773,7 +776,10 @@ pub fn puzzle_prep(puzzle: &FullPuzzle, soln: &FullSolution) -> Result<InitialWo
                     .conduit
                     .clone()
                     .ok_or(eyre!("Conduit data not found on conduit glyph"))?;
-                let mut glyph = Glyph::new(GlyphType::Conduit(conduit_locs, conduit_id));
+                let mut glyph = Glyph::new(GlyphType::Conduit {
+                    locs: conduit_locs,
+                    id: conduit_id,
+                });
                 glyph.rot_by(p.rot);
                 glyph.move_by(p.pos);
                 glyphs.push(glyph);

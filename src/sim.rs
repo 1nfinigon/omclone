@@ -663,11 +663,27 @@ pub enum GlyphType {
     MultiBond,
     Disposal,
     Equilibrium,
-    Track(Vec<Pos>),
-    Conduit(Vec<Pos>, ConduitId),
-    Input(AtomPattern, InOutId),
-    Output(AtomPattern, i32, InOutId),
-    OutputRepeating(AtomPattern, i32, InOutId),
+    Track {
+        locs: Vec<Pos>,
+    },
+    Conduit {
+        locs: Vec<Pos>,
+        id: ConduitId,
+    },
+    Input {
+        pattern: AtomPattern,
+        id: InOutId,
+    },
+    Output {
+        pattern: AtomPattern,
+        count: i32,
+        id: InOutId,
+    },
+    OutputRepeating {
+        pattern: AtomPattern,
+        count: i32,
+        id: InOutId,
+    },
 }
 
 impl GlyphType {
@@ -677,12 +693,12 @@ impl GlyphType {
             Calcification | Animismus | Projection | Dispersion | Purification | Duplication
             | Unification | Bonding | Unbonding | TriplexBond | MultiBond | Disposal
             | Equilibrium => (),
-            Track(locs) | Conduit(locs, _) => {
+            Track { locs } | Conduit { locs, .. } => {
                 for a in locs {
                     *a += pos;
                 }
             }
-            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+            Input { pattern, .. } | Output { pattern, .. } | OutputRepeating { pattern, .. } => {
                 for a in pattern {
                     a.pos += pos;
                 }
@@ -695,12 +711,12 @@ impl GlyphType {
             Calcification | Animismus | Projection | Dispersion | Purification | Duplication
             | Unification | Bonding | Unbonding | TriplexBond | MultiBond | Disposal
             | Equilibrium => (),
-            Track(locs) | Conduit(locs, _) => {
+            Track { locs } | Conduit { locs, .. } => {
                 for a in locs {
                     *a = rotate(*a, rot.normalize());
                 }
             }
-            Input(pattern, _) | Output(pattern, _, _) | OutputRepeating(pattern, _, _) => {
+            Input { pattern, .. } | Output { pattern, .. } | OutputRepeating { pattern, .. } => {
                 for a in pattern {
                     a.pos = rotate(a.pos, rot.normalize());
                     a.rotate_connections(rot.normalize());
@@ -842,14 +858,17 @@ impl Glyph {
             GlyphType::MultiBond => smallvec::smallvec![pos, pos_bi, pos_multi2, pos_multi3],
             GlyphType::TriplexBond => smallvec::smallvec![pos, pos_bi, pos_tri],
             GlyphType::Unbonding => smallvec::smallvec![pos, pos_bi],
-            GlyphType::Input(pattern, _)
-            | GlyphType::Output(pattern, _, _)
-            | GlyphType::OutputRepeating(pattern, _, _) => pattern.iter().map(|a| a.pos).collect(),
-            GlyphType::Track(pos_list) => pos_list.iter().copied().collect(),
+            GlyphType::Input { pattern, .. }
+            | GlyphType::Output { pattern, .. }
+            | GlyphType::OutputRepeating { pattern, .. } => pattern.iter().map(|a| a.pos).collect(),
+            GlyphType::Track { locs: pos_list } => pos_list.iter().copied().collect(),
             GlyphType::Disposal => {
                 smallvec::smallvec![pos, pos_bi, pos_tri, pos_ani, pos_disp3, pos_disp4, pos_unif2,]
             }
-            GlyphType::Conduit(_atom_teleport, _) => smallvec::smallvec![
+            GlyphType::Conduit {
+                locs: _atom_teleport,
+                ..
+            } => smallvec::smallvec![
                 //TODO
             ],
             GlyphType::Equilibrium => smallvec::smallvec![pos],
@@ -1617,7 +1636,7 @@ impl World {
         use GlyphType::*;
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
-            if let Input(pattern, _) = &mut glyph.glyph_type {
+            if let Input { pattern, .. } = &mut glyph.glyph_type {
                 if pattern.iter().all(|a| atoms.check_empty(motion, a.pos)) {
                     for a in pattern {
                         atoms.create_atom(a.clone())?;
@@ -1633,7 +1652,11 @@ impl World {
         for glyph in self.glyphs.iter_mut() {
             let atoms = &mut self.atoms;
             match &mut glyph.glyph_type {
-                Output(pattern, output_count, _) => {
+                Output {
+                    pattern,
+                    count: output_count,
+                    ..
+                } => {
                     let full_match = pattern.iter().all(|a| -> bool {
                         let try_key = atoms.locs.get(&a.pos);
                         if let Some(&atom_key) = try_key {
@@ -1651,7 +1674,11 @@ impl World {
                         }
                     }
                 }
-                OutputRepeating(pattern, output_count, _) => {
+                OutputRepeating {
+                    pattern,
+                    count: output_count,
+                    ..
+                } => {
                     let full_match = pattern.iter().all(|a| -> bool {
                         let try_key = atoms.locs.get(&a.pos);
                         if let Some(&atom_key) = try_key {
@@ -1914,7 +1941,10 @@ impl World {
                         atoms.destroy_atom_at(pos);
                     }
                 }
-                Conduit(atom_teleport, conduit_id) => {
+                Conduit {
+                    locs: atom_teleport,
+                    id: conduit_id,
+                } => {
                     if first_half {
                         let conduit_info = self
                             .conduit_pairs
@@ -1935,7 +1965,11 @@ impl World {
                         }
                     }
                 }
-                Equilibrium | Track(_) | Input(..) | Output(..) | OutputRepeating(..) => {}
+                Equilibrium
+                | Track { .. }
+                | Input { .. }
+                | Output { .. }
+                | OutputRepeating { .. } => {}
             }
         }
         if !first_half {
@@ -2224,9 +2258,9 @@ impl World {
     pub fn is_complete(&self) -> bool {
         let mut all_outputs_full = true;
         for g in &self.glyphs {
-            if let GlyphType::Output(_, i, _) = g.glyph_type {
-                all_outputs_full &= i == 0;
-            } else if let GlyphType::OutputRepeating(_, i, _) = g.glyph_type {
+            if let GlyphType::Output { count: i, .. }
+            | GlyphType::OutputRepeating { count: i, .. } = g.glyph_type
+            {
                 all_outputs_full &= i == 0;
             }
         }
@@ -2290,13 +2324,13 @@ impl World {
                 MultiBond => 30,
                 Disposal
                 | Equilibrium
-                | Output(_, _, _)
-                | OutputRepeating(_, _, _)
-                | Input(_, _)
-                | Conduit(_, _) => 0,
-                Track(v) => (v.len() as i32) * 5,
+                | Output { .. }
+                | OutputRepeating { .. }
+                | Input { .. }
+                | Conduit { .. } => 0,
+                Track { locs: v } => (v.len() as i32) * 5,
             };
-            if let Track(track_data) = &g.glyph_type {
+            if let Track { locs: track_data } = &g.glyph_type {
                 World::add_track(&mut world.track_maps, track_data)?;
             }
         }
@@ -2327,7 +2361,7 @@ impl World {
 
         let mut unfinished_conduit_count = 0;
         for (id, glyph) in world.glyphs.iter_mut().enumerate() {
-            if let GlyphType::Input(pattern, _) = &mut glyph.glyph_type {
+            if let GlyphType::Input { pattern, .. } = &mut glyph.glyph_type {
                 if pattern
                     .iter()
                     .all(|a| !world.atoms.locs.contains_key(&a.pos))
@@ -2337,7 +2371,7 @@ impl World {
                     }
                 }
             }
-            if let GlyphType::Conduit(_pos, conduit_id) = &glyph.glyph_type {
+            if let GlyphType::Conduit { id: conduit_id, .. } = &glyph.glyph_type {
                 if let Some(pair_data) = world.conduit_pairs.get_mut(conduit_id) {
                     ensure!(
                         pair_data.vecids.0 == pair_data.vecids.1,
