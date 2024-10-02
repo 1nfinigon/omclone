@@ -2612,5 +2612,9 @@ mod tests {
         let frp = pos_to_xy(rp);
         let rfp = nalgebra::Rotation2::new(rot_to_angle(r.raw())) * fp;
         assert!(nalgebra::distance(&frp, &rfp) < 1e-6);
+
+        for r in Rot::ALL {
+            assert_eq!(r.to_pos(), -(r.opp().to_pos()));
+        }
     }
 }
