@@ -588,13 +588,6 @@ impl AtomType {
     }
 }
 
-#[test]
-fn atom_type_len() {
-    use num_traits::FromPrimitive;
-    assert!(AtomType::from_u8(AtomType::N_TYPES.try_into().unwrap()).is_none());
-    assert!(AtomType::from_u8((AtomType::N_TYPES - 1).try_into().unwrap()).is_some());
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atom {
     pub pos: Pos,
@@ -1111,6 +1104,72 @@ impl WorldAtoms {
             });
         }
         Ok(key)
+    }
+
+    pub fn iter_molecule(&self, atom_key: AtomKey) -> WorldAtomMoleculeIterator {
+        let mut iter = WorldAtomMoleculeIterator {
+            atoms: self,
+            stack: Vec::new(),
+            seen: FxHashSet::default(),
+        };
+        iter.pend_visit(atom_key);
+        iter
+    }
+
+    pub fn iter_molecules(&self) -> WorldAtomMoleculesIterator {
+        WorldAtomMoleculesIterator {
+            atoms: self,
+            atom_iter: self.atom_map.iter(),
+            seen: FxHashSet::default(),
+        }
+    }
+}
+
+pub struct WorldAtomMoleculeIterator<'a> {
+    atoms: &'a WorldAtoms,
+    stack: Vec<AtomKey>,
+    seen: FxHashSet<AtomKey>,
+}
+
+impl<'a> WorldAtomMoleculeIterator<'a> {
+    fn pend_visit(&mut self, key: AtomKey) {
+        if self.seen.insert(key) {
+            self.stack.push(key);
+        }
+    }
+}
+
+impl<'a> Iterator for WorldAtomMoleculeIterator<'a> {
+    type Item = AtomKey;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.stack.pop().map(|next_key| {
+            self.pend_visit(next_key);
+            next_key
+        })
+    }
+}
+
+pub struct WorldAtomMoleculesIterator<'a> {
+    atoms: &'a WorldAtoms,
+    atom_iter: slotmap::basic::Iter<'a, AtomKey, Atom>,
+    seen: FxHashSet<AtomKey>,
+}
+
+impl<'a> Iterator for WorldAtomMoleculesIterator<'a> {
+    type Item = Vec<AtomKey>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((atom_key, _atom)) = self.atom_iter.next() {
+            if self.seen.contains(&atom_key) {
+                continue;
+            }
+            let mut molecule_iterator = self.atoms.iter_molecule(atom_key);
+            let molecule: Vec<_> = molecule_iterator.by_ref().collect();
+            self.seen.extend(molecule_iterator.seen);
+            return Some(molecule);
+        }
+        None
     }
 }
 

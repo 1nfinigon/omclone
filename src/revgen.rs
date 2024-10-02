@@ -183,45 +183,28 @@ enum RevStep {
     GrabInput(Pos, usize, Rot, Pos),
 }
 
-new_key_type! { pub struct MoleculeKey; }
-
 struct MoleculeInfo {
-    molecule_map: SlotMap<MoleculeKey, Vec<AtomKey>>,
-    locs: FxHashMap<Pos, MoleculeKey>,
+    molecule_map: Vec<Vec<AtomKey>>,
+    /// Map from position to molecule_map_key
+    locs: FxHashMap<Pos, usize>,
 }
 
 impl MoleculeInfo {
     fn new(atoms: &WorldAtoms) -> Self {
-        let dense_atoms: Vec<_> = atoms.atom_map.iter().collect();
-        let key_to_dense_idx: SecondaryMap<AtomKey, usize> =
-            dense_atoms.iter().enumerate().map(|(dense_idx, (atom_key, _atom))| (*atom_key, dense_idx)).collect();
-        let mut disjoint_sets = QuickUnionUf::<UnionBySize>::new(dense_atoms.len());
-        for (dense_idx, (_atom_key, atom)) in dense_atoms.iter().copied().enumerate() {
-            for r in Rot::ALL {
-                if atom.connections[r.to_usize()].intersects(Bonds::DYNAMIC_BOND) {
-                    let other_pos = atom.pos + r.to_pos();
-                    let other_key = atoms
-                        .locs
-                        .get(&other_pos)
-                        .expect("Inconsistent atoms");
-                    let other_dense_idx = key_to_dense_idx[*other_key];
-                    disjoint_sets.union(dense_idx, other_dense_idx);
-                }
+        let mut self_ = MoleculeInfo {
+            molecule_map: Vec::new(),
+            locs: FxHashMap::default(),
+        };
+        for molecule in atoms.iter_molecules() {
+            let molecule_key = self_.molecule_map.len();
+            for atom_key in molecule.iter().copied() {
+                let atom = atoms.atom_map.get(atom_key).unwrap();
+                let old_value = self_.locs.insert(atom.pos, molecule_key);
+                assert!(old_value.is_none());
             }
+            self_.molecule_map.push(molecule);
         }
-
-        let mut disjoint_set_idx_to_molecule_key = FxHashMap::default();
-        let mut molecule_map = SlotMap::with_key();
-        let mut locs = FxHashMap::default();
-        for (dense_idx, (atom_key, atom)) in dense_atoms.iter().copied().enumerate() {
-            let disjoint_set_idx = disjoint_sets.find(dense_idx);
-            let molecule_key = *disjoint_set_idx_to_molecule_key.entry(disjoint_set_idx).or_insert_with(|| {
-                molecule_map.insert(vec![atom_key])
-            });
-            locs.insert(atom.pos, molecule_key);
-        }
-
-        Self { molecule_map, locs }
+        self_
     }
 }
 
@@ -328,8 +311,7 @@ impl GenState {
 
         {
             // RotateMolecule
-            for (_, molecule) in molecules.molecule_map {
-            }
+            for molecule in molecules.molecule_map.iter() {}
         }
 
         revsteps
