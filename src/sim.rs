@@ -352,7 +352,7 @@ impl std::ops::AddAssign<i32> for RawRot {
     }
 }
 
-/// +ve CCW. Guaranteed to be normalized to 0..6
+/// +ve CCW. Guaranteed to be normalized to `0..6`
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Rot(i8);
 
@@ -367,6 +367,7 @@ impl Rot {
         r
     };
 
+    /// Returns the diametrically opposing direction
     pub fn opp(self) -> Self {
         Self::from_i8(self.0 + 3)
     }
@@ -387,9 +388,9 @@ impl Rot {
         Self(value.rem_euclid(6) as i8)
     }
 
-    /// Returns a value in the range -2..=3
+    /// Returns a value in the range `-3..3`
     pub fn to_i32_minabs(self) -> i32 {
-        if self.0 > 3 {
+        if self.0 >= 3 {
             (self.0 - 6).into()
         } else {
             self.0.into()
