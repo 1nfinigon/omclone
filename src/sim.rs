@@ -1352,30 +1352,37 @@ impl World {
         atom_key: AtomKey,
         movement: Movement,
     ) -> SimResult<()> {
-        let mut moving_atoms = VecDeque::<AtomKey>::new();
-        moving_atoms.push_back(atom_key);
+        let mut moving_atoms = Vec::new();
 
-        while let Some(this_key) = moving_atoms.pop_front() {
-            let maybe_move = motion.atoms.get(this_key);
+        let insert_motion = |motion: &mut WorldStepInfo, moving_atoms: &mut Vec<AtomKey>, key| {
+            let maybe_move = motion.atoms.get(key).copied();
             if let Some(curr_move) = maybe_move {
-                if curr_move != &movement {
+                if curr_move != movement {
                     //println!("was {:?},applying {:?}", curr_move, movement);
                     let error_str = &"Atom moved in multiple directions!";
-                    return Err(sim_error_pos(error_str, self.atoms.atom_map[this_key].pos));
+                    return Err(sim_error_pos(error_str, self.atoms.atom_map[key].pos));
                 }
             } else {
-                motion.atoms.insert(this_key, movement);
-                let atom = &self.atoms.atom_map[this_key];
-                for dir in Rot::ALL {
-                    if atom.connections[dir.to_usize()].intersects(Bonds::DYNAMIC_BOND) {
-                        let newpos = atom.pos + dir.to_pos();
-                        let newkey = *self
-                            .atoms
-                            .locs
-                            .get(&newpos)
-                            .expect("Inconsistent atoms (movement prep)");
-                        moving_atoms.push_back(newkey);
-                    }
+                motion.atoms.insert(key, movement);
+                moving_atoms.push(key);
+            }
+            Ok(maybe_move)
+        };
+
+        insert_motion(motion, &mut moving_atoms, atom_key)?;
+
+        while let Some(this_key) = moving_atoms.pop() {
+            let atom = &self.atoms.atom_map[this_key];
+            for dir in Rot::ALL {
+                if atom.connections[dir.to_usize()].intersects(Bonds::DYNAMIC_BOND) {
+                    let newpos = atom.pos + dir.to_pos();
+                    let newkey = *self
+                        .atoms
+                        .locs
+                        .get(&newpos)
+                        .expect("Inconsistent atoms (movement prep)");
+
+                    insert_motion(motion, &mut moving_atoms, newkey)?;
                 }
             }
         }
