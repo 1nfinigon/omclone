@@ -1091,7 +1091,7 @@ impl WorldAtoms {
     }
 
     //Note: only use on non-grabbed atoms!
-    fn destroy_atom_at(&mut self, loc: Pos) {
+    pub fn destroy_atom_at(&mut self, loc: Pos) {
         let atom_key = self.locs.remove(&loc).expect("Destroying nonatom!");
         let atom = self
             .atom_map
@@ -1101,7 +1101,7 @@ impl WorldAtoms {
             panic!("Inconsistent atoms (destroy loc)!");
         }
     }
-    fn take_atom(&mut self, key: AtomKey) -> Atom {
+    pub fn take_atom(&mut self, key: AtomKey) -> Atom {
         let atom = self
             .atom_map
             .remove(key)
@@ -1470,7 +1470,7 @@ impl World {
     }
 
     /// Finalize atom movement
-    fn apply_motion(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
+    pub fn apply_motion(&mut self, motion: &WorldStepInfo) -> SimResult<()> {
         for i in 0..self.arms.len() {
             self.arms[i].do_motion(motion.arms[i]);
         }
@@ -1503,7 +1503,7 @@ impl World {
     }
 
     /// Performs an instruction for a single arm.
-    fn do_instruction(
+    pub fn do_instruction(
         &mut self,
         motion: &mut WorldStepInfo,
         arm_id: usize,
