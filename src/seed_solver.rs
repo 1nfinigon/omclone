@@ -238,6 +238,7 @@ fn solve_one_puzzle_seeded(
 #[derive(Default)]
 pub struct Args {
     forever: Option<()>,
+    seed: Option<u64>,
     reload_model_every: Option<usize>,
     max_cycles: Option<u64>,
     max_cycles_from_optimal: Option<u64>,
@@ -250,6 +251,13 @@ impl Args {
             match arg.as_str() {
                 "--forever" => {
                     self_.forever = Some(());
+                }
+                "--seed" => {
+                    self_.seed = Some(
+                        args.next()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .expect("--seed should be followed by an integer seed"),
+                    );
                 }
                 "--reload-model-every" => {
                     self_.reload_model_every = Some(
@@ -330,8 +338,11 @@ pub fn main(args: std::env::Args) -> Result<()> {
         std::mem::size_of::<nn::Features>()
     );
 
-    //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
-    let mut rng = rand::thread_rng();
+    let mut rng: Box<dyn RngCore> = if let Some(seed) = args.seed {
+        Box::new(rand_pcg::Pcg64::seed_from_u64(seed))
+    } else {
+        Box::new(rand::thread_rng())
+    };
     let rng = &mut rng;
 
     //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;

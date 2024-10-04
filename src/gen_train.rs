@@ -250,7 +250,10 @@ fn gen_for_solution_dir(
         }
     });
 
-    println!("avg final outcome: {:.3}", total_final_outcome.into_inner().unwrap() / (i.into_inner() as f32));
+    println!(
+        "avg final outcome: {:.3}",
+        total_final_outcome.into_inner().unwrap() / (i.into_inner() as f32)
+    );
 
     Ok(())
 }
