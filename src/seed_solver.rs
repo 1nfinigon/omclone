@@ -212,15 +212,18 @@ fn solve_one_puzzle_seeded(
 
     // save solution and search history
 
+    let out_basedir = PathBuf::from(format!("test/games/{}", model.name));
+    std::fs::create_dir(&out_basedir).unwrap();
+
     let out_solution_filename =
-        PathBuf::from(format!("test/current-epoch/{}.solution", solution_name));
+        out_basedir.join(format!("{}.solution", solution_name));
     println!("saving solution to {:?}", out_solution_filename);
     let mut f_out_solution = BufWriter::new(File::create(&out_solution_filename)?);
     parser::write_solution(&mut f_out_solution, &out_solution)?;
     std::mem::drop(f_out_solution);
 
     let out_history_filename =
-        PathBuf::from(format!("test/current-epoch/{}.history", solution_name));
+        out_basedir.join(format!("{}.history", solution_name));
     println!("saving history to {:?}", out_history_filename);
     let mut f_out_history = BufWriter::new(File::create(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
