@@ -255,7 +255,7 @@ pub fn main() -> Result<()> {
     utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
 
     let (max_game_n, _) = utils::max_child("test/games").expect("no games");
-    for game_n in max_game_n.saturating_sub(3)..=max_game_n {
+    for game_n in max_game_n.saturating_sub(1000000)..=max_game_n {
         let path = PathBuf::from(format!("test/games/{}", game_n));
         if fs::exists(&path)? {
             gen_for_solution_dir(&par_writer_state, &puzzle_map, path)?;
