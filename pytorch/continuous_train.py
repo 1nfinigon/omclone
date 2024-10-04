@@ -131,7 +131,7 @@ if __name__ == "__main__":
                     sum(last_losses), last_value_loss, last_policy_loss, last_l2_loss,
                     grads_mean, grads_std, grads_absmax,
                 ))
-                tb_x = model_number + i + 1
+                tb_x = model_number + (i+1) * BATCH_SIZE
                 tb_writer.add_scalar('Gradient/Mean/train', grads_mean, tb_x)
                 tb_writer.add_scalar('Gradient/Std/train', grads_std, tb_x)
                 tb_writer.add_scalar('Gradient/Max/train', grads_absmax, tb_x)
