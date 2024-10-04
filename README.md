@@ -278,6 +278,11 @@ These were run on PyTorch 2.0.1 instead of 2.4.1.
 
 # Future work
 
+Pressing:
+
+-   torch `cross_entropy` expects unnormalized logits, but I'm feeding in
+    softmaxed logits during training
+
 Technical/impl work:
 
 -   Seed-solver: Generate solutions that have low cycles-left but still fail
