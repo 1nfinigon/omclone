@@ -211,19 +211,21 @@ enum RevStepArmBase {
 /// -   eval
 /// -   beam_search
 ///
-/// A single forward step is:
+/// A single forward timestep is:
 /// -   execute instructions (grab/drop immediate, others buffered)
 /// -   spawn inputs, do glyphs (first half -- consuming inputs), consume outputs
 /// -   (in substeps) collision detection in float world
 /// -   apply buffered motion to world
 /// -   spawn inputs, do glyphs (second half -- spawning outputs)
 ///
-/// So, a reverse step without collision detection is:
+/// So, a reverse timestep without collision detection is:
 /// -   execute inverse instructions (grab/drop buffer 1, others buffer 2)
 /// -   consume inputs, rev glyphs (second half -- consuming outputs)
 /// -   apply buffer 2 motion to world
 /// -   consume inputs, rev glyphs (first half -- spawning inputs), spawn outputs
 /// -   apply buffer 1 motion to world
+///
+/// (Recall that a `RevStep` is zero-or-more timesteps, though.)
 #[derive(Clone, Debug)]
 enum RevStep {
     /// Required current state:
@@ -585,30 +587,13 @@ impl GenState {
         if delta_rot == 0 {
             return;
         }
-        let (fwd_instruction, rev_instruction) = if delta_rot >= 0 {
-            (
-                BasicInstr::RotateCounterClockwise,
-                BasicInstr::RotateClockwise,
-            )
+        let instruction = if delta_rot >= 0 {
+            BasicInstr::RotateCounterClockwise
         } else {
-            (
-                BasicInstr::RotateClockwise,
-                BasicInstr::RotateCounterClockwise,
-            )
+            BasicInstr::RotateClockwise
         };
         insns_to_prepend
-            .extend(std::iter::repeat((arm_idx, fwd_instruction)).take(delta_rot.abs() as usize));
-
-        // move in the world
-        assert!(self.world.arms[arm_idx].rot.normalize() == cur_arm_rot);
-        let mut wsi = WorldStepInfo::new();
-        for _ in 0..delta_rot.abs() as usize {
-            self.world
-                .do_instruction(&mut wsi, arm_idx, rev_instruction)
-                .unwrap();
-        }
-        self.world.apply_motion(&wsi).unwrap();
-        assert!(self.world.arms[arm_idx].rot.normalize() == prev_arm_rot);
+            .extend(std::iter::repeat((arm_idx, instruction)).take(delta_rot.abs() as usize));
     }
 
     fn maybe_prepend_extend(
@@ -622,13 +607,13 @@ impl GenState {
         if delta_len == 0 {
             return Ok(());
         }
-        let (fwd_instruction, rev_instruction) = if delta_len >= 0 {
-            (BasicInstr::Extend, BasicInstr::Retract)
+        let instruction = if delta_len >= 0 {
+            BasicInstr::Extend
         } else {
-            (BasicInstr::Retract, BasicInstr::Extend)
+            BasicInstr::Retract
         };
         insns_to_prepend
-            .extend(std::iter::repeat((arm_idx, fwd_instruction)).take(delta_len.abs() as usize));
+            .extend(std::iter::repeat((arm_idx, instruction)).take(delta_len.abs() as usize));
 
         // upgrade the arm to a piston if necessary
         match &mut self.world.arms[arm_idx].arm_type {
@@ -636,17 +621,6 @@ impl GenState {
             ArmType::Piston => (),
             arm_type => return Err(eyre!("can't extend/retract this arm type: {:?}", arm_type)),
         }
-
-        // move in the world
-        assert!(self.world.arms[arm_idx].len == cur_arm_len);
-        let mut wsi = WorldStepInfo::new();
-        for _ in 0..delta_len.abs() as usize {
-            self.world
-                .do_instruction(&mut wsi, arm_idx, rev_instruction)
-                .unwrap();
-        }
-        self.world.apply_motion(&wsi).unwrap();
-        assert!(self.world.arms[arm_idx].len == prev_arm_len);
         Ok(())
     }
 
@@ -749,10 +723,6 @@ impl GenState {
                 *output_count = *output_count + 1;
 
                 insns_to_prepend.push((arm_idx, BasicInstr::Drop));
-                new.world.arms[arm_idx].grabbing = true;
-                let grabbed_atom_pos = new.world.arms[arm_idx].pos + arm_rot.dist_to_pos(*arm_len);
-                new.world.arms[arm_idx].atoms_grabbed[arm_rot.to_usize()] =
-                    *new.world.atoms.locs.get(&grabbed_atom_pos).unwrap();
             }
             &RevStep::RotateMolecule {
                 arm_idx,
@@ -807,8 +777,6 @@ impl GenState {
                 let cur_arm_grab = new.world.arms[arm_idx].grabbing;
                 if !cur_arm_grab {
                     insns_to_prepend.push((arm_idx, BasicInstr::Drop));
-                    new.world.arms[arm_idx].grabbing = true;
-                    new.world.arms[arm_idx].atoms_grabbed[0] = new.world.atoms.locs[&atom_pos];
                     // TODO: multiarm support. A multiarm can choose which
                     // collateral molecules to pick up and rotate incidentally
                 }
@@ -820,8 +788,6 @@ impl GenState {
                     .iter()
                 {
                     insns_to_prepend.push((other_arm_idx, BasicInstr::Grab));
-                    new.world.arms[arm_idx].grabbing = false;
-                    new.world.arms[arm_idx].atoms_grabbed = [AtomKey::null(); 6];
                 }
             }
             &RevStep::GrabInput { arm_idx } => {
@@ -837,9 +803,7 @@ impl GenState {
                     let molecule_idx = *world_info.molecule_locs.get(&atom_pos).unwrap();
 
                     new.maybe_spawn_input_glyph(world_info, molecule_idx)?;
-                    new.despawn_molecule(world_info, molecule_idx);
                 }
-                new.world.arms[arm_idx].grabbing = false;
                 insns_to_prepend.push((arm_idx, BasicInstr::Grab));
             }
         }
@@ -850,6 +814,7 @@ impl GenState {
         Ok(new)
     }
 
+    /// Prepend the instructions into the tape, and also execute them in the world
     fn try_prepend_instructions(&mut self, insns_to_prepend: Vec<(usize, BasicInstr)>) {
         let mut insns_to_prepend_by_arm_idx = vec![Vec::new(); self.world.arms.len()];
         for (arm_idx, insn) in insns_to_prepend {
@@ -871,6 +836,25 @@ impl GenState {
             {
                 insns[i] = insn;
             }
+        }
+
+        // move in the world
+        let mut motion = WorldStepInfo::new();
+        for timestep in (0..n_insns_to_prepend).rev() {
+            motion.clear();
+            for arm_idx in 0..self.world.arms.len() {
+                let rev_insn = match self.tapes[arm_idx].instructions[timestep] {
+                    BasicInstr::Extend => BasicInstr::Retract,
+                    BasicInstr::Retract => BasicInstr::Extend,
+                    BasicInstr::RotateCounterClockwise => BasicInstr::RotateClockwise,
+                    BasicInstr::RotateClockwise => BasicInstr::RotateCounterClockwise,
+                    fwd_insn => unimplemented!("{:?}", fwd_insn),
+                };
+                self.world
+                    .do_instruction(&mut motion, arm_idx, rev_insn)
+                    .unwrap();
+            }
+            self.world.apply_motion(&motion).unwrap();
         }
     }
 
