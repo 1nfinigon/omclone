@@ -565,7 +565,7 @@ impl GenState {
                 let arm_idx = self.world.arms.len();
                 self.world
                     .arms
-                    .push(Arm::new(arm_pos, arm_rot.raw(), arm_len, ArmType::PlainArm));
+                    .push(Arm::new(arm_pos, arm_rot.raw_minabs(), arm_len, ArmType::PlainArm));
                 self.tapes.push(Tape {
                     first: 0,
                     instructions: Vec::new(),

@@ -376,8 +376,14 @@ impl Rot {
         (0..6).step_by(step).map(Rot)
     }
 
-    pub fn raw(self) -> RawRot {
+    /// Returns a value in the range `0..6`
+    pub fn raw_nonneg(self) -> RawRot {
         RawRot(self.0 as i32)
+    }
+
+    /// Returns a value in the range `-3..3`
+    pub fn raw_minabs(self) -> RawRot {
+        RawRot(self.to_i32_minabs())
     }
 
     pub fn from_i8(value: i8) -> Self {
@@ -902,7 +908,7 @@ impl Arm {
         use Movement::*;
         match action {
             Move(Linear(p)) => self.pos += p,
-            Move(Rotation(r, _)) => self.rot += r.to_i32_minabs(),
+            Move(Rotation(r, _)) => self.rot += r.raw_minabs(),
             LengthAdjust(a) => self.len += a,
             Move(HeldStill) | Pivot(_) => {}
         }
@@ -1352,7 +1358,7 @@ impl FloatWorld {
                 Rotation(r, pivot) => {
                     let pivot_xy = pos_to_xy(pivot);
                     let offset = xy - pivot_xy;
-                    let rot = rot_to_angle(r.raw()) * amount;
+                    let rot = rot_to_angle(r.raw_minabs()) * amount;
                     (pivot_xy + (nalgebra::Rotation2::new(rot) * offset), rot)
                 }
                 HeldStill => (xy, 0.),
@@ -2136,7 +2142,7 @@ impl World {
                 "atom/arm collision!",
             )?;
             for r in Rot::step_by(arm.arm_type.angles_between_arm()) {
-                let angle = arm.rot + rot_to_angle(r.raw());
+                let angle = arm.rot + rot_to_angle(r.raw_nonneg());
                 let offset = nalgebra::Rotation2::new(angle) * XYVec::new(arm.len, 0.);
                 mark_point(&mut self.area_touched, arm.pos + offset);
                 //arm lengths are doubled in floatworld
@@ -2381,7 +2387,7 @@ impl World {
                     pair_data.vecids.1 = id;
                     unfinished_conduit_count -= 1;
                     pair_data.offset_pos -= glyph.pos;
-                    pair_data.offset_rot = (pair_data.offset_rot - glyph.rot).normalize().raw();
+                    pair_data.offset_rot = (pair_data.offset_rot - glyph.rot).normalize().raw_nonneg();
                 } else {
                     let conduit_info = ConduitInfo {
                         vecids: (id, id),
@@ -2710,7 +2716,9 @@ mod tests {
         let r = Rot(1);
         let rp = rotate(p, r);
         let frp = pos_to_xy(rp);
-        let rfp = nalgebra::Rotation2::new(rot_to_angle(r.raw())) * fp;
+        let rfp = nalgebra::Rotation2::new(rot_to_angle(r.raw_minabs())) * fp;
+        assert!(nalgebra::distance(&frp, &rfp) < 1e-6);
+        let rfp = nalgebra::Rotation2::new(rot_to_angle(r.raw_nonneg())) * fp;
         assert!(nalgebra::distance(&frp, &rfp) < 1e-6);
 
         for r in Rot::ALL {

@@ -631,7 +631,7 @@ impl RenderDataBase {
             let offset = [f_arm.pos.x, f_arm.pos.y];
             let triangles_drawn = if f_arm.grabbing { 6 } else { 3 };
             for r in Rot::step_by(f_arm.arm_type.angles_between_arm()) {
-                let angle = f_arm.rot + rot_to_angle(r.raw());
+                let angle = f_arm.rot + rot_to_angle(r.raw_nonneg());
                 ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
                     color,
                     offset,
