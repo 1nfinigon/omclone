@@ -130,14 +130,12 @@ fn process_one_solution(
                 // Basically don't use these to train the value head because
                 // the current state has no correlation with the final value
                 // from MCTS
-                let loss_weights = [0.00001, 0.8, 1.0];
+                let loss_weights = [0.00001, 1.0, 1.0];
 
                 if rng.gen_bool(if instr == BasicInstr::Empty {
-                    0.
-                    //0.05
+                    0.01
                 } else {
-                    0.
-                    //0.5
+                    0.1
                 }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
@@ -155,7 +153,7 @@ fn process_one_solution(
             search_history::Kind::Mcts => {
                 // For now, basically don't use these to train the policy head
                 // because they're bad quality. (?)
-                let loss_weights = [1.0, 1.0, 1.0];
+                let loss_weights = [10.0, 0.1, 1.0];
 
                 // include 50% of these < 200 playouts, and 100% of these
                 // >= 200 playouts
