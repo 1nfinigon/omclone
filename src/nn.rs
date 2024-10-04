@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::sim;
 use eyre::Result;
 
@@ -776,8 +778,45 @@ pub mod features {
 
 pub use features::Features;
 
+pub fn get_best_device() -> eyre::Result<tch::Device> {
+    assert_eq!(
+        std::env::var_os("CUDA_DEVICE_ORDER"),
+        Some("PCI_BUS_ID".into())
+    );
+    assert_eq!(std::env::var_os("CUDA_VISIBLE_DEVICES"), None);
+
+    if tch::Cuda::is_available() {
+        let nvml = nvml_wrapper::Nvml::init()?;
+
+        // This needs to be sorted in ascending key order.
+        let mut device_power_by_pci_bus_id = BTreeMap::new();
+
+        for nvml_index in 0..nvml.device_count()? {
+            if let Ok(device) = nvml.device_by_index(nvml_index) {
+                let pci_bus_id = device.pci_info()?.bus_id;
+                let power = device.power_usage()?;
+                device_power_by_pci_bus_id.insert(pci_bus_id, power);
+            }
+        }
+        println!(
+            "Enumerated {} CUDA devices",
+            device_power_by_pci_bus_id.len()
+        );
+        Ok(tch::Device::Cuda(
+            device_power_by_pci_bus_id
+                .into_iter()
+                .enumerate()
+                .min_by_key(|(_, (_, power))| *power)
+                .map(|(i, _)| i)
+                .unwrap(),
+        ))
+    } else {
+        Ok(tch::Device::Cpu)
+    }
+}
+
 pub mod model {
-    use std::{collections::BTreeMap, path::Path};
+    use std::path::Path;
 
     use super::*;
     use crate::sim::BasicInstr;
@@ -804,13 +843,7 @@ pub mod model {
     }
 
     impl Model {
-        pub fn load(model_path: impl AsRef<Path>) -> eyre::Result<Self> {
-            assert_eq!(
-                std::env::var_os("CUDA_DEVICE_ORDER"),
-                Some("PCI_BUS_ID".into())
-            );
-            assert_eq!(std::env::var_os("CUDA_VISIBLE_DEVICES"), None);
-
+        pub fn load(model_path: impl AsRef<Path>, device: tch::Device) -> eyre::Result<Self> {
             let name = model_path
                 .as_ref()
                 .file_stem()
@@ -818,35 +851,6 @@ pub mod model {
                 .to_string_lossy()
                 .into_owned();
 
-            let device = if tch::Cuda::is_available() {
-                let nvml = nvml_wrapper::Nvml::init()?;
-
-                // This needs to be sorted in ascending key order.
-                let mut device_power_by_pci_bus_id = BTreeMap::new();
-
-                for nvml_index in 0..nvml.device_count()? {
-                    if let Ok(device) = nvml.device_by_index(nvml_index) {
-                        let pci_bus_id = device.pci_info()?.bus_id;
-                        let power = device.power_usage()?;
-                        device_power_by_pci_bus_id.insert(pci_bus_id, power);
-                    }
-                }
-                println!(
-                    "Enumerated {} CUDA devices",
-                    device_power_by_pci_bus_id.len()
-                );
-                tch::Device::Cuda(
-                    device_power_by_pci_bus_id
-                        .into_iter()
-                        .enumerate()
-                        .min_by_key(|(_, (_, power))| *power)
-                        .map(|(i, _)| i)
-                        .unwrap(),
-                )
-            } else {
-                tch::Device::Cpu
-            };
-            println!("Using device {:?}", device);
             let mut module = tch::CModule::load_on_device(model_path.as_ref(), device)?;
             module.f_set_eval()?;
             Ok(Self {
@@ -856,7 +860,7 @@ pub mod model {
             })
         }
 
-        pub fn load_latest() -> eyre::Result<Self> {
+        pub fn load_latest(device: tch::Device) -> eyre::Result<Self> {
             // look for the latest model under test/net
             let latest_model = std::fs::read_dir("test/net")
                 .unwrap()
@@ -877,7 +881,7 @@ pub mod model {
                 .map(|(_, path)| path)
                 .unwrap();
             println!("Using latest model: {:?}", latest_model);
-            Self::load(latest_model)
+            Self::load(latest_model, device)
         }
 
         pub fn forward(

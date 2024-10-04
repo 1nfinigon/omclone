@@ -281,13 +281,14 @@ impl Args {
 fn run_one_epoch(
     args: &Args,
     rng: &mut impl Rng,
+    device: tch::Device,
     puzzle_map: &utils::PuzzleMap,
     seed_solution_paths: &mut Vec<PathBuf>,
 ) -> Result<()> {
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
-    let mut model = nn::Model::load_latest()?;
+    let mut model = nn::Model::load_latest(device)?;
     let mut solves_since_model_reload = 0;
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
@@ -306,7 +307,7 @@ fn run_one_epoch(
             solves_since_model_reload += 1;
             if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
                 solves_since_model_reload = 0;
-                model = nn::Model::load_latest()?;
+                model = nn::Model::load_latest(device)?;
             }
         }
     }
@@ -346,12 +347,15 @@ pub fn main(args: std::env::Args) -> Result<()> {
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/solution");
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
 
+    let device = nn::get_best_device()?;
+    println!("Using device {:?}", device);
+
     match args.forever {
         Some(()) => loop {
-            run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(&args, rng, device, &puzzle_map, &mut seed_solution_paths)?;
         },
         None => {
-            run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(&args, rng, device, &puzzle_map, &mut seed_solution_paths)?;
         }
     }
 
