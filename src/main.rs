@@ -50,18 +50,19 @@ fn main() -> Result<()> {
 
     install()?;
 
-    let args: Vec<_> = std::env::args().collect();
+    let mut args = std::env::args();
 
-    let subcommand = args.get(1).map(|x| x.as_str());
+    let _prog_name = args.next().unwrap();
+    let subcommand = args.next();
 
-    match subcommand {
+    match subcommand.as_deref() {
         Some("check") => check::main(),
 
         #[cfg(feature = "benchmark")]
         Some("benchmark") => benchmark::main(),
 
         #[cfg(feature = "nn")]
-        Some("seed-solver") => seed_solver::main(),
+        Some("seed-solver") => seed_solver::main(args),
 
         #[cfg(feature = "nn")]
         Some("train") => train::main(),

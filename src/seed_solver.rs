@@ -228,7 +228,66 @@ fn solve_one_puzzle_seeded(
     Ok(())
 }
 
-pub fn main() -> Result<()> {
+#[derive(Default)]
+pub struct Args {
+    forever: Option<()>,
+    reload_model_every: Option<usize>,
+}
+
+impl Args {
+    pub fn new(mut args: std::env::Args) -> Self {
+        let mut self_ = Self::default();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--forever" => {
+                    self_.forever = Some(());
+                },
+                "--reload-model-every" => {
+                    self_.reload_model_every = Some(
+                        args.next()
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .expect("--reload-model-every should be followed by a count"),
+                    );
+                },
+                _ => panic!("Unknown arg {}", arg),
+            }
+        }
+        self_
+    }
+}
+
+fn run_one_epoch(args: &Args, rng: &mut impl Rng, puzzle_map: &utils::PuzzleMap, seed_solution_paths: &mut Vec<PathBuf>) -> Result<()> {
+    println!("shuffling seed solutions");
+    seed_solution_paths.shuffle(rng);
+
+    let mut model = nn::Model::load_latest()?;
+    let mut solves_since_model_reload = 0;
+    for solution_fpath in seed_solution_paths.iter() {
+        if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
+            let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
+
+            solve_one_puzzle_seeded(
+                puzzle_fpath,
+                seed_puzzle,
+                solution_fpath,
+                &seed_solution,
+                &model,
+                rng,
+            )?;
+        }
+        solves_since_model_reload += 1;
+        if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
+            solves_since_model_reload = 0;
+            model = nn::Model::load_latest()?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn main(args: std::env::Args) -> Result<()> {
+    let args = Args::new(args);
+
     println!(
         "{} spatial features\n{} spatiotemporal features\n{} temporal features",
         nn::feature_offsets::Spatial::SIZE,
@@ -240,7 +299,6 @@ pub fn main() -> Result<()> {
         std::mem::size_of::<nn::Features>()
     );
 
-    let model = nn::Model::load()?;
     //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
     let mut rng = rand::thread_rng();
     let rng = &mut rng;
@@ -258,22 +316,16 @@ pub fn main() -> Result<()> {
     };
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/solution");
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
-    println!("shuffling seed solutions");
-    seed_solution_paths.shuffle(rng);
 
-    for solution_fpath in seed_solution_paths.iter() {
-        if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
-            let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
-
-            solve_one_puzzle_seeded(
-                puzzle_fpath,
-                seed_puzzle,
-                solution_fpath,
-                &seed_solution,
-                &model,
-                rng,
-            )?;
-        }
+    match args.forever {
+        Some(()) => {
+            loop {
+                run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
+            }
+        },
+        None => {
+            run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
+        },
     }
 
     Ok(())

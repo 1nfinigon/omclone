@@ -777,14 +777,12 @@ pub mod features {
 pub use features::Features;
 
 pub mod model {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, path::Path};
 
     use super::*;
     use crate::sim::BasicInstr;
     use eyre;
     use tch;
-
-    const MODEL_FILENAME: &str = "pytorch/model.pt";
 
     pub struct Model {
         module: tch::CModule,
@@ -805,7 +803,7 @@ pub mod model {
     }
 
     impl Model {
-        pub fn load() -> eyre::Result<Self> {
+        pub fn load(model_path: impl AsRef<Path>) -> eyre::Result<Self> {
             assert_eq!(
                 std::env::var_os("CUDA_DEVICE_ORDER"),
                 Some("PCI_BUS_ID".into())
@@ -840,9 +838,33 @@ pub mod model {
                 tch::Device::Cpu
             };
             println!("Using device {:?}", device);
-            let mut module = tch::CModule::load_on_device(MODEL_FILENAME, device)?;
+            let mut module = tch::CModule::load_on_device(model_path.as_ref(), device)?;
             module.f_set_eval()?;
             Ok(Self { module, device })
+        }
+
+        pub fn load_latest() -> eyre::Result<Self> {
+            // look for the latest model under test/net
+            let latest_model = std::fs::read_dir("test/net")
+                .unwrap()
+                .flatten()
+                .filter_map(|f| {
+                    let ftype = f.file_type().unwrap();
+                    if ftype.is_file() {
+                        f.path()
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .map(|n| (n, f.path()))
+                    } else {
+                        None
+                    }
+                })
+                .max_by_key(|(n, _)| *n)
+                .map(|(_, path)| path)
+                .unwrap();
+            println!("Using latest model: {:?}", latest_model);
+            Self::load(latest_model)
         }
 
         pub fn forward(
