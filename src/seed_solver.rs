@@ -32,9 +32,10 @@ fn solve_one_puzzle_seeded(
     }
 
     println!(
-        "====== starting {:?}, seeding with {:?}",
+        "====== starting {:?}, seeding with {:?}, model {}",
         puzzle_fpath.as_ref(),
-        solution_fpath.as_ref()
+        solution_fpath.as_ref(),
+        model.name
     );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
