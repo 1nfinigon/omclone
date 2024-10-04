@@ -133,9 +133,11 @@ fn process_one_solution(
                 let loss_weights = [0.00001, 0.8, 1.0];
 
                 if rng.gen_bool(if instr == BasicInstr::Empty {
-                    0.05
+                    0.
+                    //0.05
                 } else {
-                    0.5
+                    0.
+                    //0.5
                 }) {
                     // mock up a policy of visiting the right answer 75% of the time
                     // TODO: dunno if this is right/good,
@@ -153,12 +155,12 @@ fn process_one_solution(
             search_history::Kind::Mcts => {
                 // For now, basically don't use these to train the policy head
                 // because they're bad quality. (?)
-                let loss_weights = [1.0, 0.2, 1.0];
+                let loss_weights = [1.0, 1.0, 1.0];
 
-                // include 60% of these < 200 playouts, and 100% of these
+                // include 50% of these < 200 playouts, and 100% of these
                 // >= 200 playouts
                 let n_playouts: u32 = history_item.playouts.iter().sum();
-                if rng.gen_bool(if n_playouts < 200 { 0.6 } else { 1.0 }) {
+                if rng.gen_bool(if n_playouts < 200 { 0.5 } else { 1.0 }) {
                     let visits: Vec<_> = history_item
                         .playouts
                         .iter()
