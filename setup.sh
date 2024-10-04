@@ -20,5 +20,6 @@ echo "$this_path" >> src/default_paths.txt
 echo "" >> src/default_paths.txt
 echo "" >> src/default_paths.txt
 
-mkdir models
-mkdir runs
+mkdir test/net
+mkdir test/games
+mkdir test/training_data

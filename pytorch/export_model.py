@@ -57,6 +57,6 @@ policy_softmax_temperature = torch.Tensor([1])
 the_model.eval()
 traced_model = torch.jit.trace(the_model, (spatial, spatiotemporal, temporal, policy_softmax_temperature))
 
-filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'model.pt')
+filename = "test/net/init.pt"
 print("Saved model to {}".format(filename))
 traced_model.save(filename)
