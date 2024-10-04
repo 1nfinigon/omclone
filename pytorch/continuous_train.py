@@ -60,7 +60,7 @@ if __name__ == "__main__":
     print("Using model name: {}".format(model_number))
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    training_run_name = 'mainline_{}_{}'.format(model_number, timestamp)
+    training_run_name = 'mainline'
     print("Training run name: {}".format(training_run_name))
 
     full_set = NPZDataset(250000, device=device)
