@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use eyre::Result;
 
 fn solve_one_puzzle_seeded(
+    args: &Args,
     puzzle_fpath: impl AsRef<Path>,
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
@@ -65,11 +66,11 @@ fn solve_one_puzzle_seeded(
     let first_timestep = seed_world.world.timestep;
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
-    let n_moves_to_search = rng.gen_range(1..=15); // how many moves to leave behind for MCTS to find
+    let n_moves_to_search = rng.gen_range(1..=args.max_cycles_from_optimal.unwrap_or(15)); // how many moves to leave behind for MCTS to find
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        first_timestep + (n_moves + rng.gen_range(1..=30) + n_arms - 1) / n_arms,
+        first_timestep + (n_moves + rng.gen_range(1..=args.max_cycles.unwrap_or(30)) + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
@@ -236,6 +237,8 @@ fn solve_one_puzzle_seeded(
 pub struct Args {
     forever: Option<()>,
     reload_model_every: Option<usize>,
+    max_cycles: Option<u64>,
+    max_cycles_from_optimal: Option<u64>,
 }
 
 impl Args {
@@ -253,6 +256,20 @@ impl Args {
                             .expect("--reload-model-every should be followed by a count"),
                     );
                 },
+                "--max-cycles" => {
+                    self_.max_cycles = Some(
+                        args.next()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .expect("--max-cycles should be followed by a count"),
+                    );
+                }
+                "--max-cycles-from-optimal" => {
+                    self_.max_cycles_from_optimal = Some(
+                        args.next()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .expect("--max-cycles-from-optimal should be followed by a count"),
+                    );
+                }
                 _ => panic!("Unknown arg {}", arg),
             }
         }
@@ -271,6 +288,7 @@ fn run_one_epoch(args: &Args, rng: &mut impl Rng, puzzle_map: &utils::PuzzleMap,
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
 
             solve_one_puzzle_seeded(
+                args,
                 puzzle_fpath,
                 seed_puzzle,
                 solution_fpath,
