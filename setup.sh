@@ -22,4 +22,5 @@ echo "" >> src/default_paths.txt
 
 mkdir test/net
 mkdir test/games
+mkdir test/tensorboard
 mkdir test/training_data

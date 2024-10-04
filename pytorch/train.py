@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
         return sum(last_losses)
 
-    writer = tensorboard.SummaryWriter('runs/{}'.format(training_run_name))
+    writer = tensorboard.SummaryWriter('test/tensorboard/{}'.format(training_run_name))
     epoch_number = 0
 
     best_vloss = 1_000_000.

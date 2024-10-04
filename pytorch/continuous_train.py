@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
         return sum(last_losses)
 
-    writer = tensorboard.SummaryWriter('runs/{}'.format(training_run_name))
+    writer = tensorboard.SummaryWriter('test/tensorboard/{}'.format(training_run_name))
 
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
