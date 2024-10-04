@@ -2387,7 +2387,8 @@ impl World {
                     pair_data.vecids.1 = id;
                     unfinished_conduit_count -= 1;
                     pair_data.offset_pos -= glyph.pos;
-                    pair_data.offset_rot = (pair_data.offset_rot - glyph.rot).normalize().raw_nonneg();
+                    pair_data.offset_rot =
+                        (pair_data.offset_rot - glyph.rot).normalize().raw_nonneg();
                 } else {
                     let conduit_info = ConduitInfo {
                         vecids: (id, id),

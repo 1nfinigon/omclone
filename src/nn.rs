@@ -811,7 +811,12 @@ pub mod model {
             );
             assert_eq!(std::env::var_os("CUDA_VISIBLE_DEVICES"), None);
 
-            let name = model_path.as_ref().file_stem().unwrap().to_string_lossy().into_owned();
+            let name = model_path
+                .as_ref()
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
 
             let device = if tch::Cuda::is_available() {
                 let nvml = nvml_wrapper::Nvml::init()?;
@@ -844,7 +849,11 @@ pub mod model {
             println!("Using device {:?}", device);
             let mut module = tch::CModule::load_on_device(model_path.as_ref(), device)?;
             module.f_set_eval()?;
-            Ok(Self { name, module, device })
+            Ok(Self {
+                name,
+                module,
+                device,
+            })
         }
 
         pub fn load_latest() -> eyre::Result<Self> {

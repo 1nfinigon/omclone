@@ -10,12 +10,53 @@ use num_traits::ToPrimitive;
 use rand::prelude::*;
 use rayon::prelude::*;
 use sim::BasicInstr;
+use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+struct ParWriterState {
+    next_n: Mutex<usize>,
+}
+
+impl ParWriterState {
+    const BASEDIR: &str = "test/training_data";
+    fn new() -> Result<Self> {
+        if let Some((latest_dir_n, latest_dir)) = utils::max_child(Self::BASEDIR) {
+            let next_n = utils::max_child(latest_dir).map_or(latest_dir_n, |(n, _)| n + 1);
+
+            println!("found existing training data; starting from {}", next_n);
+            Ok(Self {
+                next_n: Mutex::new(next_n),
+            })
+        } else {
+            println!("no existing training data; starting from 0");
+            Ok(Self {
+                next_n: Mutex::new(0),
+            })
+        }
+    }
+
+    fn get(&self) -> usize {
+        *self.next_n.lock().unwrap()
+    }
+
+    fn next_npz_file(&self) -> PathBuf {
+        let mut next_n = self.next_n.lock().unwrap();
+        let dir_n = *next_n / 1000 * 1000;
+        let dir_path = PathBuf::from(format!("{}/{}", Self::BASEDIR, dir_n));
+        if !fs::metadata(&dir_path).is_ok_and(|m| m.is_dir()) {
+            fs::create_dir(&dir_path).unwrap();
+        }
+        let file_path = dir_path.join(format!("{}.npz", *next_n));
+        *next_n += 1;
+        file_path
+    }
+}
 
 fn write_npz_files(
-    file_basename: &str,
+    par_writer_state: &ParWriterState,
     features: Box<nn::Features>,
     value: f32,
     visits: [f32; BasicInstr::N_TYPES],
@@ -49,29 +90,22 @@ fn write_npz_files(
             ("pos", &pos),
             ("loss_weights", &loss_weights),
         ],
-        format!("test/next-training/{}.npz", file_basename),
+        par_writer_state.next_npz_file(),
     )?;
 
     Ok(())
 }
 
 fn process_one_solution(
+    par_writer_state: &ParWriterState,
     fpath: impl AsRef<Path>,
     rng: &mut impl Rng,
     puzzle_map: &utils::PuzzleMap,
-) -> Result<usize> {
+) -> Result<()> {
     let solution = parser::parse_solution(&mut BufReader::new(File::open(fpath.as_ref())?))?;
 
     let (_, puzzle) = puzzle_map.get(&solution.puzzle_name).unwrap();
-    let history_fpath = format!(
-        "{}.history",
-        fpath
-            .as_ref()
-            .to_str()
-            .unwrap()
-            .strip_suffix(".solution")
-            .unwrap()
-    );
+    let history_fpath = fpath.as_ref().with_extension("history");
     let history_file =
         search_history::HistoryFile::read(&mut BufReader::new(File::open(&history_fpath)?))?;
 
@@ -155,10 +189,9 @@ fn process_one_solution(
         ));
     };
 
-    let n_tensors = tensors.len();
-    for (i, (features, visits, pos, loss_weights)) in tensors.into_iter().enumerate() {
+    for (features, visits, pos, loss_weights) in tensors.into_iter() {
         write_npz_files(
-            &format!("{}_{}", solution.solution_name, i),
+            par_writer_state,
             features,
             final_result,
             visits,
@@ -167,38 +200,40 @@ fn process_one_solution(
         )?;
     }
 
-    Ok(n_tensors)
+    Ok(())
 }
 
-pub fn main() -> Result<()> {
-    println!("loading seed puzzles");
-    let mut puzzle_map = utils::PuzzleMap::new();
-    utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
+fn gen_for_solution_dir(
+    par_writer_state: &ParWriterState,
+    puzzle_map: &utils::PuzzleMap,
+    solution_dir: impl AsRef<Path>,
+) -> Result<()> {
+    println!("loading solutions for path {:?}", solution_dir.as_ref());
 
-    println!("loading current-epoch solutions");
     let mut solution_paths = Vec::new();
     let mut cb = |fpath: PathBuf| {
-        solution_paths.push(fpath);
+        if !fs::exists(fpath.with_extension("sampled")).unwrap() {
+            solution_paths.push(fpath);
+        }
     };
-    utils::read_file_suffix_recurse(&mut cb, ".solution", "test/current-epoch");
+    utils::read_file_suffix_recurse(&mut cb, ".solution", solution_dir);
 
     let i = std::sync::atomic::AtomicUsize::new(0);
-    let n_files_written = std::sync::atomic::AtomicUsize::new(0);
     solution_paths.par_iter().for_each(|fpath| {
         //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
         let mut rng = rand::thread_rng();
         let rng = &mut rng;
 
         println!(
-            "{}/{} ({} files written so far)",
+            "{}/{} (current sample id: {})",
             i.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             solution_paths.len(),
-            n_files_written.load(std::sync::atomic::Ordering::SeqCst),
+            par_writer_state.get(),
         );
-        let result = process_one_solution(fpath, rng, &puzzle_map);
+        let result = process_one_solution(par_writer_state, fpath, rng, &puzzle_map);
         match result {
-            Ok(n) => {
-                n_files_written.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+            Ok(()) => {
+                File::create_new(fpath.with_extension("sampled")).unwrap();
             }
             Err(e) => {
                 // TODO: figure out where these errors are coming from???????
@@ -206,6 +241,24 @@ pub fn main() -> Result<()> {
             }
         }
     });
+
+    Ok(())
+}
+
+pub fn main() -> Result<()> {
+    let par_writer_state = ParWriterState::new()?;
+
+    println!("loading seed puzzles");
+    let mut puzzle_map = utils::PuzzleMap::new();
+    utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
+
+    let (max_game_n, _) = utils::max_child("test/games").expect("no games");
+    for game_n in max_game_n.saturating_sub(3)..=max_game_n {
+        let path = PathBuf::from(format!("test/games/{}", game_n));
+        if fs::exists(&path)? {
+            gen_for_solution_dir(&par_writer_state, &puzzle_map, path)?;
+        }
+    }
 
     Ok(())
 }

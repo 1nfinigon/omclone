@@ -114,3 +114,17 @@ pub fn get_default_puzzle_solution() -> Result<(parser::FullPuzzle, parser::Full
     let sol = parser::parse_solution(&mut BufReader::new(f_sol))?;
     Ok((puzzle, sol))
 }
+
+pub fn max_child(p: impl AsRef<Path>) -> Option<(usize, PathBuf)> {
+    fs::read_dir(p)
+        .unwrap()
+        .flatten()
+        .filter_map(|f| {
+            f.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|f| f.parse::<usize>().ok())
+                .map(|n| (n, f.path()))
+        })
+        .max_by_key(|(n, _)| *n)
+}

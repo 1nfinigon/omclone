@@ -70,7 +70,8 @@ fn solve_one_puzzle_seeded(
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        first_timestep + (n_moves + rng.gen_range(1..=args.max_cycles.unwrap_or(30)) + n_arms - 1) / n_arms,
+        first_timestep
+            + (n_moves + rng.gen_range(1..=args.max_cycles.unwrap_or(30)) + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
@@ -214,17 +215,17 @@ fn solve_one_puzzle_seeded(
     // save solution and search history
 
     let out_basedir = PathBuf::from(format!("test/games/{}", model.name));
-    std::fs::create_dir(&out_basedir).unwrap();
+    if !std::fs::exists(&out_basedir)? {
+        std::fs::create_dir(&out_basedir)?;
+    }
 
-    let out_solution_filename =
-        out_basedir.join(format!("{}.solution", solution_name));
+    let out_solution_filename = out_basedir.join(format!("{}.solution", solution_name));
     println!("saving solution to {:?}", out_solution_filename);
     let mut f_out_solution = BufWriter::new(File::create(&out_solution_filename)?);
     parser::write_solution(&mut f_out_solution, &out_solution)?;
     std::mem::drop(f_out_solution);
 
-    let out_history_filename =
-        out_basedir.join(format!("{}.history", solution_name));
+    let out_history_filename = out_basedir.join(format!("{}.history", solution_name));
     println!("saving history to {:?}", out_history_filename);
     let mut f_out_history = BufWriter::new(File::create(&out_history_filename)?);
     out_history.write(&mut f_out_history)?;
@@ -248,14 +249,14 @@ impl Args {
             match arg.as_str() {
                 "--forever" => {
                     self_.forever = Some(());
-                },
+                }
                 "--reload-model-every" => {
                     self_.reload_model_every = Some(
                         args.next()
                             .and_then(|s| s.parse::<usize>().ok())
                             .expect("--reload-model-every should be followed by a count"),
                     );
-                },
+                }
                 "--max-cycles" => {
                     self_.max_cycles = Some(
                         args.next()
@@ -277,7 +278,12 @@ impl Args {
     }
 }
 
-fn run_one_epoch(args: &Args, rng: &mut impl Rng, puzzle_map: &utils::PuzzleMap, seed_solution_paths: &mut Vec<PathBuf>) -> Result<()> {
+fn run_one_epoch(
+    args: &Args,
+    rng: &mut impl Rng,
+    puzzle_map: &utils::PuzzleMap,
+    seed_solution_paths: &mut Vec<PathBuf>,
+) -> Result<()> {
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
@@ -341,14 +347,12 @@ pub fn main(args: std::env::Args) -> Result<()> {
     utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
 
     match args.forever {
-        Some(()) => {
-            loop {
-                run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
-            }
+        Some(()) => loop {
+            run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
         },
         None => {
             run_one_epoch(&args, rng, &puzzle_map, &mut seed_solution_paths)?;
-        },
+        }
     }
 
     Ok(())
