@@ -101,7 +101,7 @@ fn process_one_solution(
     fpath: impl AsRef<Path>,
     rng: &mut impl Rng,
     puzzle_map: &utils::PuzzleMap,
-) -> Result<()> {
+) -> Result<f32> {
     let solution = parser::parse_solution(&mut BufReader::new(File::open(fpath.as_ref())?))?;
 
     let (_, puzzle) = puzzle_map.get(&solution.puzzle_name).unwrap();
@@ -193,6 +193,8 @@ fn process_one_solution(
         ));
     };
 
+    assert!((final_result - history_file.final_outcome).abs() < 1e-6);
+
     for (features, visits, pos, loss_weights) in tensors.into_iter() {
         write_npz_files(
             par_writer_state,
@@ -204,7 +206,7 @@ fn process_one_solution(
         )?;
     }
 
-    Ok(())
+    Ok(final_result)
 }
 
 fn gen_for_solution_dir(
@@ -223,6 +225,7 @@ fn gen_for_solution_dir(
     utils::read_file_suffix_recurse(&mut cb, ".solution", solution_dir);
 
     let i = std::sync::atomic::AtomicUsize::new(0);
+    let total_final_outcome = std::sync::Mutex::new(0f32);
     solution_paths.par_iter().for_each(|fpath| {
         //let mut rng = rand_pcg::Pcg64::seed_from_u64(123);
         let mut rng = rand::thread_rng();
@@ -236,7 +239,8 @@ fn gen_for_solution_dir(
         );
         let result = process_one_solution(par_writer_state, fpath, rng, &puzzle_map);
         match result {
-            Ok(()) => {
+            Ok(final_outcome) => {
+                *total_final_outcome.lock().unwrap() += final_outcome;
                 File::create_new(fpath.with_extension("sampled")).unwrap();
             }
             Err(e) => {
@@ -245,6 +249,8 @@ fn gen_for_solution_dir(
             }
         }
     });
+
+    println!("avg final outcome: {:.3}", total_final_outcome.into_inner().unwrap() / (i.into_inner() as f32));
 
     Ok(())
 }
