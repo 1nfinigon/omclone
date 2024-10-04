@@ -15,10 +15,11 @@ ln -sf ../../omsim/test/solution .
 ln -sf ../../om-leaderboard ./om-leaderboard-master
 popd
 
-rm src/default_paths.txt
-echo "$this_path" >> src/default_paths.txt
-echo "" >> src/default_paths.txt
-echo "" >> src/default_paths.txt
+if [ ! -f src/default_paths.txt ]; then
+    echo "$this_path" >> src/default_paths.txt
+    echo "" >> src/default_paths.txt
+    echo "" >> src/default_paths.txt
+fi
 
 mkdir test/net
 mkdir test/games
