@@ -906,7 +906,7 @@ pub mod model {
                 ),
                 tch::IValue::Tensor(features.temporal.to_dense_tensor(options)?.f_unsqueeze(0)?),
                 tch::IValue::Tensor(
-                    tch::Tensor::f_from_slice(&[if is_root { 2.00 } else { 1. }])?
+                    tch::Tensor::f_from_slice(&[if is_root { 6.00 } else { 1. }])?
                         .f_to(self.device)?,
                 ),
             ];
