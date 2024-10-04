@@ -9,6 +9,8 @@ mod utils;
 mod benchmark;
 
 #[cfg(feature = "nn")]
+mod gen_train;
+#[cfg(feature = "nn")]
 mod nn;
 #[cfg(feature = "nn")]
 mod search;
@@ -18,8 +20,6 @@ mod search_history;
 mod search_state;
 #[cfg(feature = "nn")]
 mod seed_solver;
-#[cfg(feature = "nn")]
-mod train;
 
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod render_library;
@@ -65,7 +65,7 @@ fn main() -> Result<()> {
         Some("seed-solver") => seed_solver::main(args),
 
         #[cfg(feature = "nn")]
-        Some("train") => train::main(),
+        Some("gen-train") => gen_train::main(),
 
         Some("revgen") => revgen::main(),
 
