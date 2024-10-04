@@ -210,6 +210,7 @@ fn solve_one_puzzle_seeded(
         solution_name: solution_name.clone(),
         history: search_history,
         timestep_limit: search_state.timestep_limit.try_into().unwrap(),
+        final_outcome: if result_is_success { 1.0 } else { 0.0 },
     };
 
     // save solution and search history

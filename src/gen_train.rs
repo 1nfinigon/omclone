@@ -153,7 +153,11 @@ fn process_one_solution(
             search_history::Kind::Mcts => {
                 // For now, basically don't use these to train the policy head
                 // because they're bad quality. (?)
-                let loss_weights = [10.0, 0.1, 1.0];
+                let loss_weights = if history_file.final_outcome > 0.5 {
+                    [10.0, 5.0, 1.0]
+                } else {
+                    [0.1, 0.05, 1.0]
+                };
 
                 // include 50% of these < 200 playouts, and 100% of these
                 // >= 200 playouts
