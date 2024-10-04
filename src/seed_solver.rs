@@ -274,11 +274,12 @@ fn run_one_epoch(args: &Args, rng: &mut impl Rng, puzzle_map: &utils::PuzzleMap,
                 &model,
                 rng,
             )?;
-        }
-        solves_since_model_reload += 1;
-        if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
-            solves_since_model_reload = 0;
-            model = nn::Model::load_latest()?;
+
+            solves_since_model_reload += 1;
+            if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
+                solves_since_model_reload = 0;
+                model = nn::Model::load_latest()?;
+            }
         }
     }
 
