@@ -106,6 +106,7 @@ fn solve_one_puzzle_seeded(
 
     // search for a solution
 
+    let mut still_following_premoves = true;
     let result_is_success = loop {
         if let Some(result) = search_state.evaluate_final_state() {
             println!("done; result = {}", result);
@@ -162,11 +163,24 @@ fn solve_one_puzzle_seeded(
             }
         );
 
-        tapes[search_state.next_arm_index()]
-            .instructions
-            .push(instr);
-        search_state.update(instr);
-        search_history.append_mcts(&stats);
+        if still_following_premoves && stats.root_value < 1e-3 {
+            let arm_index = search_state.next_arm_index();
+            let instr = seed_world.tapes[arm_index].get(
+                search_state.world.timestep as usize,
+                seed_world.repeat_length,
+            );
+            println!("Applying true update due to low confidence: {:?}", instr);
+            tapes[arm_index].instructions.push(instr);
+            search_state.update(instr);
+            search_history.append_from_optimal_solution(instr);
+        } else {
+            still_following_premoves = false;
+            tapes[search_state.next_arm_index()]
+                .instructions
+                .push(instr);
+            search_state.update(instr);
+            search_history.append_mcts(&stats);
+        }
     };
 
     // finalize world for saving
