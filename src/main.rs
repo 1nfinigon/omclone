@@ -42,6 +42,12 @@ fn main() -> Result<()> {
         std::env::set_var("RUST_BACKTRACE", "full");
     }
     */
+
+    #[cfg(feature = "nn")]
+    unsafe {
+        std::env::set_var("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
+    }
+
     install()?;
 
     let args: Vec<_> = std::env::args().collect();

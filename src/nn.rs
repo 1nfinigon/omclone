@@ -777,6 +777,8 @@ pub mod features {
 pub use features::Features;
 
 pub mod model {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::sim::BasicInstr;
     use eyre;
@@ -804,7 +806,40 @@ pub mod model {
 
     impl Model {
         pub fn load() -> eyre::Result<Self> {
-            let device = tch::Device::cuda_if_available();
+            assert_eq!(
+                std::env::var_os("CUDA_DEVICE_ORDER"),
+                Some("PCI_BUS_ID".into())
+            );
+            assert_eq!(std::env::var_os("CUDA_VISIBLE_DEVICES"), None);
+            let device = if tch::Cuda::is_available() {
+                let nvml = nvml_wrapper::Nvml::init()?;
+
+                // This needs to be sorted in ascending key order.
+                let mut device_power_by_pci_bus_id = BTreeMap::new();
+
+                for nvml_index in 0..nvml.device_count()? {
+                    if let Ok(device) = nvml.device_by_index(nvml_index) {
+                        let pci_bus_id = device.pci_info()?.bus_id;
+                        let power = device.power_usage()?;
+                        device_power_by_pci_bus_id.insert(pci_bus_id, power);
+                    }
+                }
+                println!(
+                    "Enumerated {} CUDA devices",
+                    device_power_by_pci_bus_id.len()
+                );
+                tch::Device::Cuda(
+                    device_power_by_pci_bus_id
+                        .into_iter()
+                        .enumerate()
+                        .min_by_key(|(_, (_, power))| *power)
+                        .map(|(i, _)| i)
+                        .unwrap(),
+                )
+            } else {
+                tch::Device::Cpu
+            };
+            println!("Using device {:?}", device);
             let mut module = tch::CModule::load_on_device(MODEL_FILENAME, device)?;
             module.f_set_eval()?;
             Ok(Self { module, device })
