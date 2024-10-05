@@ -827,6 +827,7 @@ pub mod model {
         pub name: String,
         module: tch::CModule,
         device: tch::Device,
+        tracy_client: tracy_client::Client,
     }
 
     pub struct Evaluation {
@@ -843,7 +844,7 @@ pub mod model {
     }
 
     impl Model {
-        pub fn load(model_path: impl AsRef<Path>, device: tch::Device) -> eyre::Result<Self> {
+        pub fn load(model_path: impl AsRef<Path>, device: tch::Device, tracy_client: tracy_client::Client) -> eyre::Result<Self> {
             let name = model_path
                 .as_ref()
                 .file_stem()
@@ -857,10 +858,11 @@ pub mod model {
                 name,
                 module,
                 device,
+                tracy_client,
             })
         }
 
-        pub fn load_latest(device: tch::Device) -> eyre::Result<Self> {
+        pub fn load_latest(device: tch::Device, tracy_client: tracy_client::Client) -> eyre::Result<Self> {
             // look for the latest model under test/net/mainline
             let latest_model = std::fs::read_dir("test/net/mainline")
                 .unwrap()
@@ -881,7 +883,7 @@ pub mod model {
                 .map(|(_, path)| path)
                 .unwrap();
             println!("Using latest model: {:?}", latest_model);
-            Self::load(latest_model, device)
+            Self::load(latest_model, device, tracy_client)
         }
 
         pub fn forward(
@@ -891,64 +893,75 @@ pub mod model {
             y: usize,
             is_root: bool,
         ) -> eyre::Result<Evaluation> {
+            let _span = self.tracy_client.clone().span(tracy_client::span_location!("nn fwd"), 0);
+
             assert!(x < constants::N_WIDTH);
             assert!(y < constants::N_HEIGHT);
 
             let options = (tch::Kind::Float, self.device);
 
-            let input = [
-                tch::IValue::Tensor(features.spatial.to_dense_tensor(options)?.f_unsqueeze(0)?),
-                tch::IValue::Tensor(
-                    features
-                        .spatiotemporal
-                        .to_dense_tensor(options)?
-                        .f_unsqueeze(0)?,
-                ),
-                tch::IValue::Tensor(features.temporal.to_dense_tensor(options)?.f_unsqueeze(0)?),
-                tch::IValue::Tensor(
-                    tch::Tensor::f_from_slice(&[if is_root { 2.00 } else { 1. }])?
-                        .f_to(self.device)?,
-                ),
-            ];
+            let input = {
+                let _span = self.tracy_client.clone().span(tracy_client::span_location!("nn fwd: input munging"), 0);
+                [
+                    tch::IValue::Tensor(features.spatial.to_dense_tensor(options)?.f_unsqueeze(0)?),
+                    tch::IValue::Tensor(
+                        features
+                            .spatiotemporal
+                            .to_dense_tensor(options)?
+                            .f_unsqueeze(0)?,
+                    ),
+                    tch::IValue::Tensor(features.temporal.to_dense_tensor(options)?.f_unsqueeze(0)?),
+                    tch::IValue::Tensor(
+                        tch::Tensor::f_from_slice(&[if is_root { 2.00 } else { 1. }])?
+                            .f_to(self.device)?,
+                    ),
+                ]
+            };
 
-            let output = tch::no_grad(|| self.module.forward_is(&input))?;
+            let output = {
+                let _span = self.tracy_client.clone().span(tracy_client::span_location!("nn fwd: exec"), 0);
+                tch::no_grad(|| self.module.forward_is(&input))?
+            };
 
-            let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
+            {
+                let _span = self.tracy_client.clone().span(tracy_client::span_location!("nn fwd: output munging"), 0);
+                let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
 
-            let mut policy = [0f32; BasicInstr::N_TYPES];
+                let mut policy = [0f32; BasicInstr::N_TYPES];
 
-            assert_eq!(
-                policy_tensor.size4()?,
-                (
-                    1,
-                    BasicInstr::N_TYPES as i64,
-                    constants::N_HEIGHT as i64,
-                    constants::N_WIDTH as i64
-                )
-            );
-            let mut policy_sum = 0.;
-            for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
-                let this_policy =
-                    policy_tensor.f_double_value(&[0, i_instr as i64, y as i64, x as i64])? as f32;
-                assert!(this_policy >= 0.);
-                *policy_elt = this_policy;
-                policy_sum += this_policy;
+                assert_eq!(
+                    policy_tensor.size4()?,
+                    (
+                        1,
+                        BasicInstr::N_TYPES as i64,
+                        constants::N_HEIGHT as i64,
+                        constants::N_WIDTH as i64
+                    )
+                );
+                let mut policy_sum = 0.;
+                for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
+                    let this_policy =
+                        policy_tensor.f_double_value(&[0, i_instr as i64, y as i64, x as i64])? as f32;
+                    assert!(this_policy >= 0.);
+                    *policy_elt = this_policy;
+                    policy_sum += this_policy;
+                }
+                assert!((policy_sum - 1.).abs() < 1e-6);
+
+                assert_eq!(value_tensor.size2()?, (1, 2));
+                let win = value_tensor.f_double_value(&[0, 0])? as f32;
+                assert!(win >= 0.);
+                let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
+                assert!(loss_by_cycles >= 0.);
+                let value_sum = win + loss_by_cycles;
+                assert!((value_sum - 1.).abs() < 1e-6);
+
+                Ok(Evaluation {
+                    policy,
+                    win,
+                    //loss_by_cycles,
+                })
             }
-            assert!((policy_sum - 1.).abs() < 1e-6);
-
-            assert_eq!(value_tensor.size2()?, (1, 2));
-            let win = value_tensor.f_double_value(&[0, 0])? as f32;
-            assert!(win >= 0.);
-            let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
-            assert!(loss_by_cycles >= 0.);
-            let value_sum = win + loss_by_cycles;
-            assert!((value_sum - 1.).abs() < 1e-6);
-
-            Ok(Evaluation {
-                policy,
-                win,
-                //loss_by_cycles,
-            })
         }
     }
 }

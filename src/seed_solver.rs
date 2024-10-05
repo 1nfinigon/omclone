@@ -311,6 +311,7 @@ impl Args {
 
 fn run_one_epoch(
     args: &Args,
+    tracy_client: tracy_client::Client,
     rng: &mut impl Rng,
     device: tch::Device,
     puzzle_map: &utils::PuzzleMap,
@@ -319,7 +320,7 @@ fn run_one_epoch(
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
-    let mut model = nn::Model::load_latest(device)?;
+    let mut model = nn::Model::load_latest(device, tracy_client.clone())?;
     let mut solves_since_model_reload = 0;
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
@@ -338,7 +339,7 @@ fn run_one_epoch(
             solves_since_model_reload += 1;
             if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
                 solves_since_model_reload = 0;
-                model = nn::Model::load_latest(device)?;
+                model = nn::Model::load_latest(device, tracy_client.clone())?;
             }
         }
     }
@@ -346,7 +347,7 @@ fn run_one_epoch(
     Ok(())
 }
 
-pub fn main(args: std::env::Args) -> Result<()> {
+pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<()> {
     let args = Args::new(args);
 
     println!(
@@ -386,10 +387,10 @@ pub fn main(args: std::env::Args) -> Result<()> {
 
     match args.forever {
         Some(()) => loop {
-            run_one_epoch(&args, rng, device, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(&args, tracy_client.clone(), rng, device, &puzzle_map, &mut seed_solution_paths)?;
         },
         None => {
-            run_one_epoch(&args, rng, device, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(&args, tracy_client.clone(), rng, device, &puzzle_map, &mut seed_solution_paths)?;
         }
     }
 

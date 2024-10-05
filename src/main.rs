@@ -37,6 +37,8 @@ use color_eyre::install;
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::install;
 
+tracy_client::register_demangler!();
+
 fn main() -> Result<()> {
     /*
     #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +54,8 @@ fn main() -> Result<()> {
 
     install()?;
 
+    let tracy_client = tracy_client::Client::start();
+
     let mut args = std::env::args();
 
     let _prog_name = args.next().unwrap();
@@ -64,7 +68,7 @@ fn main() -> Result<()> {
         Some("benchmark") => benchmark::main(),
 
         #[cfg(feature = "nn")]
-        Some("seed-solver") => seed_solver::main(args),
+        Some("seed-solver") => seed_solver::main(args, tracy_client),
 
         #[cfg(feature = "nn")]
         Some("gen-train") => gen_train::main(),

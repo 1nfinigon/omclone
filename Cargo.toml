@@ -47,7 +47,7 @@ uuid = "1.10"
 rayon = {version = "1.10", optional = true}
 indexmap = "2"
 union-find = "0.4"
-
+tracy-client = {version = "0.17.4", features = ["demangle"]}
 
 egui = {version = "0.27", optional = true}
 miniquad = { version = "0.4", optional = true}
