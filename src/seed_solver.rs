@@ -168,10 +168,12 @@ fn solve_one_puzzle_seeded(
         // intercept: what should the value at 0 be
         let lowconf = |x: f64, elbow: f64, sharpness: f64, intercept: f64| {
             // log(1+exp(6*(1-(x/0.5))))/6
-            ((1. + (sharpness * (1. - (x / elbow))).exp()).ln() * intercept / sharpness).clamp(0., 1.)
+            ((1. + (sharpness * (1. - (x / elbow))).exp()).ln() * intercept / sharpness)
+                .clamp(0., 1.)
         };
 
-        if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6., 0.9)) {
+        if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6., 0.9))
+        {
             let arm_index = search_state.next_arm_index();
             let instr = seed_world.tapes[arm_index].get(
                 search_state.world.timestep as usize,
@@ -387,10 +389,24 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
 
     match args.forever {
         Some(()) => loop {
-            run_one_epoch(&args, tracy_client.clone(), rng, device, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(
+                &args,
+                tracy_client.clone(),
+                rng,
+                device,
+                &puzzle_map,
+                &mut seed_solution_paths,
+            )?;
         },
         None => {
-            run_one_epoch(&args, tracy_client.clone(), rng, device, &puzzle_map, &mut seed_solution_paths)?;
+            run_one_epoch(
+                &args,
+                tracy_client.clone(),
+                rng,
+                device,
+                &puzzle_map,
+                &mut seed_solution_paths,
+            )?;
         }
     }
 

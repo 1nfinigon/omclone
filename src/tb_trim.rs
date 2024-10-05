@@ -1,9 +1,9 @@
 use std::fs::{self, File};
-use std::mem;
 use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::mem;
 
-use eyre::Result;
 use crate::utils;
+use eyre::Result;
 
 /// Returns Ok(buf, is_eof)
 fn read_exact<'a, R: Read + ?Sized>(r: &mut R, mut buf: &'a mut [u8]) -> Result<(&'a [u8], bool)> {
@@ -12,7 +12,7 @@ fn read_exact<'a, R: Read + ?Sized>(r: &mut R, mut buf: &'a mut [u8]) -> Result<
         match r.read(&mut buf[offset..]) {
             Ok(0) => {
                 return Ok((&buf[..offset], true));
-            },
+            }
             Ok(n) => {
                 offset += n;
             }
@@ -25,11 +25,18 @@ fn read_exact<'a, R: Read + ?Sized>(r: &mut R, mut buf: &'a mut [u8]) -> Result<
 
 pub fn main() -> Result<()> {
     let mut paths = Vec::new();
-    utils::read_file_suffix_recurse(&mut |p| {
-        if p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.starts_with("events.out")) {
-            paths.push(p);
-        }
-    }, "", "test/tensorboard");
+    utils::read_file_suffix_recurse(
+        &mut |p| {
+            if p.file_name()
+                .and_then(|f| f.to_str())
+                .is_some_and(|f| f.starts_with("events.out"))
+            {
+                paths.push(p);
+            }
+        },
+        "",
+        "test/tensorboard",
+    );
 
     for p in paths {
         println!("processing {:?}", p);
@@ -43,11 +50,13 @@ pub fn main() -> Result<()> {
             let mut length_buffer = [0u8; 8];
             match r.read_exact(&mut length_buffer) {
                 Ok(()) => (),
-                Err(e) =>
-                    if e.kind() == io::ErrorKind::UnexpectedEof { break; }
-                    else {
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
                         return Err(e.into());
-                    },
+                    }
+                }
             }
             let length = u64::from_le_bytes(length_buffer) as usize;
             if length < 16384 {
@@ -57,7 +66,11 @@ pub fn main() -> Result<()> {
                 let (data_buffer, is_eof) = read_exact(&mut r, &mut data_buffer[..length + 8])?;
                 w.write_all(data_buffer)?;
                 if is_eof {
-                    println!("file was truncated early (read {}, expected {})", data_buffer.len(), length + 8);
+                    println!(
+                        "file was truncated early (read {}, expected {})",
+                        data_buffer.len(),
+                        length + 8
+                    );
                     break;
                 }
             } else {
