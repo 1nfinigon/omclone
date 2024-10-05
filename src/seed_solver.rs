@@ -163,7 +163,12 @@ fn solve_one_puzzle_seeded(
             }
         );
 
-        if still_following_premoves && stats.root_value < 1e-3 {
+        let lowconf = |x: f64, elbow: f64, sharpness: f64| {
+            // log(1+exp(6*(1-(x/0.5))))/6
+            (1. + (sharpness * (1. - (x / elbow))).exp()).ln().clamp(0., 1.)
+        };
+
+        if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6.)) {
             let arm_index = search_state.next_arm_index();
             let instr = seed_world.tapes[arm_index].get(
                 search_state.world.timestep as usize,
