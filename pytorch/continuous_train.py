@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
             # Gather data and report
             running_losses += losses
-            running_losses_list.push(loss)
+            running_losses_list.append(loss)
             n_iterations_since_stats_printed += 1
             if i % 10 == 0:
                 last_losses = (running_losses / n_iterations_since_stats_printed).tolist()
