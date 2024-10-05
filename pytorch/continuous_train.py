@@ -87,6 +87,7 @@ if __name__ == "__main__":
 
     def train_one_epoch(tb_writer):
         running_losses = torch.zeros([3], device=device)
+        running_losses_list = []
         last_losses = None
         n_iterations_since_stats_printed = 0
 
@@ -117,6 +118,7 @@ if __name__ == "__main__":
 
             # Gather data and report
             running_losses += losses
+            running_losses_list.push(loss)
             n_iterations_since_stats_printed += 1
             if i % 10 == 0:
                 last_losses = (running_losses / n_iterations_since_stats_printed).tolist()
@@ -140,11 +142,16 @@ if __name__ == "__main__":
                 tb_writer.add_scalar('Loss/L2 penalty/train', last_l2_loss, tb_x)
                 tb_writer.add_scalar('Loss/Total/train', sum(last_losses), tb_x)
 
-                if i % 1000 == 0:
-                    tb_writer.add_histogram('Gradient/Parameter-wise distribution by batch', grads, tb_x)
+                if i % 100 == 0:
+                    tb_writer.add_histogram('Gradient/Parameter-wise distribution', grads, tb_x)
 
+                value_loss_all, policy_loss_all, l2_loss_all = torch.cat(running_losses_list, dim=0).t().unbind()
+                tb_writer.add_histogram('Loss/Value/Sample-wise distribution', value_loss_all, tb_x)
+                tb_writer.add_histogram('Loss/Policy/Sample-wise distribution', policy_loss_all, tb_x)
+                tb_writer.add_histogram('Loss/L2 penalty/Sample-wise distribution', l2_loss_all, tb_x)
 
                 running_losses *= 0.
+                running_losses_list = []
                 n_iterations_since_stats_printed = 0
 
         return sum(last_losses)
