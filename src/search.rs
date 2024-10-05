@@ -188,10 +188,7 @@ impl TreeSearch {
 
             match self.node(node_idx) {
                 Node::Terminal(terminal_node) => {
-                    let span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("terminal node"), 0);
+                    span.emit_text("leaf: terminal node");
 
                     break terminal_node.value;
                 }
@@ -242,16 +239,18 @@ impl TreeSearch {
                     state.update(*update);
                 }
                 Node::Unexpanded => {
-                    let span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("unexpanded node"), 0);
-
                     // expand this node
                     if let Some(win) = state.evaluate_final_state() {
+                        span.emit_text("leaf: terminal node");
+
                         *self.node_mut(node_idx) = Node::Terminal(TerminalNode::new(win));
                         break win;
                     } else {
+                        let _span = self.tracy_client.clone().span(
+                            tracy_client::span_location!("leaf: unexpanded nonterminal node"),
+                            0,
+                        );
+
                         let next_arm_index = state.instr_buffer.len();
                         let next_arm_pos = state.world.arms[next_arm_index].pos;
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
@@ -284,7 +283,7 @@ impl TreeSearch {
         span.emit_value(path.len() as u64);
 
         {
-            let span = self
+            let _span = self
                 .tracy_client
                 .clone()
                 .span(tracy_client::span_location!("backprop"), 0);
