@@ -139,6 +139,11 @@ if __name__ == "__main__":
                 tb_writer.add_scalar('Loss/Policy/train', last_policy_loss, tb_x)
                 tb_writer.add_scalar('Loss/L2 penalty/train', last_l2_loss, tb_x)
                 tb_writer.add_scalar('Loss/Total/train', sum(last_losses), tb_x)
+
+                if i % 1000 == 0:
+                    tb_writer.add_histogram('Gradient/Parameter-wise distribution by batch', grads, tb_x)
+
+
                 running_losses *= 0.
                 n_iterations_since_stats_printed = 0
 
