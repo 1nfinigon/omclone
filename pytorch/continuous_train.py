@@ -72,10 +72,10 @@ if __name__ == "__main__":
     model.to(device)
 
     def loss_fn(model, pos, model_value_outputs, model_policy_outputs, value_outputs, policy_outputs, loss_weights):
-        value_error = 1.5 * (value_outputs * model_value_outputs.clamp(min=1e-3).log())
+        value_error = 1.5 * (value_outputs * model_value_outputs.clamp(min=1e-3).log()).sum(dim=1)
         B = model_policy_outputs.size()[0]
         model_policy_outputs = torch.stack([model_policy_outputs[b, :, pos[b, 0], pos[b, 1]] for b in range(B)])
-        policy_error = 1.0 * (policy_outputs * model_policy_outputs.clamp(min=1e-3).log())
+        policy_error = 1.0 * (policy_outputs * model_policy_outputs.clamp(min=1e-3).log()).sum(dim=1)
         l2_penalty = 3e-5 * torch.stack([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad]).sum().expand(B)
         return torch.stack([value_error, policy_error, l2_penalty], dim=1) * loss_weights
 
