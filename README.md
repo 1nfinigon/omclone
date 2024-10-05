@@ -278,11 +278,6 @@ These were run on PyTorch 2.0.1 instead of 2.4.1.
 
 # Future work
 
-Pressing:
-
--   torch `cross_entropy` expects unnormalized logits, but I'm feeding in
-    softmaxed logits during training
-
 Technical/impl work:
 
 -   Seed-solver: Generate solutions that have low cycles-left but still fail
@@ -303,6 +298,10 @@ Technical/impl work:
 
 Science-y investigation work:
 
+-   Check the distribution of loss function on individual samples of validation
+    set. If there are a cluster of values around the mean then you are
+    overfitting. If there are just a few values very high above a low majority
+    group then your loss is being affected by outliers
 -   Explicit weights init
 -   Lean on existing solutions more, but be careful mixing them in with
     MCTS-generated solutions. They are from different domains; try having them
