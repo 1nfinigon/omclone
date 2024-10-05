@@ -16,6 +16,7 @@ use eyre::Result;
 
 fn solve_one_puzzle_seeded(
     args: &Args,
+    tracy_client: tracy_client::Client,
     puzzle_fpath: impl AsRef<Path>,
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
@@ -113,7 +114,7 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        let mut tree_search = search::TreeSearch::new(search_state.clone());
+        let mut tree_search = search::TreeSearch::new(search_state.clone(), tracy_client.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
@@ -330,6 +331,7 @@ fn run_one_epoch(
 
             solve_one_puzzle_seeded(
                 args,
+                tracy_client.clone(),
                 puzzle_fpath,
                 seed_puzzle,
                 solution_fpath,

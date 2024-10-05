@@ -99,16 +99,18 @@ pub struct TreeSearch {
     sum_depth: usize,
     max_depth: u32,
     dirichlet_distr: rand_distr::Dirichlet<f32>,
+    tracy_client: tracy_client::Client,
 }
 
 impl TreeSearch {
-    pub fn new(root: State) -> Self {
+    pub fn new(root: State, tracy_client: tracy_client::Client) -> Self {
         Self {
             root,
             nodes: vec![Node::Unexpanded],
             sum_depth: 0,
             max_depth: 0,
             dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
+            tracy_client,
         }
     }
 
@@ -166,6 +168,11 @@ impl TreeSearch {
     }
 
     pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
+        let span = self
+            .tracy_client
+            .clone()
+            .span(tracy_client::span_location!("search once"), 0);
+
         let mut state = self.root.clone();
         let mut node_idx = NodeId(0);
         let mut path = Vec::new();
@@ -181,9 +188,19 @@ impl TreeSearch {
 
             match self.node(node_idx) {
                 Node::Terminal(terminal_node) => {
+                    let span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("terminal node"), 0);
+
                     break terminal_node.value;
                 }
                 Node::Real(real_node) => {
+                    let span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("real node"), 0);
+
                     let next_updates = state.next_updates().ok().unwrap();
 
                     let default_value_for_unexpanded_child = {
@@ -225,6 +242,11 @@ impl TreeSearch {
                     state.update(*update);
                 }
                 Node::Unexpanded => {
+                    let span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("unexpanded node"), 0);
+
                     // expand this node
                     if let Some(win) = state.evaluate_final_state() {
                         *self.node_mut(node_idx) = Node::Terminal(TerminalNode::new(win));
@@ -259,16 +281,25 @@ impl TreeSearch {
             }
         };
 
-        // backpropagate
-        for &node_idx in path.iter().rev() {
-            self.node_mut(node_idx).incr_visits();
-            if let Node::Real(real_node) = self.node_mut(node_idx) {
-                real_node.value_sum += leaf_utility;
+        span.emit_value(path.len() as u64);
+
+        {
+            let span = self
+                .tracy_client
+                .clone()
+                .span(tracy_client::span_location!("backprop"), 0);
+
+            // backpropagate
+            for &node_idx in path.iter().rev() {
+                self.node_mut(node_idx).incr_visits();
+                if let Node::Real(real_node) = self.node_mut(node_idx) {
+                    real_node.value_sum += leaf_utility;
+                }
             }
+            let this_depth = path.len().saturating_sub(1);
+            self.sum_depth += this_depth;
+            self.max_depth = self.max_depth.max(this_depth as u32);
         }
-        let this_depth = path.len().saturating_sub(1);
-        self.sum_depth += this_depth;
-        self.max_depth = self.max_depth.max(this_depth as u32);
 
         Ok(())
     }
