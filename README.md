@@ -289,6 +289,9 @@ I had also been observing the value probability being extremely sharp (either 0
 or 1, very rarely in between). This stopped happening after the above bug was
 fixed.
 
+I've repeatedly had to lower the AdamW lr from 4e-4 to 5e-6, to avoid
+instability.
+
 # Future work
 
 Technical/impl work:

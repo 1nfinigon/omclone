@@ -80,7 +80,7 @@ if __name__ == "__main__":
         l2_penalty = 3e-5 * torch.stack([torch.linalg.norm(p) for p in model.parameters() if p.requires_grad]).sum().expand(B)
         return torch.stack([value_error, policy_error, l2_penalty], dim=1) * loss_weights
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=4e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-6)
 
     print('Model has {} trainable parameters'.format(sum(p.numel() for p in model.parameters())))
 
