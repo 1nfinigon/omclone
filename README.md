@@ -274,7 +274,14 @@ These were run on PyTorch 2.0.1 instead of 2.4.1.
     -   Optimizer: SGD lr=1e-4 momentum=0.999
 -   Run H: model48_20240929_113059
     -   Optimizer: SGD lr=5e-5 momentum=0.999
+    
+I abandoned this; I didn't learn anything of interest that experiment 4 didn't
+show already.
 
+# Experiment 6 - continuous training from MCTS sliding window
+
+I discovered and fixed a major bug where my loss function was applying softmax
+twice.
 
 # Future work
 
