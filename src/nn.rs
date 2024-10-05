@@ -379,14 +379,14 @@ impl<const N: usize> SparseCoo<N> {
         let tensor = {
             let _span = tracy_client
                 .clone()
-                .span(tracy_client::span_location!("to_dense"), 0);
-            tensor.f_to_dense(None, false)?
+                .span(tracy_client::span_location!("to device"), 0);
+            tensor.f_to(options.1)?
         };
         let tensor = {
             let _span = tracy_client
                 .clone()
-                .span(tracy_client::span_location!("to device"), 0);
-            tensor.f_to(options.1)?
+                .span(tracy_client::span_location!("to_dense"), 0);
+            tensor.f_to_dense(None, false)?
         };
         Ok(tensor)
     }
