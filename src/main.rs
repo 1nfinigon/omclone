@@ -20,6 +20,8 @@ mod search_history;
 mod search_state;
 #[cfg(feature = "nn")]
 mod seed_solver;
+#[cfg(feature = "nn")]
+mod tb_trim;
 
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod render_library;
@@ -66,6 +68,9 @@ fn main() -> Result<()> {
 
         #[cfg(feature = "nn")]
         Some("gen-train") => gen_train::main(),
+
+        #[cfg(feature = "nn")]
+        Some("tb-trim") => tb_trim::main(),
 
         Some("revgen") => revgen::main(),
 
