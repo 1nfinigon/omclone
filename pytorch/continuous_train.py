@@ -52,16 +52,17 @@ class NPZDataset(torch.utils.data.Dataset):
         return data
 
 if __name__ == "__main__":
+    training_run_name = 'mainline' if len(sys.argv) < 2 else sys.argv[1]
+    print("Training run name: {}".format(training_run_name))
+
     device = device()
 
     torch.manual_seed(0)
 
-    (model_number, model_path) = max(((int(p.stem), p) for p in Path("test/net").glob("*")), key=lambda x: x[0])
+    (model_number, model_path) = max(((int(p.stem), p) for p in Path("test/net/{}".format(training_run_name)).glob("*")), key=lambda x: x[0])
     print("Using model name: {}".format(model_number))
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    training_run_name = 'mainline'
-    print("Training run name: {}".format(training_run_name))
 
     full_set = NPZDataset(250000, device=device)
     training_set, validation_set = torch.utils.data.random_split(full_set, [0.75, 0.25], generator=torch.Generator().manual_seed(42))
@@ -204,6 +205,6 @@ if __name__ == "__main__":
     writer.flush()
 
     # Save the model's state
-    model_path = 'test/net/{}.pt'.format(model_number + len(training_set))
+    model_path = 'test/net/{}/{}.pt'.format(training_run_name, model_number + len(training_set))
     print("saving to {}".format(model_path))
     model.save(model_path)

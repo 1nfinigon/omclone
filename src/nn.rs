@@ -861,8 +861,8 @@ pub mod model {
         }
 
         pub fn load_latest(device: tch::Device) -> eyre::Result<Self> {
-            // look for the latest model under test/net
-            let latest_model = std::fs::read_dir("test/net")
+            // look for the latest model under test/net/mainline
+            let latest_model = std::fs::read_dir("test/net/mainline")
                 .unwrap()
                 .flatten()
                 .filter_map(|f| {

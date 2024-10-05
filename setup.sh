@@ -22,6 +22,7 @@ if [ ! -f src/default_paths.txt ]; then
 fi
 
 mkdir test/net
+mkdir test/net/mainline
 mkdir test/games
 mkdir test/tensorboard
 mkdir test/training_data
