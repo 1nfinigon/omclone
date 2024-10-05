@@ -103,13 +103,14 @@ if __name__ == "__main__":
                 policy_softmax_temperature)
 
             # Compute the loss and its gradients
-            losses = loss_fn(model,
+            losses_by_sample = loss_fn(model,
                              data.pos.to(device, non_blocking=True),
                              model_value_outputs,
                              model_policy_outputs,
                              data.value_outputs.to(device, non_blocking=True),
                              data.policy_outputs.to(device, non_blocking=True),
-                             data.loss_weights.to(device, non_blocking=True)).mean(dim=0)
+                             data.loss_weights.to(device, non_blocking=True))
+            losses = losses_by_sample.mean(dim=0)
             loss = losses.sum()
             loss.backward()
 
@@ -118,7 +119,7 @@ if __name__ == "__main__":
 
             # Gather data and report
             running_losses += losses
-            running_losses_list.append(loss)
+            running_losses_list.append(losses_by_sample)
             n_iterations_since_stats_printed += 1
             if i % 10 == 0:
                 last_losses = (running_losses / n_iterations_since_stats_printed).tolist()
