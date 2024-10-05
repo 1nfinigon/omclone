@@ -163,12 +163,15 @@ fn solve_one_puzzle_seeded(
             }
         );
 
-        let lowconf = |x: f64, elbow: f64, sharpness: f64| {
+        // elbow: at what x value does the unsmoothed curve hit zero?
+        // sharpness: how sharp the curve should be
+        // intercept: what should the value at 0 be
+        let lowconf = |x: f64, elbow: f64, sharpness: f64, intercept: f64| {
             // log(1+exp(6*(1-(x/0.5))))/6
-            (1. + (sharpness * (1. - (x / elbow))).exp()).ln().clamp(0., 1.)
+            ((1. + (sharpness * (1. - (x / elbow))).exp()).ln() * intercept / sharpness).clamp(0., 1.)
         };
 
-        if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6.)) {
+        if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6., 0.9)) {
             let arm_index = search_state.next_arm_index();
             let instr = seed_world.tapes[arm_index].get(
                 search_state.world.timestep as usize,
