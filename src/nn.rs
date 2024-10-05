@@ -1022,13 +1022,13 @@ pub mod model {
                         .tracy_client
                         .clone()
                         .span(tracy_client::span_location!("policy extraction"), 0);
+                    let policy_tensor = policy_tensor
+                        .f_select(3, x as i64)?
+                        .f_select(2, y as i64)?
+                        .f_select(0, 0)?
+                        .f_to(tch::Device::Cpu)?;
                     for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
-                        let this_policy = policy_tensor.f_double_value(&[
-                            0,
-                            i_instr as i64,
-                            y as i64,
-                            x as i64,
-                        ])? as f32;
+                        let this_policy = policy_tensor.f_double_value(&[i_instr as i64])? as f32;
                         assert!(this_policy >= 0.);
                         *policy_elt = this_policy;
                         policy_sum += this_policy;
