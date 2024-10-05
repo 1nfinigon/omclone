@@ -981,7 +981,7 @@ pub mod model {
                             0,
                         );
                         tch::IValue::Tensor(
-                            tch::Tensor::f_from_slice(&[if is_root { 2.00 } else { 1. }])?
+                            tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
                                 .f_to(self.device)?,
                         )
                     },
