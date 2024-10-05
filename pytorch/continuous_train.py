@@ -148,9 +148,9 @@ if __name__ == "__main__":
                     tb_writer.add_histogram('Gradient/Parameter-wise distribution', grads, tb_x)
 
                     value_loss_all, policy_loss_all, l2_loss_all = torch.cat(running_losses_list, dim=0).t().unbind()
-                    tb_writer.add_histogram('Loss/Value/Sample-wise distribution', value_loss_all, tb_x, bins='auto')
-                    tb_writer.add_histogram('Loss/Policy/Sample-wise distribution', policy_loss_all, tb_x, bins='auto')
-                    tb_writer.add_histogram('Loss/L2 penalty/Sample-wise distribution', l2_loss_all, tb_x, bins='auto')
+                    tb_writer.add_histogram('Loss/Value/Sample-wise distribution', value_loss_all, tb_x)
+                    tb_writer.add_histogram('Loss/Policy/Sample-wise distribution', policy_loss_all, tb_x)
+                    tb_writer.add_histogram('Loss/L2 penalty/Sample-wise distribution', l2_loss_all, tb_x)
 
                     running_losses_list = []
 
