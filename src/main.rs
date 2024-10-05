@@ -37,6 +37,7 @@ use color_eyre::install;
 #[cfg(not(feature = "color_eyre"))]
 use simple_eyre::install;
 
+#[cfg(feature = "tracy")]
 tracy_client::register_demangler!();
 
 fn main() -> Result<()> {

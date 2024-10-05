@@ -7,6 +7,14 @@ default-run = "omclone"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["benchmark", "editor_ui", "display_ui", "color_eyre", "nn"]
+tracy = [ "tracy-client/enable",
+          "tracy-client/system-tracing",
+          "tracy-client/context-switch-tracing",
+          "tracy-client/sampling",
+          "tracy-client/code-transfer",
+          "tracy-client/broadcast",
+          "tracy-client/callstack-inlines",
+          "tracy-client/demangle"]
 benchmark = []
 editor_ui = ["display_ui"]
 display_ui = ["egui", "miniquad", "egui-miniquad", "image", "fontdue"]
@@ -47,7 +55,7 @@ uuid = "1.10"
 rayon = {version = "1.10", optional = true}
 indexmap = "2"
 union-find = "0.4"
-tracy-client = {version = "0.17.4", features = ["demangle"]}
+tracy-client = {version = "0.17.4", default-features = false}
 
 egui = {version = "0.27", optional = true}
 miniquad = { version = "0.4", optional = true}
