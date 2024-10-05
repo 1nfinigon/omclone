@@ -156,7 +156,7 @@ if __name__ == "__main__":
 
                 if i % 1000 == 0:
                     for (name, params) in model.named_parameters():
-                        tb_writer.add_histogram('Weights/{}'.format(name), params.flatten(), tb_x, bins='auto')
+                        tb_writer.add_histogram('Weights/{}'.format(name), params.flatten(), tb_x)
 
                 running_losses *= 0.
                 n_iterations_since_stats_printed = 0
