@@ -283,6 +283,12 @@ show already.
 I discovered and fixed a major bug where my loss function was applying softmax
 twice.
 
+This was causing both my value and policy to be _extremely_ sharp. I had
+compensated by ramping up the root policy temperature from 1.03 to 6.0 (!), and
+I had also been observing the value probability being extremely sharp (either 0
+or 1, very rarely in between). This stopped happening after the above bug was
+fixed.
+
 # Future work
 
 Technical/impl work:
