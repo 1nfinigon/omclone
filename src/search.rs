@@ -6,7 +6,7 @@ use atomic_float::AtomicF32;
 use eyre::{OptionExt, Result};
 use once_cell::sync::OnceCell;
 use rand::prelude::*;
-use std::sync::atomic::{self, AtomicU32};
+use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 
 /// How many virtual visits should an in-progress thread count for (in an
 /// attempt to avoid multiple threads descending exactly the same line)?
@@ -205,8 +205,8 @@ impl NodeData {
 pub struct TreeSearch {
     root: State,
     root_node: Node,
-    sum_depth: usize,
-    max_depth: u32,
+    sum_depth: AtomicUsize,
+    max_depth: AtomicU32,
     dirichlet_distr: rand_distr::Dirichlet<f32>,
     tracy_client: tracy_client::Client,
 }
@@ -216,14 +216,14 @@ impl TreeSearch {
         Self {
             root,
             root_node: Node::new_unexpanded(),
-            sum_depth: 0,
-            max_depth: 0,
+            sum_depth: 0.into(),
+            max_depth: 0.into(),
             dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
             tracy_client,
         }
     }
 
-    pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
+    pub fn search_once<RngT: Rng>(&self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
         let span = self
             .tracy_client
             .clone()
@@ -362,8 +362,21 @@ impl TreeSearch {
                 node_data.decr_virtual_loss_count();
             }
             let this_depth = virtual_loss_incurred.len();
-            self.sum_depth += this_depth;
-            self.max_depth = self.max_depth.max(this_depth as u32);
+            self.sum_depth
+                .fetch_add(this_depth, atomic::Ordering::Relaxed);
+            // `fetch_update` returns `Err` on closure returning `None`, but we
+            // don't care
+            let (Ok(_) | Err(_)) = self.max_depth.fetch_update(
+                atomic::Ordering::Relaxed,
+                atomic::Ordering::Relaxed,
+                |max_depth| {
+                    if max_depth >= this_depth as u32 {
+                        None
+                    } else {
+                        Some(this_depth as u32)
+                    }
+                },
+            );
         }
 
         Ok(())
@@ -374,11 +387,11 @@ impl TreeSearch {
     }
 
     pub fn avg_depth(&self) -> f32 {
-        (self.sum_depth as f32) / (self.sum_visits() as f32)
+        (self.sum_depth.load(atomic::Ordering::Relaxed) as f32) / (self.sum_visits() as f32)
     }
 
     pub fn max_depth(&self) -> u32 {
-        self.max_depth
+        self.max_depth.load(atomic::Ordering::Relaxed)
     }
 }
 

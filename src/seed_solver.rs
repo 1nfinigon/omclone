@@ -8,6 +8,8 @@ use crate::sim;
 use crate::utils;
 
 use rand::prelude::*;
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -114,13 +116,17 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        let mut tree_search = search::TreeSearch::new(search_state.clone(), tracy_client.clone());
+        let tree_search = search::TreeSearch::new(search_state.clone(), tracy_client.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
-        for _ in 0..playouts {
-            tree_search.search_once(rng, model)?;
-        }
+        (0..playouts)
+            .into_par_iter()
+            .map_init(
+                || rand::thread_rng(),
+                |rng, _| -> Result<()> { Ok(tree_search.search_once(rng, model)?) },
+            )
+            .collect::<Result<()>>()?;
 
         let stats = tree_search.next_updates_with_stats();
 
@@ -262,6 +268,7 @@ fn solve_one_puzzle_seeded(
 
 #[derive(Default)]
 pub struct Args {
+    threads: Option<usize>,
     forever: Option<()>,
     seed: Option<u64>,
     reload_model_every: Option<usize>,
@@ -274,6 +281,13 @@ impl Args {
         let mut self_ = Self::default();
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "--threads" => {
+                    self_.threads = Some(
+                        args.next()
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .expect("--threads should be followed by a count"),
+                    );
+                }
                 "--forever" => {
                     self_.forever = Some(());
                 }
@@ -365,13 +379,6 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
         std::mem::size_of::<nn::Features>()
     );
 
-    let mut rng: Box<dyn RngCore> = if let Some(seed) = args.seed {
-        Box::new(rand_pcg::Pcg64::seed_from_u64(seed))
-    } else {
-        Box::new(rand::thread_rng())
-    };
-    let rng = &mut rng;
-
     //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
     //solve_one_puzzle_seeded(&"", &seed_puzzle, &"", &seed_solution, &model, rng)?;
 
@@ -389,28 +396,40 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
     let device = nn::get_best_device()?;
     println!("Using device {:?}", device);
 
-    match args.forever {
-        Some(()) => loop {
-            run_one_epoch(
-                &args,
-                tracy_client.clone(),
-                rng,
-                device,
-                &puzzle_map,
-                &mut seed_solution_paths,
-            )?;
-        },
-        None => {
-            run_one_epoch(
-                &args,
-                tracy_client.clone(),
-                rng,
-                device,
-                &puzzle_map,
-                &mut seed_solution_paths,
-            )?;
-        }
-    }
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads.unwrap_or(4))
+        .thread_name(|i| format!("search thread {}", i))
+        .build()?
+        .install(|| -> Result<()> {
+            let mut rng: Box<dyn RngCore> = if let Some(seed) = args.seed {
+                Box::new(rand_pcg::Pcg64::seed_from_u64(seed))
+            } else {
+                Box::new(rand::thread_rng())
+            };
+            let rng = &mut rng;
 
-    Ok(())
+            match args.forever {
+                Some(()) => loop {
+                    run_one_epoch(
+                        &args,
+                        tracy_client.clone(),
+                        rng,
+                        device,
+                        &puzzle_map,
+                        &mut seed_solution_paths,
+                    )?;
+                },
+                None => {
+                    run_one_epoch(
+                        &args,
+                        tracy_client.clone(),
+                        rng,
+                        device,
+                        &puzzle_map,
+                        &mut seed_solution_paths,
+                    )?;
+                }
+            }
+            Ok(())
+        })
 }
