@@ -15,29 +15,33 @@ pub const PUZZLE_DIR: &str = "test/puzzle";
 /// file is the fname, not the puzzle name. So, we key the PuzzleMap by fname.
 pub type PuzzleMap = HashMap<String, (PathBuf, parser::FullPuzzle)>;
 
+pub fn insert_into_puzzle_map(puzzle_map: &mut PuzzleMap, f_path: impl AsRef<Path>) {
+    let f_puzzle = File::open(f_path.as_ref()).unwrap();
+    let fname = f_path.as_ref().file_name().unwrap().to_string_lossy();
+    let fname = fname.strip_suffix(".puzzle").unwrap_or(&fname);
+    if let Ok(puzzle) = parser::parse_puzzle(&mut BufReader::new(f_puzzle)) {
+        if puzzle.outputs.iter().any(|atoms| {
+            atoms
+                .iter()
+                .any(|atom| atom.atom_type == AtomType::RepeatingOutputMarker)
+        }) {
+            println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
+        } else {
+            let existing_puzzle = puzzle_map.insert(fname.to_string(), (f_path.as_ref().to_owned(), puzzle));
+            assert!(existing_puzzle.is_none());
+        }
+    } else {
+        println!("Puzzle failed to load: {:?}", f_path.as_ref());
+    }
+}
+
 pub fn read_puzzle_recurse(puzzle_map: &mut PuzzleMap, directory: impl AsRef<Path>) {
     for f in fs::read_dir(directory).unwrap().flatten() {
         let ftype = f.file_type().unwrap();
         if ftype.is_dir() {
             read_puzzle_recurse(puzzle_map, f.path());
         } else if ftype.is_file() {
-            let f_puzzle = File::open(f.path()).unwrap();
-            let fname = f.file_name().into_string().unwrap();
-            let fname = fname.strip_suffix(".puzzle").unwrap_or(&fname);
-            if let Ok(puzzle) = parser::parse_puzzle(&mut BufReader::new(f_puzzle)) {
-                if puzzle.outputs.iter().any(|atoms| {
-                    atoms
-                        .iter()
-                        .any(|atom| atom.atom_type == AtomType::RepeatingOutputMarker)
-                }) {
-                    println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
-                } else {
-                    let existing_puzzle = puzzle_map.insert(fname.to_string(), (f.path(), puzzle));
-                    assert!(existing_puzzle.is_none());
-                }
-            } else {
-                println!("Puzzle failed to load: {:?}", f.path());
-            }
+            insert_into_puzzle_map(puzzle_map, f.path());
         }
     }
 }

@@ -281,6 +281,7 @@ fn solve_one_puzzle_seeded(
 pub struct Args {
     threads: Option<usize>,
     forever: Option<()>,
+    single: Option<()>,
     seed: Option<u64>,
     reload_model_every: Option<usize>,
     max_cycles: Option<u64>,
@@ -301,6 +302,9 @@ impl Args {
                 }
                 "--forever" => {
                     self_.forever = Some(());
+                }
+                "--single" => {
+                    self_.single = Some(());
                 }
                 "--seed" => {
                     self_.seed = Some(
@@ -390,19 +394,27 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
         std::mem::size_of::<nn::Features>()
     );
 
-    //let (seed_puzzle, seed_solution) = utils::get_default_puzzle_solution()?;
     //solve_one_puzzle_seeded(&"", &seed_puzzle, &"", &seed_solution, &model, rng)?;
 
-    println!("loading seed puzzles");
     let mut puzzle_map = utils::PuzzleMap::new();
-    utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
-    println!("loading seed solutions");
     let mut seed_solution_paths = Vec::new();
-    let mut cb = |fpath: PathBuf| {
-        seed_solution_paths.push(fpath);
-    };
-    utils::read_file_suffix_recurse(&mut cb, ".solution", "test/solution");
-    utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
+
+    if let Some(()) = args.single {
+        let (base_str, puzzle_str, solution_str) = utils::get_default_path_strs();
+
+        utils::insert_into_puzzle_map(&mut puzzle_map, PathBuf::from(base_str).join(puzzle_str));
+        seed_solution_paths.push(PathBuf::from(base_str).join(solution_str));
+    } else {
+        println!("loading seed puzzles");
+        utils::read_puzzle_recurse(&mut puzzle_map, "test/puzzle");
+
+        println!("loading seed solutions");
+        let mut cb = |fpath: PathBuf| {
+            seed_solution_paths.push(fpath);
+        };
+        utils::read_file_suffix_recurse(&mut cb, ".solution", "test/solution");
+        utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
+    }
 
     let device = nn::get_best_device()?;
     println!("Using device {:?}", device);
