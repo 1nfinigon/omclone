@@ -292,6 +292,20 @@ fixed.
 I've repeatedly had to lower the AdamW lr from 4e-4 to 5e-6, to avoid
 instability.
 
+Introduced altline = more res layers (res, res, respool, res, res, convtime,
+res, res, respool, res, res)
+Killed altline at 120M because it was tracking mainline loss/policy extremely
+closely
+
+Note that when I changed the ratios of human-seed-to-mcts data, there were
+drastic loss changes (increase, and then decrease again).
+
+This implies that right now the mainline model architecture is not the limiting
+factor, but instead the quality of the training data is the limiting factor.
+
+Introduced to mainline the parallel search speedups at 172M, and increased
+playouts from 100/600 to 1000/6000.
+
 # Future work
 
 Technical/impl work:
