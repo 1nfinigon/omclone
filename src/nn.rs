@@ -1012,6 +1012,10 @@ pub mod model {
     use rand::prelude::*;
 
     impl search::BatchEval for Model {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
         fn max_batch_size(&self) -> usize {
             128
         }

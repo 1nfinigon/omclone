@@ -221,6 +221,8 @@ pub struct EvalResult {
 }
 
 pub trait BatchEval: Sync + Send {
+    fn name(&self) -> &str;
+
     fn max_batch_size(&self) -> usize;
 
     /// `states` contains a bool `is_root`
@@ -235,6 +237,7 @@ struct EvalThreadRequest {
 }
 
 pub struct EvalThread {
+    eval: Arc<dyn BatchEval + 'static>,
     eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
     eval_count: AtomicUsize,
 }
@@ -330,16 +333,23 @@ impl EvalThread {
         }
     }
 
-    pub fn new(eval: Arc<dyn BatchEval>, tracy_client: tracy_client::Client) -> Self {
+    pub fn new(eval: impl BatchEval + 'static, tracy_client: tracy_client::Client) -> Self {
+        let eval = Arc::new(eval);
         let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
         thread::spawn({
+            let eval = eval.clone();
             let tracy_client = tracy_client.clone();
             move || Self::thread_main(eval, eval_thread_rx, tracy_client)
         });
         Self {
+            eval,
             eval_count: 0.into(),
             eval_thread_tx,
         }
+    }
+
+    pub fn model_name(&self) -> &str {
+        self.eval.name()
     }
 
     pub fn clear(&mut self) {
