@@ -2,15 +2,68 @@ use crate::nn;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
+use atomic_float::AtomicF32;
 use eyre::{OptionExt, Result};
+use once_cell::sync::OnceCell;
 use rand::prelude::*;
-use std::collections::BTreeMap;
+use std::sync::atomic::{self, AtomicU32};
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ChildId(u32);
 
-struct RealNode {
-    children: BTreeMap<ChildId, NodeId>,
+/// Represents a node in one of its three states:
+/// - unexpanded (nothing is known about this node yet): OnceCell is not set,
+///   and not currently being initialized
+/// - expanding (a thread is fleshing out the node and evaluating the nn):
+///   OnceCell is being initialized (locked)
+/// - expanded (terminal OR non-terminal): OnceCell is set
+///
+/// This type is intended to be "small" -- approx 2 words.
+struct Node(OnceCell<Box<NodeData>>);
+
+impl Node {
+    const fn new_unexpanded() -> Self {
+        Self(OnceCell::new())
+    }
+
+    /// Returns `true` if this thread succeeded in the expansion of this node;
+    /// false if another thread did the initialization (or is still doing
+    /// initialization, in which case this function will block). If `false`,
+    /// then it is guaranteed that `f` was not called. It is also guaranteed
+    /// that after this call, `data` will return `Some`.
+    fn data_expanding_if_still_unexpanded<F: FnOnce() -> Result<NodeData>>(
+        &self,
+        f: F,
+    ) -> Result<(&NodeData, bool)> {
+        let mut this_thread_expanded = false;
+        let data = self.0.get_or_try_init(|| -> Result<_> {
+            this_thread_expanded = true;
+            Ok(Box::new(f()?))
+        })?;
+        Ok((data, this_thread_expanded))
+    }
+
+    /// Returns `None` if unexpanded.
+    fn data(&self) -> Option<&NodeData> {
+        self.0.get().map(|b| b.as_ref())
+    }
+
+    fn visits(&self) -> u32 {
+        self.data().map_or(0, |data| data.visits())
+    }
+}
+
+/// Contains data about an expanded terminal OR non-terminal node.
+/// This type is intended to be mutable with only a shared reference.
+/// All relevant fields are inherently atomic/sync. Compound operations might be
+/// racy but aren't intended to affect search too much.
+///
+/// This type is not intended to be "small" memory-wise.
+struct NodeData {
+    // TODO: remove this and use utility/value_sum being NaN instead.
+    terminal: bool,
+
+    children: [Node; BasicInstr::N_TYPES],
 
     /// raw NN utility (for non-leaf nodes), or final evaluation (for leaf
     /// nodes)
@@ -21,81 +74,88 @@ struct RealNode {
     policy: [f32; BasicInstr::N_TYPES],
 
     /// = N
-    visits: u32,
+    visits: AtomicU32,
 
     /// = Q-value * N
-    value_sum: f32,
+    value_sum: AtomicF32,
 }
 
-impl RealNode {
-    fn new() -> Self {
+impl NodeData {
+    fn new_terminal(value: f32) -> Self {
         Self {
-            children: BTreeMap::new(),
-            utility: 0.,
+            terminal: true,
+            children: [const { Node::new_unexpanded() }; BasicInstr::N_TYPES],
+            utility: value,
             policy: [0.; BasicInstr::N_TYPES],
-            visits: 0,
-            value_sum: 0.,
+            visits: 0.into(),
+            value_sum: 0.0.into(),
         }
+    }
+
+    fn new_nonterminal(nn_utility: f32, nn_policy: [f32; BasicInstr::N_TYPES]) -> Self {
+        Self {
+            terminal: false,
+            children: [const { Node::new_unexpanded() }; BasicInstr::N_TYPES],
+            utility: nn_utility,
+            policy: nn_policy,
+            visits: 0.into(),
+            value_sum: 0.0.into(),
+        }
+    }
+
+    fn is_terminal(&self) -> bool {
+        self.terminal
+    }
+
+    /// NN utility, if non-terminal. Terminal valuation otherwise
+    fn raw_utility(&self) -> f32 {
+        self.utility
     }
 
     fn value(&self) -> f32 {
-        if self.visits == 0 {
+        if self.terminal {
             self.utility
         } else {
-            self.value_sum / (self.visits as f32)
+            let visits = self.visits();
+            if visits == 0 {
+                self.utility
+            } else {
+                // TODO: fix the race with visits by changing value_sum to just value
+                self.value_sum.load(atomic::Ordering::Relaxed) / (visits as f32)
+            }
         }
     }
-}
 
-struct TerminalNode {
-    value: f32,
-    visits: u32,
-}
-
-impl TerminalNode {
-    fn new(value: f32) -> Self {
-        Self { value, visits: 0 }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct NodeId(u32);
-
-enum Node {
-    Unexpanded,
-    Real(RealNode),
-    Terminal(TerminalNode),
-}
-
-impl Node {
     fn visits(&self) -> u32 {
-        match self {
-            Node::Unexpanded => 0,
-            Node::Real(real_node) => real_node.visits,
-            Node::Terminal(terminal_node) => terminal_node.visits,
-        }
+        self.visits.load(atomic::Ordering::Relaxed)
     }
 
-    fn incr_visits(&mut self) {
-        match self {
-            Node::Unexpanded => panic!("can't incr unexpanded node"),
-            Node::Real(real_node) => real_node.visits += 1,
-            Node::Terminal(terminal_node) => terminal_node.visits += 1,
-        }
+    fn get_child(&self, child_id: ChildId) -> &Node {
+        &self.children[child_id.0 as usize]
     }
 
-    fn value(&self) -> Option<f32> {
-        match self {
-            Node::Real(real_node) => Some(real_node.value()),
-            Node::Terminal(terminal_node) => Some(terminal_node.value),
-            Node::Unexpanded => None,
+    fn puct(&self, child_id: ChildId, default_value_for_unexpanded_child: f32) -> NonNan {
+        let child = self.get_child(child_id);
+        let policy = self.policy[child_id.0 as usize];
+        let child_value = child
+            .data()
+            .map_or(default_value_for_unexpanded_child, |child| child.value());
+        let visits = self.visits.load(atomic::Ordering::Relaxed);
+        let prior = policy * (visits as f32).sqrt() / (1. + child.visits() as f32);
+        NonNan::new(child_value + 1.4 * prior).unwrap()
+    }
+
+    fn incr_visits_and_utility(&self, utility: f32) {
+        self.visits.fetch_add(1, atomic::Ordering::Relaxed);
+        if !self.is_terminal() {
+            self.value_sum.fetch_add(utility, atomic::Ordering::Relaxed);
         }
     }
 }
 
 pub struct TreeSearch {
     root: State,
-    nodes: Vec<Node>,
+    root_node: Node,
     sum_depth: usize,
     max_depth: u32,
     dirichlet_distr: rand_distr::Dirichlet<f32>,
@@ -106,65 +166,12 @@ impl TreeSearch {
     pub fn new(root: State, tracy_client: tracy_client::Client) -> Self {
         Self {
             root,
-            nodes: vec![Node::Unexpanded],
+            root_node: Node::new_unexpanded(),
             sum_depth: 0,
             max_depth: 0,
             dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
             tracy_client,
         }
-    }
-
-    fn node(&self, node_idx: NodeId) -> &Node {
-        &self.nodes[node_idx.0 as usize]
-    }
-
-    fn node_mut(&mut self, node_idx: NodeId) -> &mut Node {
-        &mut self.nodes[node_idx.0 as usize]
-    }
-
-    fn get_child(&self, real_node: &RealNode, child_id: ChildId) -> &Node {
-        real_node
-            .children
-            .get(&child_id)
-            .map_or(&Node::Unexpanded, |&node_id| self.node(node_id))
-    }
-
-    fn get_or_add_child(&mut self, node_idx: NodeId, child_id: ChildId) -> NodeId {
-        let nodes_len = self.nodes.len();
-        match &mut self.nodes[node_idx.0 as usize] {
-            Node::Real(real_node) => {
-                let mut needs_pushing = false;
-                let child_node_id = real_node
-                    .children
-                    .entry(child_id)
-                    .or_insert_with(|| {
-                        let node_id = NodeId(nodes_len.try_into().unwrap());
-                        needs_pushing = true;
-                        node_id
-                    })
-                    .to_owned();
-                if needs_pushing {
-                    self.nodes.push(Node::Unexpanded);
-                }
-                child_node_id
-            }
-            _ => panic!("get_or_add_child called for a non-real node"),
-        }
-    }
-
-    /// Returns None if the child is unexpanded; in this case the heuristic for
-    /// unexpanded nodes should be used.
-    fn puct(
-        &self,
-        parent: &RealNode,
-        child_id: ChildId,
-        default_value_for_unexpanded_child: f32,
-    ) -> NonNan {
-        let child = self.get_child(parent, child_id);
-        let policy = parent.policy[child_id.0 as usize];
-        let child_value = child.value().unwrap_or(default_value_for_unexpanded_child);
-        let prior = policy * (parent.visits as f32).sqrt() / (1. + child.visits() as f32);
-        NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
     pub fn search_once<RngT: Rng>(&mut self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
@@ -174,77 +181,24 @@ impl TreeSearch {
             .span(tracy_client::span_location!("search once"), 0);
 
         let mut state = self.root.clone();
-        let mut node_idx = NodeId(0);
-        let mut path = Vec::new();
+        let mut node = &self.root_node;
+
+        // Contains all nodes from the root, including the newly expanded node
+        // that we stopped descending at.
+        let mut path: Vec<&NodeData> = Vec::new();
 
         let leaf_utility = loop {
-            path.push(node_idx);
-            if path.len() >= 500 {
-                // assume deadlocked
-                break 0.;
-            }
+            let is_root = path.len() == 0;
 
-            let is_root = node_idx == NodeId(0);
+            let (node_data, this_thread_expanded) =
+                node.data_expanding_if_still_unexpanded(|| {
+                    // if this callback was called, then we are the lucky ones who
+                    // get to expand this previously unexpanded node
 
-            match self.node(node_idx) {
-                Node::Terminal(terminal_node) => {
-                    span.emit_text("leaf: terminal node");
-
-                    break terminal_node.value;
-                }
-                Node::Real(real_node) => {
-                    let span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("real node"), 0);
-
-                    let next_updates = state.next_updates().ok().unwrap();
-
-                    let default_value_for_unexpanded_child = {
-                        let first_play_urgency_reduction = if is_root {
-                            assert!(path.len() == 1);
-                            // root has no first play urgency reduction if
-                            // Dirichlet noise is disabled
-                            // TODO: dirichlet noise
-                            0.
-                        } else {
-                            0.2 * real_node
-                                .policy
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(i, p)| {
-                                    if self.get_child(real_node, ChildId(i as u32)).visits() > 0 {
-                                        Some(p)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .sum::<f32>()
-                                .sqrt()
-                        };
-                        real_node.value() - first_play_urgency_reduction
-                    };
-
-                    // pick a child based on PUCT
-                    let child_id = (0..next_updates.len().try_into().unwrap())
-                        .map(ChildId)
-                        .max_by_key(|&child_id| {
-                            self.puct(real_node, child_id, default_value_for_unexpanded_child)
-                        })
-                        .unwrap();
-
-                    // move to child, update the state
-                    node_idx = self.get_or_add_child(node_idx, child_id);
-                    let update = next_updates.get(child_id.0 as usize).unwrap();
-                    state.update(*update);
-                }
-                Node::Unexpanded => {
-                    // expand this node
                     if let Some(win) = state.evaluate_final_state() {
                         span.emit_text("leaf: terminal node");
 
-                        *self.node_mut(node_idx) = Node::Terminal(TerminalNode::new(win));
-                        break win;
+                        Ok(NodeData::new_terminal(win))
                     } else {
                         let _span = self.tracy_client.clone().span(
                             tracy_client::span_location!("leaf: unexpanded nonterminal node"),
@@ -256,28 +210,85 @@ impl TreeSearch {
                         let (x, y) = nn::features::normalize_position(next_arm_pos)
                             .ok_or_eyre("arm out of nn bounds")?;
 
-                        let eval = model.forward(&state.nn_features, x, y, is_root)?;
+                        let mut eval = model.forward(&state.nn_features, x, y, is_root)?;
 
-                        let mut real_node = RealNode::new();
-                        real_node.policy = eval.policy;
                         if is_root {
                             // add Dirichlet noise
                             // TODO: for this problem, we should stretch out the
                             // Dirichlet noise to more than just the root.
                             // TODO: filter to only valid moves
                             let noise = self.dirichlet_distr.sample(rng);
-                            for (policy, noise) in real_node.policy.iter_mut().zip(noise) {
+                            for (policy, noise) in eval.policy.iter_mut().zip(noise) {
                                 const EPS: f32 = 0.25;
                                 *policy = (1. - EPS) * *policy + EPS * noise;
                             }
                         }
-                        real_node.utility = eval.win;
 
-                        *self.node_mut(node_idx) = Node::Real(real_node);
-                        break eval.win;
+                        Ok(NodeData::new_nonterminal(eval.win, eval.policy))
                     }
-                }
+                })?;
+
+            path.push(node_data);
+
+            if this_thread_expanded {
+                // We were the ones to expand, so stop descending here.
+                break node_data.value();
             }
+
+            // Otherwise, the node was already expanded.
+
+            if node_data.is_terminal() {
+                span.emit_text("leaf: terminal node");
+
+                break node_data.value();
+            }
+
+            // The node is not a leaf. We need to keep descending.
+
+            let _span = self
+                .tracy_client
+                .clone()
+                .span(tracy_client::span_location!("real node"), 0);
+
+            let next_updates = state.next_updates().ok().unwrap();
+
+            let default_value_for_unexpanded_child = {
+                let first_play_urgency_reduction = if is_root {
+                    assert!(path.len() == 1);
+                    // root has no first play urgency reduction if
+                    // Dirichlet noise is disabled
+                    // TODO: dirichlet noise
+                    0.
+                } else {
+                    0.2 * node_data
+                        .policy
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            if node_data.get_child(ChildId(i as u32)).visits() > 0 {
+                                Some(p)
+                            } else {
+                                None
+                            }
+                        })
+                        .sum::<f32>()
+                        .sqrt()
+                };
+                node_data.value() - first_play_urgency_reduction
+            };
+
+            // pick a child based on PUCT
+            let child_id = (0..next_updates.len().try_into().unwrap())
+                .map(ChildId)
+                .max_by_key(|&child_id| {
+                    node_data.puct(child_id, default_value_for_unexpanded_child)
+                })
+                .unwrap();
+
+            // move to child, update the state
+            node = node_data.get_child(child_id);
+            let update = next_updates.get(child_id.0 as usize).unwrap();
+            state.update(*update);
         };
 
         span.emit_value(path.len() as u64);
@@ -289,11 +300,8 @@ impl TreeSearch {
                 .span(tracy_client::span_location!("backprop"), 0);
 
             // backpropagate
-            for &node_idx in path.iter().rev() {
-                self.node_mut(node_idx).incr_visits();
-                if let Node::Real(real_node) = self.node_mut(node_idx) {
-                    real_node.value_sum += leaf_utility;
-                }
+            for node_data in path.iter().rev() {
+                node_data.incr_visits_and_utility(leaf_utility);
             }
             let this_depth = path.len().saturating_sub(1);
             self.sum_depth += this_depth;
@@ -304,7 +312,7 @@ impl TreeSearch {
     }
 
     pub fn sum_visits(&self) -> u32 {
-        self.node(NodeId(0)).visits()
+        self.root_node.visits()
     }
 
     pub fn avg_depth(&self) -> f32 {
@@ -345,36 +353,39 @@ impl NextUpdatesWithStats {
 
 impl TreeSearch {
     pub fn next_updates_with_stats(&self) -> NextUpdatesWithStats {
-        match self.node(NodeId(0)) {
-            Node::Real(root_real_node) => {
-                let updates_with_stats = self
-                    .root
-                    .next_updates()
-                    .ok()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .map(|(child_id, &instr)| {
-                        let child_id = ChildId(child_id.try_into().unwrap());
-                        let child = self.get_child(root_real_node, child_id);
-                        UpdateWithStats {
-                            instr,
-                            is_terminal: matches!(child, Node::Terminal(_)),
-                            value: NonNan::new(child.value().unwrap_or(root_real_node.value()))
-                                .unwrap(),
-                            visits: child.visits(),
-                        }
-                    })
-                    .collect();
-                NextUpdatesWithStats {
-                    root_value: root_real_node.value(),
-                    root_raw_utility: root_real_node.utility,
-                    updates_with_stats,
-                    avg_depth: self.avg_depth(),
-                    max_depth: self.max_depth(),
+        let root_node_data = self
+            .root_node
+            .data()
+            .expect("Need tree to be expanded at least once to get updates");
+        let updates_with_stats = self
+            .root
+            .next_updates()
+            .ok()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(child_id, &instr)| {
+                let child_id = ChildId(child_id.try_into().unwrap());
+                let child = root_node_data.get_child(child_id);
+                UpdateWithStats {
+                    instr,
+                    is_terminal: child.data().is_some_and(|child| child.is_terminal()),
+                    value: NonNan::new(
+                        child
+                            .data()
+                            .map_or(root_node_data.value(), |child| child.value()),
+                    )
+                    .unwrap(),
+                    visits: child.visits(),
                 }
-            }
-            _ => panic!("Need tree to be expanded at least once to get updates"),
+            })
+            .collect();
+        NextUpdatesWithStats {
+            root_value: root_node_data.value(),
+            root_raw_utility: root_node_data.raw_utility(),
+            updates_with_stats,
+            avg_depth: self.avg_depth(),
+            max_depth: self.max_depth(),
         }
     }
 }
