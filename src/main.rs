@@ -10,7 +10,7 @@ mod benchmark;
 
 #[cfg(feature = "nn")]
 mod eval;
-#[cfg(feature = "nn")]
+#[cfg(all(feature = "nn", feature = "torch"))]
 mod gen_train;
 #[cfg(feature = "nn")]
 mod nn;
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         #[cfg(feature = "nn")]
         Some("seed-solver") => seed_solver::main(args, tracy_client),
 
-        #[cfg(feature = "nn")]
+        #[cfg(all(feature = "nn", feature = "torch"))]
         Some("gen-train") => gen_train::main(),
 
         #[cfg(feature = "nn")]

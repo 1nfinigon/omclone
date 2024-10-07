@@ -421,7 +421,9 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
         utils::read_file_suffix_recurse(&mut cb, ".solution", "test/om-leaderboard-master");
     }
 
+    #[cfg(feature = "torch")]
     let device = nn::get_best_device()?;
+    #[cfg(feature = "torch")]
     println!("Using device {:?}", device);
 
     let mut make_evaluator = || -> Result<Box<dyn eval::AsyncEvaluator>> {

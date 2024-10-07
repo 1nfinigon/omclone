@@ -450,12 +450,14 @@ impl<const N: usize> SparseCoo<N> {
     }
 }
 
+#[cfg(feature = "torch")]
 pub struct SparseCooTensorsForSerializing {
     pub indices: tch::Tensor,
     pub values: tch::Tensor,
     pub size: tch::Tensor,
 }
 
+#[cfg(feature = "torch")]
 impl<const N: usize> SparseCoo<N> {
     pub fn to_tensors_for_serializing(&self) -> Result<SparseCooTensorsForSerializing> {
         Ok(SparseCooTensorsForSerializing {
