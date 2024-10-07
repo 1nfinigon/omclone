@@ -372,46 +372,6 @@ trait ToDenseTensor {
     ) -> Result<tch::Tensor>;
 }
 
-impl<const N: usize> ToDenseTensor for SparseCoo<N> {
-    fn to_dense_tensor(
-        &self,
-        tracy_client: tracy_client::Client,
-        options: (tch::Kind, tch::Device),
-    ) -> Result<tch::Tensor> {
-        let _span = tracy_client.clone().span(
-            tracy_client::span_location!("SparseCoo::to_dense_vector"),
-            0,
-        );
-        let indices = self.indices_tensor()?;
-        let values = self.values_tensor()?;
-        let tensor = {
-            let _span = tracy_client
-                .clone()
-                .span(tracy_client::span_location!("load sparse"), 0);
-            tch::Tensor::f_sparse_coo_tensor_indices_size(
-                &indices,
-                &values,
-                &self.size[..],
-                options,
-                true,
-            )?
-        };
-        let tensor = {
-            let _span = tracy_client
-                .clone()
-                .span(tracy_client::span_location!("to device"), 0);
-            tensor.f_to(options.1)?
-        };
-        let tensor = {
-            let _span = tracy_client
-                .clone()
-                .span(tracy_client::span_location!("to_dense"), 0);
-            tensor.f_to_dense(None, false)?
-        };
-        Ok(tensor)
-    }
-}
-
 impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
     fn to_dense_tensor(
         &self,
