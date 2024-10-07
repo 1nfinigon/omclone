@@ -423,7 +423,7 @@ class PolicyHead(torch.nn.Module):
         ## testing: artificially boost one of the instructions
         # input[:, 3] += 100.
 
-        return (input / softmax_temperature).softmax(dim=1)
+        return (input / softmax_temperature.view((-1, 1, 1, 1))).softmax(dim=1)
 
 def _test():
     # test trace generalizability
@@ -433,18 +433,18 @@ def _test():
     W = 5
     N = 2
     input1 = torch.rand(B, C, H, W)
+    softmax_temperature1 = torch.Tensor([1] * B)
 
     B = 11
     H = 14
     W = 15
     input2 = torch.rand(B, C, H, W)
-
-    softmax_temperature = torch.Tensor([1])
+    softmax_temperature2 = torch.Tensor([1.03] * B)
 
     model = PolicyHead(C, N)
-    output = model(input2, softmax_temperature)
+    output = model(input2, softmax_temperature2)
     assert(output.size() == (B, N_INSTR_TYPES, H, W))
-    traced_output = torch.jit.trace(model, (input1, softmax_temperature))(input2, softmax_temperature)
+    traced_output = torch.jit.trace(model, (input1, softmax_temperature1))(input2, softmax_temperature2)
     assert torch.allclose(traced_output, output)
 
 _TESTS.append(_test)
@@ -548,3 +548,6 @@ class ModelV1(torch.nn.Module):
 def run_tests():
     for test in _TESTS:
         test()
+
+if __name__ == '__main__':
+    run_tests()

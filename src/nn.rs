@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::sim;
-use eyre::Result;
+use eyre::{ensure, eyre, OptionExt, Result};
 
 pub mod constants {
 
@@ -352,8 +352,18 @@ impl<const N: usize> SparseCoo<N> {
     fn size_tensor(&self) -> Result<tch::Tensor> {
         Ok(tch::Tensor::f_from_slice(&self.size[..])?)
     }
+}
 
-    pub fn to_dense_tensor(
+trait ToDenseTensor {
+    fn to_dense_tensor(
+        &self,
+        tracy_client: tracy_client::Client,
+        options: (tch::Kind, tch::Device),
+    ) -> Result<tch::Tensor>;
+}
+
+impl<const N: usize> ToDenseTensor for SparseCoo<N> {
+    fn to_dense_tensor(
         &self,
         tracy_client: tracy_client::Client,
         options: (tch::Kind, tch::Device),
@@ -372,6 +382,97 @@ impl<const N: usize> SparseCoo<N> {
                 &indices,
                 &values,
                 &self.size[..],
+                options,
+                true,
+            )?
+        };
+        let tensor = {
+            let _span = tracy_client
+                .clone()
+                .span(tracy_client::span_location!("to device"), 0);
+            tensor.f_to(options.1)?
+        };
+        let tensor = {
+            let _span = tracy_client
+                .clone()
+                .span(tracy_client::span_location!("to_dense"), 0);
+            tensor.f_to_dense(None, false)?
+        };
+        Ok(tensor)
+    }
+}
+
+impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
+    fn to_dense_tensor(
+        &self,
+        tracy_client: tracy_client::Client,
+        options: (tch::Kind, tch::Device),
+    ) -> Result<tch::Tensor> {
+        let _span = tracy_client.clone().span(
+            tracy_client::span_location!("[SparseCoo]::to_dense_vector"),
+            0,
+        );
+
+        let batch_size = self.len();
+        ensure!(batch_size > 0);
+
+        let size = self
+            .iter()
+            .map(|sample| sample.size)
+            .try_fold(None, |prev_size, this_size| {
+                if let Some(prev_size) = prev_size {
+                    if prev_size != this_size {
+                        return Err(eyre!(
+                            "mismatched sizes in SparseCoo batch: {:?} vs {:?}",
+                            prev_size,
+                            this_size
+                        ));
+                    }
+                }
+                Ok(Some(this_size))
+            })?
+            .ok_or_eyre("SparseCoo batch is empty")?;
+
+        let mut all_indices = Vec::with_capacity(batch_size);
+        let mut all_values = Vec::with_capacity(batch_size);
+
+        for (batch_index, sample) in self.into_iter().enumerate() {
+            let indices = sample.indices_tensor()?;
+            let values = sample.values_tensor()?;
+
+            let (n, num_nonzero) = indices.size2()?;
+            assert_eq!(n, N as i64);
+
+            // prepend the batch index, so that indices becomes a tensor of size (n +
+            // 1, num_nonzero).
+            let indices = tch::Tensor::f_cat(
+                &[
+                    tch::Tensor::f_full(
+                        [1, num_nonzero],
+                        batch_index as i64,
+                        (tch::Kind::Int64, options.1),
+                    )?,
+                    indices,
+                ],
+                0,
+            )?;
+
+            all_indices.push(indices);
+            all_values.push(values);
+        }
+
+        let all_indices = tch::Tensor::f_cat(&all_indices, 1)?;
+        let all_values = tch::Tensor::f_cat(&all_values, 0)?;
+        let size_with_batch_dim: Vec<_> = std::iter::once(batch_size as i64).chain(size).collect();
+
+        let tensor = {
+            let _span = tracy_client
+                .clone()
+                .span(tracy_client::span_location!("load sparse"), 0);
+            tch::Tensor::f_sparse_coo_tensor_indices_size(
+                &all_indices,
+                &all_values,
+                &size_with_batch_dim,
                 options,
                 true,
             )?
@@ -919,172 +1020,149 @@ pub mod model {
             &self,
             states: Vec<(search_state::State, bool)>,
         ) -> Result<Vec<search::EvalResult>> {
-            // TODO: actually batch it
-
             let rng = &mut rand::thread_rng();
-            let mut eval_results = Vec::with_capacity(states.len());
+            let batch_size = states.len();
 
-            for (state, is_root) in states {
-                let next_arm_index = state.instr_buffer.len();
-                let next_arm_pos = state.world.arms[next_arm_index].pos;
-                let (x, y) = features::normalize_position(next_arm_pos)
-                    .ok_or_eyre("arm out of nn bounds")?;
+            let options = (tch::Kind::Float, self.device);
 
+            let input = {
                 let _span = self
                     .tracy_client
                     .clone()
-                    .span(tracy_client::span_location!("nn fwd"), 0);
+                    .span(tracy_client::span_location!("input munging"), 0);
 
-                assert!(x < constants::N_WIDTH);
-                assert!(y < constants::N_HEIGHT);
+                let spatial: Vec<_> = states
+                    .iter()
+                    .map(|(state, _)| &state.nn_features.spatial)
+                    .collect();
+                let spatial = spatial.to_dense_tensor(self.tracy_client.clone(), options)?;
+                let spatiotemporal: Vec<_> = states
+                    .iter()
+                    .map(|(state, _)| &state.nn_features.spatiotemporal)
+                    .collect();
+                let spatiotemporal =
+                    spatiotemporal.to_dense_tensor(self.tracy_client.clone(), options)?;
+                let temporal: Vec<_> = states
+                    .iter()
+                    .map(|(state, _)| &state.nn_features.temporal)
+                    .collect();
+                let temporal = temporal.to_dense_tensor(self.tracy_client.clone(), options)?;
 
-                let options = (tch::Kind::Float, self.device);
+                let policy_softmax_temperature: Vec<_> = states
+                    .iter()
+                    .map(|(_, is_root)| if *is_root { 1.03 } else { 1. })
+                    .collect();
+                let policy_softmax_temperature =
+                    tch::Tensor::f_from_slice(&policy_softmax_temperature)?.f_to(self.device)?;
 
-                let input = {
-                    let _span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("input munging"), 0);
-                    [
-                        {
+                assert_eq!(policy_softmax_temperature.size1()?, batch_size as i64);
+
+                [
+                    tch::IValue::Tensor(spatial),
+                    tch::IValue::Tensor(spatiotemporal),
+                    tch::IValue::Tensor(temporal),
+                    tch::IValue::Tensor(policy_softmax_temperature),
+                ]
+            };
+
+            let output = {
+                let _span = self
+                    .tracy_client
+                    .clone()
+                    .span(tracy_client::span_location!("exec"), 0);
+                tch::no_grad(|| self.module.forward_is(&input))?
+            };
+
+            let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
+
+            assert_eq!(
+                policy_tensor.size4()?,
+                (
+                    batch_size as i64,
+                    BasicInstr::N_TYPES as i64,
+                    constants::N_HEIGHT as i64,
+                    constants::N_WIDTH as i64
+                )
+            );
+            assert_eq!(value_tensor.size2()?, (batch_size as i64, 2));
+
+            let _span = self
+                .tracy_client
+                .clone()
+                .span(tracy_client::span_location!("output munging"), 0);
+
+            states
+                .iter()
+                .enumerate()
+                .map(|(batch_index, (state, is_root))| {
+                    let (win, mut policy) = {
+                        let next_arm_index = state.instr_buffer.len();
+                        let next_arm_pos = state.world.arms[next_arm_index].pos;
+                        let (x, y) = features::normalize_position(next_arm_pos)
+                            .ok_or_eyre("arm out of nn bounds")?;
+                        assert!(x < constants::N_WIDTH);
+                        assert!(y < constants::N_HEIGHT);
+
+                        let policy = {
+                            let mut policy = [0f32; BasicInstr::N_TYPES];
+
+                            let mut policy_sum = 0.;
                             let _span = self
                                 .tracy_client
                                 .clone()
-                                .span(tracy_client::span_location!("spatial"), 0);
-                            tch::IValue::Tensor(
-                                state
-                                    .nn_features
-                                    .spatial
-                                    .to_dense_tensor(self.tracy_client.clone(), options)?
-                                    .f_unsqueeze(0)?,
-                            )
-                        },
-                        {
+                                .span(tracy_client::span_location!("policy extraction"), 0);
+                            let policy_tensor = policy_tensor
+                                .f_select(3, x as i64)?
+                                .f_select(2, y as i64)?
+                                .f_select(0, batch_index as i64)?
+                                .f_to(tch::Device::Cpu)?;
+                            for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
+                                let this_policy =
+                                    policy_tensor.f_double_value(&[i_instr as i64])? as f32;
+                                assert!(this_policy >= 0.);
+                                *policy_elt = this_policy;
+                                policy_sum += this_policy;
+                            }
+                            assert!((policy_sum - 1.).abs() < 1e-6);
+                            policy
+                        };
+
+                        let win = {
                             let _span = self
                                 .tracy_client
                                 .clone()
-                                .span(tracy_client::span_location!("spatiotemporal"), 0);
-                            tch::IValue::Tensor(
-                                state
-                                    .nn_features
-                                    .spatiotemporal
-                                    .to_dense_tensor(self.tracy_client.clone(), options)?
-                                    .f_unsqueeze(0)?,
-                            )
-                        },
-                        {
-                            let _span = self
-                                .tracy_client
-                                .clone()
-                                .span(tracy_client::span_location!("temporal"), 0);
-                            tch::IValue::Tensor(
-                                state
-                                    .nn_features
-                                    .temporal
-                                    .to_dense_tensor(self.tracy_client.clone(), options)?
-                                    .f_unsqueeze(0)?,
-                            )
-                        },
-                        {
-                            let _span = self.tracy_client.clone().span(
-                                tracy_client::span_location!("policy_softmax_temperature"),
-                                0,
-                            );
-                            tch::IValue::Tensor(
-                                tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
-                                    .f_to(self.device)?,
-                            )
-                        },
-                    ]
-                };
+                                .span(tracy_client::span_location!("value extraction"), 0);
+                            let win = value_tensor.f_double_value(&[batch_index as i64, 0])? as f32;
+                            assert!(win >= 0.);
+                            let loss_by_cycles =
+                                value_tensor.f_double_value(&[batch_index as i64, 1])? as f32;
+                            assert!(loss_by_cycles >= 0.);
+                            let value_sum = win + loss_by_cycles;
+                            assert!((value_sum - 1.).abs() < 1e-6);
+                            win
+                        };
 
-                let output = {
-                    let _span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("exec"), 0);
-                    tch::no_grad(|| self.module.forward_is(&input))?
-                };
+                        (win, policy)
+                    };
 
-                let (win, mut policy) = {
-                    let _span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("output munging"), 0);
-                    let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) =
-                        output.try_into()?;
-
-                    let policy = {
-                        let mut policy = [0f32; BasicInstr::N_TYPES];
-
-                        assert_eq!(
-                            policy_tensor.size4()?,
-                            (
-                                1,
-                                BasicInstr::N_TYPES as i64,
-                                constants::N_HEIGHT as i64,
-                                constants::N_WIDTH as i64
-                            )
-                        );
-
-                        let mut policy_sum = 0.;
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("policy extraction"), 0);
-                        let policy_tensor = policy_tensor
-                            .f_select(3, x as i64)?
-                            .f_select(2, y as i64)?
-                            .f_select(0, 0)?
-                            .f_to(tch::Device::Cpu)?;
-                        for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
-                            let this_policy =
-                                policy_tensor.f_double_value(&[i_instr as i64])? as f32;
-                            assert!(this_policy >= 0.);
-                            *policy_elt = this_policy;
-                            policy_sum += this_policy;
+                    if *is_root {
+                        // add Dirichlet noise
+                        // TODO: for this problem, we should stretch out the
+                        // Dirichlet noise to more than just the root.
+                        // TODO: filter to only valid moves
+                        let noise = self.dirichlet_distr.sample(rng);
+                        for (policy, noise) in policy.iter_mut().zip(noise) {
+                            const EPS: f32 = 0.25;
+                            *policy = (1. - EPS) * *policy + EPS * noise;
                         }
-                        assert!((policy_sum - 1.).abs() < 1e-6);
-                        policy
-                    };
-
-                    let win = {
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("value extraction"), 0);
-                        assert_eq!(value_tensor.size2()?, (1, 2));
-                        let win = value_tensor.f_double_value(&[0, 0])? as f32;
-                        assert!(win >= 0.);
-                        let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
-                        assert!(loss_by_cycles >= 0.);
-                        let value_sum = win + loss_by_cycles;
-                        assert!((value_sum - 1.).abs() < 1e-6);
-                        win
-                    };
-
-                    (win, policy)
-                };
-
-                if is_root {
-                    // add Dirichlet noise
-                    // TODO: for this problem, we should stretch out the
-                    // Dirichlet noise to more than just the root.
-                    // TODO: filter to only valid moves
-                    let noise = self.dirichlet_distr.sample(rng);
-                    for (policy, noise) in policy.iter_mut().zip(noise) {
-                        const EPS: f32 = 0.25;
-                        *policy = (1. - EPS) * *policy + EPS * noise;
                     }
-                }
 
-                eval_results.push(search::EvalResult {
-                    utility: win,
-                    policy,
-                });
-            }
-
-            Ok(eval_results)
+                    Ok(search::EvalResult {
+                        utility: win,
+                        policy,
+                    })
+                })
+                .collect()
         }
     }
 }
