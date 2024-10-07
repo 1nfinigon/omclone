@@ -1,16 +1,11 @@
+use crate::eval::Evaluator;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
 use atomic_float::AtomicF32;
-use eyre::{Context, Result};
+use eyre::Result;
 use once_cell::sync::OnceCell;
-use std::{
-    sync::{
-        atomic::{self, AtomicU32, AtomicUsize},
-        mpsc, Arc,
-    },
-    thread,
-};
+use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 
 /// How many virtual visits should an in-progress thread count for (in an
 /// attempt to avoid multiple threads descending exactly the same line)?
@@ -214,168 +209,6 @@ pub struct TreeSearch {
     tracy_client: tracy_client::Client,
 }
 
-pub struct EvalResult {
-    pub utility: f32,
-    pub policy: [f32; BasicInstr::N_TYPES],
-}
-
-pub trait BatchEval: Sync + Send {
-    fn name(&self) -> &str;
-
-    fn max_batch_size(&self) -> usize;
-
-    /// `states` contains a bool `is_root`
-    /// Must return a Vec of the same length
-    fn batch_eval(&self, states: Vec<(State, bool)>) -> Result<Vec<EvalResult>>;
-}
-
-struct EvalThreadRequest {
-    state: State,
-    is_root: bool,
-    tx: mpsc::SyncSender<EvalResult>,
-}
-
-pub struct EvalThread {
-    eval: Arc<dyn BatchEval + 'static>,
-    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
-    eval_count: AtomicUsize,
-}
-
-impl EvalThread {
-    const MAX_EVAL_BATCH_SIZE: usize = 128;
-
-    fn thread_main(
-        eval: Arc<dyn BatchEval>,
-        rx: mpsc::Receiver<EvalThreadRequest>,
-        tracy_client: tracy_client::Client,
-    ) {
-        let _span = tracy_client
-            .clone()
-            .span(tracy_client::span_location!("eval thread"), 0);
-
-        let tracy_eval_batch_size_plot = tracy_client::plot_name!("eval batch size");
-
-        let max_batch_size = eval.max_batch_size();
-
-        loop {
-            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
-
-            // These two should always be the same length.
-            let mut batch_to_evaluate = Vec::new();
-            let mut result_txs = Vec::new();
-
-            // First, let's accumulate as many eval requests as possible
-            loop {
-                if batch_to_evaluate.len() >= max_batch_size {
-                    break;
-                }
-
-                let EvalThreadRequest { state, is_root, tx } = {
-                    if batch_to_evaluate.is_empty() {
-                        match rx.recv() {
-                            Ok(request) => request,
-                            Err(mpsc::RecvError) => {
-                                // no more data will ever come; nothing we can do but
-                                // terminate
-                                return;
-                            }
-                        }
-                    } else {
-                        match rx.try_recv() {
-                            Ok(request) => request,
-                            Err(mpsc::TryRecvError::Disconnected) => {
-                                // no more data will ever come; nothing we can do but
-                                // terminate
-                                return;
-                            }
-                            Err(mpsc::TryRecvError::Empty) => {
-                                // end of this batch
-                                break;
-                            }
-                        }
-                    }
-                };
-
-                batch_to_evaluate.push((state, is_root));
-                result_txs.push(tx);
-            }
-
-            assert!(!batch_to_evaluate.is_empty());
-            assert_eq!(batch_to_evaluate.len(), result_txs.len());
-
-            // workaround tracy_client not allowing stairstep plot config
-            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
-
-            tracy_client.plot(tracy_eval_batch_size_plot, batch_to_evaluate.len() as f64);
-
-            // Now, let's process our batch.
-            let results = {
-                let span = tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("batch eval"), 0);
-                span.emit_value(result_txs.len() as u64);
-
-                // We can't do much with errors (it would be noisy to pass the
-                // same error back to every search thread), so just panic
-                eval.batch_eval(batch_to_evaluate)
-                    .expect("batch evaluation failed")
-            };
-            assert_eq!(result_txs.len(), results.len());
-            let len = results.len();
-
-            for (result_tx, result) in result_txs.into_iter().zip(results.into_iter()) {
-                let (Ok(()) | Err(_)) = result_tx.send(result);
-            }
-
-            // workaround tracy_client not allowing stairstep plot config
-            tracy_client.plot(tracy_eval_batch_size_plot, len as f64);
-        }
-    }
-
-    pub fn new(eval: impl BatchEval + 'static, tracy_client: tracy_client::Client) -> Self {
-        let eval = Arc::new(eval);
-        let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
-        thread::spawn({
-            let eval = eval.clone();
-            let tracy_client = tracy_client.clone();
-            move || Self::thread_main(eval, eval_thread_rx, tracy_client)
-        });
-        Self {
-            eval,
-            eval_count: 0.into(),
-            eval_thread_tx,
-        }
-    }
-
-    pub fn model_name(&self) -> &str {
-        self.eval.name()
-    }
-
-    pub fn eval_count(&self) -> usize {
-        self.eval_count.load(atomic::Ordering::Relaxed)
-    }
-
-    pub fn clear(&mut self) {
-        self.eval_count = 0.into();
-    }
-
-    /// Queues an evaluation on the eval thread, and waits for the result
-    fn eval_blocking(&self, state: State, is_root: bool) -> Result<EvalResult> {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let () = self
-            .eval_thread_tx
-            .send(EvalThreadRequest { state, is_root, tx })
-            .wrap_err("eval thread died, not accepting requests")?;
-
-        self.eval_count.fetch_add(1, atomic::Ordering::Relaxed);
-
-        let result = rx
-            .recv()
-            .wrap_err("eval thread died, never sent response")?;
-        Ok(result)
-    }
-}
-
 impl TreeSearch {
     pub fn new(root: State, tracy_client: tracy_client::Client) -> Self {
         Self {
@@ -428,7 +261,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
         }
     }
 
-    fn do_one_descent(&mut self, eval_thread: &EvalThread) -> Result<bool> {
+    fn do_one_descent(&mut self, evaluator: &dyn Evaluator) -> Result<bool> {
         let span = self
             .tracy_client
             .clone()
@@ -458,7 +291,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
                             .clone()
                             .span(tracy_client::span_location!("leaf: expanding node"), 0);
 
-                        let eval_result = eval_thread.eval_blocking(*state, is_root)?;
+                        let eval_result = evaluator.eval_blocking(*state, is_root)?;
 
                         Ok((
                             NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
@@ -591,11 +424,11 @@ impl<'a> TreeSearchWorkFibre<'a> {
     }
 
     /// Returns Ok(true) if finished, Ok(false) if blocked.
-    fn do_some_work(&mut self, eval_thread: &EvalThread) -> Result<bool> {
+    fn do_some_work(&mut self, evaluator: &dyn Evaluator) -> Result<bool> {
         loop {
             match self.fibre_state {
                 TreeSearchWorkFibreState::Descending => {
-                    let unblocked = self.do_one_descent(eval_thread)?;
+                    let unblocked = self.do_one_descent(evaluator)?;
                     if !unblocked {
                         return Ok(false);
                     }
@@ -616,9 +449,9 @@ impl<'a> TreeSearchWorkFibre<'a> {
 }
 
 impl TreeSearch {
-    pub fn search_once(&self, eval_thread: &EvalThread) -> Result<()> {
+    pub fn search_once(&self, evaluator: &dyn Evaluator) -> Result<()> {
         let mut fibre = TreeSearchWorkFibre::new(self);
-        let finished = fibre.do_some_work(eval_thread)?;
+        let finished = fibre.do_some_work(evaluator)?;
         assert!(finished, "async resuming of work not yet implemented");
         Ok(())
     }

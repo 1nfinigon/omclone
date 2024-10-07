@@ -9,6 +9,8 @@ mod utils;
 mod benchmark;
 
 #[cfg(feature = "nn")]
+mod eval;
+#[cfg(feature = "nn")]
 mod gen_train;
 #[cfg(feature = "nn")]
 mod nn;

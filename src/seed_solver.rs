@@ -1,4 +1,5 @@
 use crate::check;
+use crate::eval;
 use crate::nn;
 use crate::parser;
 use crate::search;
@@ -24,7 +25,7 @@ fn solve_one_puzzle_seeded(
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
     seed_solution: &parser::FullSolution,
-    eval_thread: &mut search::EvalThread,
+    eval_thread: &mut dyn eval::Evaluator,
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(seed_puzzle, seed_solution)?;
@@ -353,7 +354,7 @@ fn run_one_epoch(
     seed_solution_paths.shuffle(rng);
 
     let mut model = nn::Model::load_latest(device, tracy_client.clone())?;
-    let mut eval_thread = search::EvalThread::new(model, tracy_client.clone());
+    let mut eval_thread = nn::EvalThread::new(model, tracy_client.clone());
     let mut solves_since_model_reload = 0;
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, puzzle_map) {
@@ -374,7 +375,7 @@ fn run_one_epoch(
             if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
                 solves_since_model_reload = 0;
                 model = nn::Model::load_latest(device, tracy_client.clone())?;
-                eval_thread = search::EvalThread::new(model, tracy_client.clone());
+                eval_thread = nn::EvalThread::new(model, tracy_client.clone());
             }
         }
     }

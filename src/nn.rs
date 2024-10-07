@@ -1,7 +1,17 @@
+use crate::eval::{EvalResult, Evaluator};
+use crate::search_state;
+use crate::search_state::State;
+use crate::sim::{self, BasicInstr};
+use eyre::{ensure, eyre, Context, OptionExt, Result};
+use rand::prelude::*;
 use std::collections::BTreeMap;
-
-use crate::sim;
-use eyre::{ensure, eyre, OptionExt, Result};
+use std::path::Path;
+use std::sync::{
+    atomic::{self, AtomicUsize},
+    mpsc, Arc,
+};
+use std::thread;
+use tch;
 
 pub mod constants {
 
@@ -902,7 +912,7 @@ pub mod features {
 
 pub use features::Features;
 
-pub fn get_best_device() -> eyre::Result<tch::Device> {
+pub fn get_best_device() -> Result<tch::Device> {
     assert_eq!(
         std::env::var_os("CUDA_DEVICE_ORDER"),
         Some("PCI_BUS_ID".into())
@@ -939,236 +949,353 @@ pub fn get_best_device() -> eyre::Result<tch::Device> {
     }
 }
 
-pub mod model {
-    use std::path::Path;
+pub struct Model {
+    pub name: String,
+    module: tch::CModule,
+    device: tch::Device,
+    tracy_client: tracy_client::Client,
+    dirichlet_distr: rand_distr::Dirichlet<f32>,
+}
 
-    use super::*;
-    use crate::sim::BasicInstr;
-    use eyre::{self, OptionExt};
-    use tch;
-
-    pub struct Model {
-        pub name: String,
-        module: tch::CModule,
+impl Model {
+    pub fn load(
+        model_path: impl AsRef<Path>,
         device: tch::Device,
         tracy_client: tracy_client::Client,
-        dirichlet_distr: rand_distr::Dirichlet<f32>,
+    ) -> Result<Self> {
+        let name = model_path
+            .as_ref()
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        let mut module = tch::CModule::load_on_device(model_path.as_ref(), device)?;
+        module.f_set_eval()?;
+        Ok(Self {
+            name,
+            module,
+            device,
+            tracy_client,
+            dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
+        })
     }
 
-    impl Model {
-        pub fn load(
-            model_path: impl AsRef<Path>,
-            device: tch::Device,
-            tracy_client: tracy_client::Client,
-        ) -> eyre::Result<Self> {
-            let name = model_path
-                .as_ref()
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned();
-
-            let mut module = tch::CModule::load_on_device(model_path.as_ref(), device)?;
-            module.f_set_eval()?;
-            Ok(Self {
-                name,
-                module,
-                device,
-                tracy_client,
-                dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
+    pub fn load_latest(device: tch::Device, tracy_client: tracy_client::Client) -> Result<Self> {
+        // look for the latest model under test/net/mainline
+        let latest_model = std::fs::read_dir("test/net/mainline")
+            .unwrap()
+            .flatten()
+            .filter_map(|f| {
+                let ftype = f.file_type().unwrap();
+                if ftype.is_file() {
+                    f.path()
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .map(|n| (n, f.path()))
+                } else {
+                    None
+                }
             })
-        }
-
-        pub fn load_latest(
-            device: tch::Device,
-            tracy_client: tracy_client::Client,
-        ) -> eyre::Result<Self> {
-            // look for the latest model under test/net/mainline
-            let latest_model = std::fs::read_dir("test/net/mainline")
-                .unwrap()
-                .flatten()
-                .filter_map(|f| {
-                    let ftype = f.file_type().unwrap();
-                    if ftype.is_file() {
-                        f.path()
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .and_then(|s| s.parse::<usize>().ok())
-                            .map(|n| (n, f.path()))
-                    } else {
-                        None
-                    }
-                })
-                .max_by_key(|(n, _)| *n)
-                .map(|(_, path)| path)
-                .unwrap();
-            println!("Using latest model: {:?}", latest_model);
-            Self::load(latest_model, device, tracy_client)
-        }
+            .max_by_key(|(n, _)| *n)
+            .map(|(_, path)| path)
+            .unwrap();
+        println!("Using latest model: {:?}", latest_model);
+        Self::load(latest_model, device, tracy_client)
     }
 
-    use crate::search;
-    use crate::search_state;
-    use rand::prelude::*;
+    fn batch_eval(&self, states: Vec<(search_state::State, bool)>) -> Result<Vec<EvalResult>> {
+        let rng = &mut rand::thread_rng();
+        let batch_size = states.len();
 
-    impl search::BatchEval for Model {
-        fn name(&self) -> &str {
-            &self.name
-        }
+        let options = (tch::Kind::Float, self.device);
 
-        fn max_batch_size(&self) -> usize {
-            128
-        }
-
-        fn batch_eval(
-            &self,
-            states: Vec<(search_state::State, bool)>,
-        ) -> Result<Vec<search::EvalResult>> {
-            let rng = &mut rand::thread_rng();
-            let batch_size = states.len();
-
-            let options = (tch::Kind::Float, self.device);
-
-            let input = {
-                let _span = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("input munging"), 0);
-
-                let spatial: Vec<_> = states
-                    .iter()
-                    .map(|(state, _)| &state.nn_features.spatial)
-                    .collect();
-                let spatial = spatial.to_dense_tensor(self.tracy_client.clone(), options)?;
-                let spatiotemporal: Vec<_> = states
-                    .iter()
-                    .map(|(state, _)| &state.nn_features.spatiotemporal)
-                    .collect();
-                let spatiotemporal =
-                    spatiotemporal.to_dense_tensor(self.tracy_client.clone(), options)?;
-                let temporal: Vec<_> = states
-                    .iter()
-                    .map(|(state, _)| &state.nn_features.temporal)
-                    .collect();
-                let temporal = temporal.to_dense_tensor(self.tracy_client.clone(), options)?;
-
-                let policy_softmax_temperature: Vec<_> = states
-                    .iter()
-                    .map(|(_, is_root)| if *is_root { 1.03 } else { 1. })
-                    .collect();
-                let policy_softmax_temperature =
-                    tch::Tensor::f_from_slice(&policy_softmax_temperature)?.f_to(self.device)?;
-
-                assert_eq!(policy_softmax_temperature.size1()?, batch_size as i64);
-
-                [
-                    tch::IValue::Tensor(spatial),
-                    tch::IValue::Tensor(spatiotemporal),
-                    tch::IValue::Tensor(temporal),
-                    tch::IValue::Tensor(policy_softmax_temperature),
-                ]
-            };
-
-            let output = {
-                let _span = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("exec"), 0);
-                tch::no_grad(|| self.module.forward_is(&input))?
-            };
-
-            let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
-
-            assert_eq!(
-                policy_tensor.size4()?,
-                (
-                    batch_size as i64,
-                    BasicInstr::N_TYPES as i64,
-                    constants::N_HEIGHT as i64,
-                    constants::N_WIDTH as i64
-                )
-            );
-            assert_eq!(value_tensor.size2()?, (batch_size as i64, 2));
-
+        let input = {
             let _span = self
                 .tracy_client
                 .clone()
-                .span(tracy_client::span_location!("output munging"), 0);
+                .span(tracy_client::span_location!("input munging"), 0);
 
-            states
+            let spatial: Vec<_> = states
                 .iter()
-                .enumerate()
-                .map(|(batch_index, (state, is_root))| {
-                    let (win, mut policy) = {
-                        let next_arm_index = state.instr_buffer.len();
-                        let next_arm_pos = state.world.arms[next_arm_index].pos;
-                        let (x, y) = features::normalize_position(next_arm_pos)
-                            .ok_or_eyre("arm out of nn bounds")?;
-                        assert!(x < constants::N_WIDTH);
-                        assert!(y < constants::N_HEIGHT);
+                .map(|(state, _)| &state.nn_features.spatial)
+                .collect();
+            let spatial = spatial.to_dense_tensor(self.tracy_client.clone(), options)?;
+            let spatiotemporal: Vec<_> = states
+                .iter()
+                .map(|(state, _)| &state.nn_features.spatiotemporal)
+                .collect();
+            let spatiotemporal =
+                spatiotemporal.to_dense_tensor(self.tracy_client.clone(), options)?;
+            let temporal: Vec<_> = states
+                .iter()
+                .map(|(state, _)| &state.nn_features.temporal)
+                .collect();
+            let temporal = temporal.to_dense_tensor(self.tracy_client.clone(), options)?;
 
-                        let policy = {
-                            let mut policy = [0f32; BasicInstr::N_TYPES];
+            let policy_softmax_temperature: Vec<_> = states
+                .iter()
+                .map(|(_, is_root)| if *is_root { 1.03 } else { 1. })
+                .collect();
+            let policy_softmax_temperature =
+                tch::Tensor::f_from_slice(&policy_softmax_temperature)?.f_to(self.device)?;
 
-                            let mut policy_sum = 0.;
-                            let _span = self
-                                .tracy_client
-                                .clone()
-                                .span(tracy_client::span_location!("policy extraction"), 0);
-                            let policy_tensor = policy_tensor
-                                .f_select(3, x as i64)?
-                                .f_select(2, y as i64)?
-                                .f_select(0, batch_index as i64)?
-                                .f_to(tch::Device::Cpu)?;
-                            for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
-                                let this_policy =
-                                    policy_tensor.f_double_value(&[i_instr as i64])? as f32;
-                                assert!(this_policy >= 0.);
-                                *policy_elt = this_policy;
-                                policy_sum += this_policy;
-                            }
-                            assert!((policy_sum - 1.).abs() < 1e-6);
-                            policy
-                        };
+            assert_eq!(policy_softmax_temperature.size1()?, batch_size as i64);
 
-                        let win = {
-                            let _span = self
-                                .tracy_client
-                                .clone()
-                                .span(tracy_client::span_location!("value extraction"), 0);
-                            let win = value_tensor.f_double_value(&[batch_index as i64, 0])? as f32;
-                            assert!(win >= 0.);
-                            let loss_by_cycles =
-                                value_tensor.f_double_value(&[batch_index as i64, 1])? as f32;
-                            assert!(loss_by_cycles >= 0.);
-                            let value_sum = win + loss_by_cycles;
-                            assert!((value_sum - 1.).abs() < 1e-6);
-                            win
-                        };
+            [
+                tch::IValue::Tensor(spatial),
+                tch::IValue::Tensor(spatiotemporal),
+                tch::IValue::Tensor(temporal),
+                tch::IValue::Tensor(policy_softmax_temperature),
+            ]
+        };
 
-                        (win, policy)
+        let output = {
+            let _span = self
+                .tracy_client
+                .clone()
+                .span(tracy_client::span_location!("exec"), 0);
+            tch::no_grad(|| self.module.forward_is(&input))?
+        };
+
+        let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) = output.try_into()?;
+
+        assert_eq!(
+            policy_tensor.size4()?,
+            (
+                batch_size as i64,
+                BasicInstr::N_TYPES as i64,
+                constants::N_HEIGHT as i64,
+                constants::N_WIDTH as i64
+            )
+        );
+        assert_eq!(value_tensor.size2()?, (batch_size as i64, 2));
+
+        let _span = self
+            .tracy_client
+            .clone()
+            .span(tracy_client::span_location!("output munging"), 0);
+
+        states
+            .iter()
+            .enumerate()
+            .map(|(batch_index, (state, is_root))| {
+                let (win, mut policy) = {
+                    let next_arm_index = state.instr_buffer.len();
+                    let next_arm_pos = state.world.arms[next_arm_index].pos;
+                    let (x, y) = features::normalize_position(next_arm_pos)
+                        .ok_or_eyre("arm out of nn bounds")?;
+                    assert!(x < constants::N_WIDTH);
+                    assert!(y < constants::N_HEIGHT);
+
+                    let policy = {
+                        let mut policy = [0f32; BasicInstr::N_TYPES];
+
+                        let mut policy_sum = 0.;
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("policy extraction"), 0);
+                        let policy_tensor = policy_tensor
+                            .f_select(3, x as i64)?
+                            .f_select(2, y as i64)?
+                            .f_select(0, batch_index as i64)?
+                            .f_to(tch::Device::Cpu)?;
+                        for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
+                            let this_policy =
+                                policy_tensor.f_double_value(&[i_instr as i64])? as f32;
+                            assert!(this_policy >= 0.);
+                            *policy_elt = this_policy;
+                            policy_sum += this_policy;
+                        }
+                        assert!((policy_sum - 1.).abs() < 1e-6);
+                        policy
                     };
 
-                    if *is_root {
-                        // add Dirichlet noise
-                        // TODO: for this problem, we should stretch out the
-                        // Dirichlet noise to more than just the root.
-                        // TODO: filter to only valid moves
-                        let noise = self.dirichlet_distr.sample(rng);
-                        for (policy, noise) in policy.iter_mut().zip(noise) {
-                            const EPS: f32 = 0.25;
-                            *policy = (1. - EPS) * *policy + EPS * noise;
+                    let win = {
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("value extraction"), 0);
+                        let win = value_tensor.f_double_value(&[batch_index as i64, 0])? as f32;
+                        assert!(win >= 0.);
+                        let loss_by_cycles =
+                            value_tensor.f_double_value(&[batch_index as i64, 1])? as f32;
+                        assert!(loss_by_cycles >= 0.);
+                        let value_sum = win + loss_by_cycles;
+                        assert!((value_sum - 1.).abs() < 1e-6);
+                        win
+                    };
+
+                    (win, policy)
+                };
+
+                if *is_root {
+                    // add Dirichlet noise
+                    // TODO: for this problem, we should stretch out the
+                    // Dirichlet noise to more than just the root.
+                    // TODO: filter to only valid moves
+                    let noise = self.dirichlet_distr.sample(rng);
+                    for (policy, noise) in policy.iter_mut().zip(noise) {
+                        const EPS: f32 = 0.25;
+                        *policy = (1. - EPS) * *policy + EPS * noise;
+                    }
+                }
+
+                Ok(EvalResult {
+                    utility: win,
+                    policy,
+                })
+            })
+            .collect()
+    }
+}
+
+struct EvalThreadRequest {
+    state: State,
+    is_root: bool,
+    tx: mpsc::SyncSender<EvalResult>,
+}
+
+pub struct EvalThread {
+    model: Arc<Model>,
+    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
+    eval_count: AtomicUsize,
+}
+
+impl EvalThread {
+    const MAX_EVAL_BATCH_SIZE: usize = 128;
+
+    fn thread_main(
+        model: Arc<Model>,
+        rx: mpsc::Receiver<EvalThreadRequest>,
+        tracy_client: tracy_client::Client,
+    ) {
+        let _span = tracy_client
+            .clone()
+            .span(tracy_client::span_location!("eval thread"), 0);
+
+        let tracy_eval_batch_size_plot = tracy_client::plot_name!("eval batch size");
+
+        loop {
+            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
+
+            // These two should always be the same length.
+            let mut batch_to_evaluate = Vec::new();
+            let mut result_txs = Vec::new();
+
+            // First, let's accumulate as many eval requests as possible
+            loop {
+                if batch_to_evaluate.len() >= Self::MAX_EVAL_BATCH_SIZE {
+                    break;
+                }
+
+                let EvalThreadRequest { state, is_root, tx } = {
+                    if batch_to_evaluate.is_empty() {
+                        match rx.recv() {
+                            Ok(request) => request,
+                            Err(mpsc::RecvError) => {
+                                // no more data will ever come; nothing we can do but
+                                // terminate
+                                return;
+                            }
+                        }
+                    } else {
+                        match rx.try_recv() {
+                            Ok(request) => request,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                // no more data will ever come; nothing we can do but
+                                // terminate
+                                return;
+                            }
+                            Err(mpsc::TryRecvError::Empty) => {
+                                // end of this batch
+                                break;
+                            }
                         }
                     }
+                };
 
-                    Ok(search::EvalResult {
-                        utility: win,
-                        policy,
-                    })
-                })
-                .collect()
+                batch_to_evaluate.push((state, is_root));
+                result_txs.push(tx);
+            }
+
+            assert!(!batch_to_evaluate.is_empty());
+            assert_eq!(batch_to_evaluate.len(), result_txs.len());
+
+            // workaround tracy_client not allowing stairstep plot config
+            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
+
+            tracy_client.plot(tracy_eval_batch_size_plot, batch_to_evaluate.len() as f64);
+
+            // Now, let's process our batch.
+            let results = {
+                let span = tracy_client
+                    .clone()
+                    .span(tracy_client::span_location!("batch eval"), 0);
+                span.emit_value(result_txs.len() as u64);
+
+                // We can't do much with errors (it would be noisy to pass the
+                // same error back to every search thread), so just panic
+                model
+                    .batch_eval(batch_to_evaluate)
+                    .expect("batch evaluation failed")
+            };
+            assert_eq!(result_txs.len(), results.len());
+            let len = results.len();
+
+            for (result_tx, result) in result_txs.into_iter().zip(results.into_iter()) {
+                let (Ok(()) | Err(_)) = result_tx.send(result);
+            }
+
+            // workaround tracy_client not allowing stairstep plot config
+            tracy_client.plot(tracy_eval_batch_size_plot, len as f64);
+        }
+    }
+
+    pub fn new(model: Model, tracy_client: tracy_client::Client) -> Self {
+        let model = Arc::new(model);
+        let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
+        thread::spawn({
+            let model = model.clone();
+            let tracy_client = tracy_client.clone();
+            move || Self::thread_main(model, eval_thread_rx, tracy_client)
+        });
+        Self {
+            model,
+            eval_count: 0.into(),
+            eval_thread_tx,
         }
     }
 }
 
-pub use model::Model;
+impl Evaluator for EvalThread {
+    fn model_name(&self) -> &str {
+        &self.model.name
+    }
+
+    fn eval_count(&self) -> usize {
+        self.eval_count.load(atomic::Ordering::Relaxed)
+    }
+
+    fn clear(&mut self) {
+        self.eval_count = 0.into();
+    }
+
+    /// Queues an evaluation on the eval thread, and waits for the result
+    fn eval_blocking(&self, state: State, is_root: bool) -> Result<EvalResult> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let () = self
+            .eval_thread_tx
+            .send(EvalThreadRequest { state, is_root, tx })
+            .wrap_err("eval thread died, not accepting requests")?;
+
+        self.eval_count.fetch_add(1, atomic::Ordering::Relaxed);
+
+        let result = rx
+            .recv()
+            .wrap_err("eval thread died, never sent response")?;
+        Ok(result)
+    }
+}
