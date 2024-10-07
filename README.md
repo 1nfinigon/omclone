@@ -306,6 +306,13 @@ factor, but instead the quality of the training data is the limiting factor.
 Introduced to mainline the parallel search speedups at 172M, and increased
 playouts from 100/600 to 1000/6000.
 
+Currently at 172M:
+- window size = 350k
+- probability of including human sample: 0.024 if nonempty, else 0.006
+- human loss weights: [v = 0.00001, p = 1.0, l2 = 1.0]
+- probability of including mcts sample: 0.5 if 1000 playouts else 1.0
+- mcts loss weights: [v = 0.1, p = 1.0 if win else 0.4, l2 = 1.0]
+
 # Future work
 
 Technical/impl work:
