@@ -237,7 +237,7 @@ fn gen_for_solution_dir(
             solution_paths.len(),
             par_writer_state.get(),
         );
-        let result = process_one_solution(par_writer_state, fpath, rng, &puzzle_map);
+        let result = process_one_solution(par_writer_state, fpath, rng, puzzle_map);
         match result {
             Ok(final_outcome) => {
                 *total_final_outcome.lock().unwrap() += final_outcome;

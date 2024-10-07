@@ -1050,7 +1050,6 @@ dependencies = [
  "bitflags 2.6.0",
  "color-eyre",
  "console_error_panic_hook",
- "crossbeam-deque",
  "egui",
  "egui-miniquad",
  "enum-primitive-derive",

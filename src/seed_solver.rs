@@ -127,7 +127,7 @@ fn solve_one_puzzle_seeded(
         let time_start = time::Instant::now();
         (0..playouts)
             .into_par_iter()
-            .map(|_| -> Result<()> { Ok(tree_search.search_once()?) })
+            .map(|_| tree_search.search_once())
             .collect::<Result<()>>()?;
         let time_diff = time::Instant::now() - time_start;
 
@@ -355,7 +355,7 @@ fn run_one_epoch(
     let mut eval_thread = search::EvalThread::new(model, tracy_client.clone());
     let mut solves_since_model_reload = 0;
     for solution_fpath in seed_solution_paths.iter() {
-        if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
+        if let Some(seed_solution) = utils::verify_solution(solution_fpath, puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
 
             solve_one_puzzle_seeded(

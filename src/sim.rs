@@ -1135,7 +1135,6 @@ impl WorldAtoms {
 
     pub fn iter_molecule(&self, atom_key: AtomKey) -> WorldAtomMoleculeIterator {
         let mut iter = WorldAtomMoleculeIterator {
-            atoms: self,
             stack: Vec::new(),
             seen: FxHashSet::default(),
         };
@@ -1152,13 +1151,12 @@ impl WorldAtoms {
     }
 }
 
-pub struct WorldAtomMoleculeIterator<'a> {
-    atoms: &'a WorldAtoms,
+pub struct WorldAtomMoleculeIterator {
     stack: Vec<AtomKey>,
     seen: FxHashSet<AtomKey>,
 }
 
-impl<'a> WorldAtomMoleculeIterator<'a> {
+impl WorldAtomMoleculeIterator {
     fn pend_visit(&mut self, key: AtomKey) {
         if self.seen.insert(key) {
             self.stack.push(key);
@@ -1166,14 +1164,13 @@ impl<'a> WorldAtomMoleculeIterator<'a> {
     }
 }
 
-impl<'a> Iterator for WorldAtomMoleculeIterator<'a> {
+impl Iterator for WorldAtomMoleculeIterator {
     type Item = AtomKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stack.pop().map(|next_key| {
-            self.pend_visit(next_key);
-            next_key
-        })
+        self.stack
+            .pop()
+            .inspect(|&next_key| self.pend_visit(next_key))
     }
 }
 
@@ -1187,7 +1184,7 @@ impl<'a> Iterator for WorldAtomMoleculesIterator<'a> {
     type Item = Vec<AtomKey>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((atom_key, _atom)) = self.atom_iter.next() {
+        for (atom_key, _atom) in self.atom_iter.by_ref() {
             if self.seen.contains(&atom_key) {
                 continue;
             }

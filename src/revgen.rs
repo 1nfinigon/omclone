@@ -229,18 +229,19 @@ enum RevStepArmBase {
 #[derive(Clone, Debug)]
 enum RevStep {
     /// Required current state:
-    /// - arm_base needs synthesizing, or existing arm_base is not grabbing
-    /// - arm is over at least one output glyph with count > 0
-    /// - all output positions are empty
+    /// -   arm_base needs synthesizing, or existing arm_base is not grabbing
+    /// -   arm is over at least one output glyph with count > 0
+    /// -   all output positions are empty
+    ///
     /// Reverse action:
-    /// - (if required) spawn a new arm at arm_pos with arm_len and arm_rot
-    /// - (if required) set arm type to piston
-    /// - (if required) add to tape: rotate to arm_rot
-    /// - (if required) add to tape: extend to arm_len
-    /// - spawn a molecule at the given output
-    /// - decrement output glyph count
-    /// - add to tape: drop
-    /// - set prev arm state to grabbed
+    /// -   (if required) spawn a new arm at arm_pos with arm_len and arm_rot
+    /// -   (if required) set arm type to piston
+    /// -   (if required) add to tape: rotate to arm_rot
+    /// -   (if required) add to tape: extend to arm_len
+    /// -   spawn a molecule at the given output
+    /// -   decrement output glyph count
+    /// -   add to tape: drop
+    /// -   set prev arm state to grabbed
     DropOutput {
         arm_base: RevStepArmBase,
         arm_len: i32,
@@ -248,30 +249,32 @@ enum RevStep {
         glyph_idx: usize,
     },
     /// Required current state:
-    /// - existing arm_base is currently grabbing one or more molecules
+    /// -   existing arm_base is currently grabbing one or more molecules
+    ///
     /// Reverse action:
-    /// - (if required) other arms that are grabbing:
-    ///   - add to tape of other arm: grab
-    ///   - set previous other arm state to dropped
-    /// - add to tape: rotate arm (to prev_rot via shortest sequence)
-    /// - move molecule(s) currently grabbed
-    /// - Check postconditions of glyphs under moved molecules (e.g. no previous
-    /// salt atom
+    /// -   (if required) other arms that are grabbing:
+    ///     -   add to tape of other arm: grab
+    ///     -   set previous other arm state to dropped
+    /// -   add to tape: rotate arm (to prev_rot via shortest sequence)
+    /// -   move molecule(s) currently grabbed
+    /// -   Check postconditions of glyphs under moved molecules (e.g. no previous
+    ///     salt atom
     RotateMolecule { arm_idx: usize, prev_arm_rot: Rot },
     /// Required current state:
-    /// - prev_arm is over at least one molecule
-    /// - molecule is currently not held, or held by a different arm from
-    ///   prev_arm_base
-    /// - prev_arm_base needs creating, or existing arm_base is not grabbing
+    /// -   prev_arm is over at least one molecule
+    /// -   molecule is currently not held, or held by a different arm from
+    ///     prev_arm_base
+    /// -   prev_arm_base needs creating, or existing arm_base is not grabbing
+    ///
     /// Reverse action:
-    /// - (if required) spawn a new arm at arm_pos with arm_len and arm_rot
-    /// - (if required) set arm type to piston
-    /// - (if required) add to tape: rotate to arm_rot
-    /// - (if required) add to tape: extend to arm_len
-    /// - add to tape of current arm: grab
-    /// - set current arm state to dropped (ALL atoms)
-    /// - add to tape of prev arm: drop
-    /// - set prev_arm_base arm state to grabbed
+    /// -   (if required) spawn a new arm at arm_pos with arm_len and arm_rot
+    /// -   (if required) set arm type to piston
+    /// -   (if required) add to tape: rotate to arm_rot
+    /// -   (if required) add to tape: extend to arm_len
+    /// -   add to tape of current arm: grab
+    /// -   set current arm state to dropped (ALL atoms)
+    /// -   add to tape of prev arm: drop
+    /// -   set prev_arm_base arm state to grabbed
     HandoverMolecule {
         prev_arm_base: RevStepArmBase,
         prev_arm_len: i32,
@@ -281,14 +284,15 @@ enum RevStep {
     //Piston(Pos, usize, usize),
     //TrackMolecule(Pos, Pos),
     /// Required current state:
-    /// - existing arm_idx is already grabbing
-    /// - _every_ grabbed molecule is either over an exact equal input glyph, or
-    ///   over nothing at all
+    /// -   existing arm_idx is already grabbing
+    /// -   _every_ grabbed molecule is either over an exact equal input glyph, or
+    ///     over nothing at all
+    ///
     /// Reverse action:
-    /// - spawn an input glyph
-    /// - add to tape: grab
-    /// - set prev arm state to ungrabbed
-    /// - remove all molecules
+    /// -   spawn an input glyph
+    /// -   add to tape: grab
+    /// -   set prev arm state to ungrabbed
+    /// -   remove all molecules
     GrabInput { arm_idx: usize },
 }
 
@@ -595,8 +599,9 @@ impl GenState {
         } else {
             BasicInstr::RotateClockwise
         };
-        insns_to_prepend
-            .extend(std::iter::repeat((arm_idx, instruction)).take(delta_rot.abs() as usize));
+        insns_to_prepend.extend(
+            std::iter::repeat((arm_idx, instruction)).take(delta_rot.unsigned_abs() as usize),
+        );
     }
 
     fn maybe_prepend_extend(
@@ -615,8 +620,9 @@ impl GenState {
         } else {
             BasicInstr::Retract
         };
-        insns_to_prepend
-            .extend(std::iter::repeat((arm_idx, instruction)).take(delta_len.abs() as usize));
+        insns_to_prepend.extend(
+            std::iter::repeat((arm_idx, instruction)).take(delta_len.unsigned_abs() as usize),
+        );
 
         // upgrade the arm to a piston if necessary
         match &mut self.world.arms[arm_idx].arm_type {
@@ -723,7 +729,7 @@ impl GenState {
                 for atom in atom_pattern {
                     new.world.atoms.create_atom(atom.clone())?;
                 }
-                *output_count = *output_count + 1;
+                *output_count += 1;
 
                 insns_to_prepend.push((arm_idx, BasicInstr::Drop));
             }

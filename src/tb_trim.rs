@@ -6,7 +6,7 @@ use crate::utils;
 use eyre::Result;
 
 /// Returns Ok(buf, is_eof)
-fn read_exact<'a, R: Read + ?Sized>(r: &mut R, mut buf: &'a mut [u8]) -> Result<(&'a [u8], bool)> {
+fn read_exact<'a, R: Read + ?Sized>(r: &mut R, buf: &'a mut [u8]) -> Result<(&'a [u8], bool)> {
     let mut offset = 0;
     while !buf[offset..].is_empty() {
         match r.read(&mut buf[offset..]) {

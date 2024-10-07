@@ -436,7 +436,7 @@ impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
         let mut all_indices = Vec::with_capacity(batch_size);
         let mut all_values = Vec::with_capacity(batch_size);
 
-        for (batch_index, sample) in self.into_iter().enumerate() {
+        for (batch_index, sample) in self.iter().enumerate() {
             let indices = sample.indices_tensor()?;
             let values = sample.values_tensor()?;
 

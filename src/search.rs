@@ -272,7 +272,7 @@ impl EvalThread {
                 }
 
                 let EvalThreadRequest { state, is_root, tx } = {
-                    if batch_to_evaluate.len() == 0 {
+                    if batch_to_evaluate.is_empty() {
                         match rx.recv() {
                             Ok(request) => request,
                             Err(mpsc::RecvError) => {
@@ -301,7 +301,7 @@ impl EvalThread {
                 result_txs.push(tx);
             }
 
-            assert!(batch_to_evaluate.len() > 0);
+            assert!(!batch_to_evaluate.is_empty());
             assert_eq!(batch_to_evaluate.len(), result_txs.len());
 
             // workaround tracy_client not allowing stairstep plot config
@@ -436,7 +436,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
             .tracy_client
             .clone()
             .span(tracy_client::span_location!("do_one_descent"), 0);
-        let is_root = self.virtual_loss_incurred.len() == 0;
+        let is_root = self.virtual_loss_incurred.is_empty();
 
         let (node_data, this_thread_expanded) = {
             let span_need_to_expand = self
@@ -561,7 +561,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
         let update = next_updates.get(child_id.0 as usize).unwrap();
         self.state.as_mut().unwrap().update(*update);
 
-        return Ok(true);
+        Ok(true)
     }
 
     fn do_backprop(&mut self, leaf_utility: f32) {
