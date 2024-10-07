@@ -110,6 +110,9 @@ fn solve_one_puzzle_seeded(
 
     // search for a solution
 
+    let mut tree_search =
+        search::TreeSearch::new(search_state.clone(), model.clone(), tracy_client.clone());
+
     let mut still_following_premoves = true;
     let result_is_success = loop {
         if let Some(result) = search_state.evaluate_final_state() {
@@ -117,8 +120,7 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        let tree_search =
-            search::TreeSearch::new(search_state.clone(), model.clone(), tracy_client.clone());
+        tree_search.clear(search_state.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 

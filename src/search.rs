@@ -246,12 +246,12 @@ impl TreeSearch {
             .clone()
             .span(tracy_client::span_location!("eval thread"), 0);
 
+        let tracy_eval_batch_size_plot = tracy_client::plot_name!("eval batch size");
+
         let max_batch_size = eval.max_batch_size();
 
         loop {
-            let span = tracy_client
-                .clone()
-                .span(tracy_client::span_location!("batch"), 0);
+            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
 
             // These two should always be the same length.
             let mut batch_to_evaluate = Vec::new();
@@ -263,31 +263,50 @@ impl TreeSearch {
                     break;
                 }
 
-                match rx.try_recv() {
-                    Ok(EvalThreadRequest { state, is_root, tx }) => {
-                        batch_to_evaluate.push((state, is_root));
-                        result_txs.push(tx);
+                let EvalThreadRequest { state, is_root, tx } = {
+                    if batch_to_evaluate.len() == 0 {
+                        match rx.recv() {
+                            Ok(request) => request,
+                            Err(mpsc::RecvError) => {
+                                // no more data will ever come; nothing we can do but
+                                // terminate
+                                return;
+                            }
+                        }
+                    } else {
+                        match rx.try_recv() {
+                            Ok(request) => request,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                // no more data will ever come; nothing we can do but
+                                // terminate
+                                return;
+                            }
+                            Err(mpsc::TryRecvError::Empty) => {
+                                // end of this batch
+                                break;
+                            }
+                        }
                     }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // no more data will ever come; nothing we can do but
-                        // terminate
-                        return;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // end of this batch
-                        break;
-                    }
-                }
+                };
+
+                batch_to_evaluate.push((state, is_root));
+                result_txs.push(tx);
             }
 
+            assert!(batch_to_evaluate.len() > 0);
             assert_eq!(batch_to_evaluate.len(), result_txs.len());
-            span.emit_value(result_txs.len() as u64);
+
+            // workaround tracy_client not allowing stairstep plot config
+            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
+
+            tracy_client.plot(tracy_eval_batch_size_plot, batch_to_evaluate.len() as f64);
 
             // Now, let's process our batch.
             let results = {
-                let _span = tracy_client
+                let span = tracy_client
                     .clone()
-                    .span(tracy_client::span_location!("eval"), 0);
+                    .span(tracy_client::span_location!("batch eval"), 0);
+                span.emit_value(result_txs.len() as u64);
 
                 // We can't do much with errors (it would be noisy to pass the
                 // same error back to every search thread), so just panic
@@ -295,10 +314,14 @@ impl TreeSearch {
                     .expect("batch evaluation failed")
             };
             assert_eq!(result_txs.len(), results.len());
+            let len = results.len();
 
             for (result_tx, result) in result_txs.into_iter().zip(results.into_iter()) {
                 let (Ok(()) | Err(_)) = result_tx.send(result);
             }
+
+            // workaround tracy_client not allowing stairstep plot config
+            tracy_client.plot(tracy_eval_batch_size_plot, len as f64);
         }
     }
 
@@ -316,6 +339,13 @@ impl TreeSearch {
             tracy_client,
             eval_thread_tx,
         }
+    }
+
+    pub fn clear(&mut self, root: State) {
+        self.root = root;
+        self.root_node = Node::new_unexpanded();
+        self.sum_depth = 0.into();
+        self.max_depth = 0.into();
     }
 
     /// Queues an evaluation on the eval thread, and waits for the result
