@@ -27,7 +27,8 @@ pub fn insert_into_puzzle_map(puzzle_map: &mut PuzzleMap, f_path: impl AsRef<Pat
         }) {
             println!("Skipping infinite: {} | {}", fname, puzzle.puzzle_name);
         } else {
-            let existing_puzzle = puzzle_map.insert(fname.to_string(), (f_path.as_ref().to_owned(), puzzle));
+            let existing_puzzle =
+                puzzle_map.insert(fname.to_string(), (f_path.as_ref().to_owned(), puzzle));
             assert!(existing_puzzle.is_none());
         }
     } else {

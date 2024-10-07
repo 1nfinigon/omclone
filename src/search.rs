@@ -206,14 +206,13 @@ impl NodeData {
     }
 }
 
-pub struct TreeSearch {
+pub struct TreeSearch<'a> {
     root: State,
     root_node: Node,
-    eval_count: AtomicUsize,
     sum_depth: AtomicUsize,
     max_depth: AtomicU32,
+    eval_thread: &'a mut EvalThread,
     tracy_client: tracy_client::Client,
-    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
 }
 
 pub struct EvalResult {
@@ -235,10 +234,15 @@ struct EvalThreadRequest {
     tx: mpsc::SyncSender<EvalResult>,
 }
 
-impl TreeSearch {
+pub struct EvalThread {
+    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
+    eval_count: AtomicUsize,
+}
+
+impl EvalThread {
     const MAX_EVAL_BATCH_SIZE: usize = 128;
 
-    fn eval_thread(
+    fn thread_main(
         eval: Arc<dyn BatchEval>,
         rx: mpsc::Receiver<EvalThreadRequest>,
         tracy_client: tracy_client::Client,
@@ -326,29 +330,20 @@ impl TreeSearch {
         }
     }
 
-    pub fn new(root: State, eval: Arc<dyn BatchEval>, tracy_client: tracy_client::Client) -> Self {
+    pub fn new(eval: Arc<dyn BatchEval>, tracy_client: tracy_client::Client) -> Self {
         let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
         thread::spawn({
             let tracy_client = tracy_client.clone();
-            move || Self::eval_thread(eval, eval_thread_rx, tracy_client)
+            move || Self::thread_main(eval, eval_thread_rx, tracy_client)
         });
         Self {
-            root,
-            root_node: Node::new_unexpanded(),
             eval_count: 0.into(),
-            sum_depth: 0.into(),
-            max_depth: 0.into(),
-            tracy_client,
             eval_thread_tx,
         }
     }
 
-    pub fn clear(&mut self, root: State) {
-        self.root = root;
-        self.root_node = Node::new_unexpanded();
+    pub fn clear(&mut self) {
         self.eval_count = 0.into();
-        self.sum_depth = 0.into();
-        self.max_depth = 0.into();
     }
 
     /// Queues an evaluation on the eval thread, and waits for the result
@@ -366,24 +361,217 @@ impl TreeSearch {
             .wrap_err("eval thread died, never sent response")?;
         Ok(result)
     }
+}
 
-    fn do_backprop(&self, virtual_loss_incurred: Vec<&NodeData>, leaf_utility: f32) {
+impl<'a> TreeSearch<'a> {
+    pub fn new(
+        root: State,
+        eval_thread: &'a mut EvalThread,
+        tracy_client: tracy_client::Client,
+    ) -> Self {
+        Self {
+            root,
+            root_node: Node::new_unexpanded(),
+            sum_depth: 0.into(),
+            max_depth: 0.into(),
+            eval_thread,
+            tracy_client,
+        }
+    }
+
+    pub fn clear(&mut self, root: State) {
+        self.root = root;
+        self.root_node = Node::new_unexpanded();
+        self.sum_depth = 0.into();
+        self.max_depth = 0.into();
+        self.eval_thread.clear();
+    }
+}
+
+enum TreeSearchWorkFibreState {
+    Descending,
+    //WaitingForExpansion,
+    ReachedExpandedLeaf { leaf_utility: f32 },
+    Finished,
+}
+
+struct TreeSearchWorkFibre<'a> {
+    fibre_state: TreeSearchWorkFibreState,
+    /// We need to allow `data_expanding_if_still_unexpanded` to take
+    /// ownership of `State` if the callback is called, but we need
+    /// to retain ownership otherwise. It's hard to convince Rust at
+    /// compile-time, so instead do this ownership check at runtime.
+    state: Option<Box<State>>,
+    /// Contains all nodes that we added virtual loss to.
+    virtual_loss_incurred: Vec<&'a NodeData>,
+    node: &'a Node,
+    tracy_client: tracy_client::Client,
+    tree_search: &'a TreeSearch<'a>,
+}
+
+impl<'a> TreeSearchWorkFibre<'a> {
+    fn new(tree_search: &'a TreeSearch) -> Self {
+        Self {
+            fibre_state: TreeSearchWorkFibreState::Descending,
+            state: Some(Box::new(tree_search.root.clone())),
+            node: &tree_search.root_node,
+            virtual_loss_incurred: Vec::new(),
+            tracy_client: tree_search.tracy_client.clone(),
+            tree_search,
+        }
+    }
+
+    fn do_one_descent(&mut self) -> Result<bool> {
+        let span = self
+            .tracy_client
+            .clone()
+            .span(tracy_client::span_location!("do_one_descent"), 0);
+        let is_root = self.virtual_loss_incurred.len() == 0;
+
+        let (node_data, this_thread_expanded) = {
+            let span_need_to_expand = self
+                .tracy_client
+                .clone()
+                .span(tracy_client::span_location!("need to expand?"), 0);
+
+            let (node_data, this_thread_expanded) =
+                self.node.data_expanding_if_still_unexpanded(|| {
+                    // if this callback was called, then we are the lucky ones who
+                    // get to expand this previously unexpanded node
+
+                    let state = self.state.take().unwrap();
+
+                    if let Some(win) = state.evaluate_final_state() {
+                        span.emit_text("leaf: terminal node");
+
+                        Ok((NodeData::new_terminal(win), win))
+                    } else {
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("leaf: expanding node"), 0);
+
+                        let eval_result = self
+                            .tree_search
+                            .eval_thread
+                            .eval_blocking(*state, is_root)?;
+
+                        Ok((
+                            NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
+                            eval_result.utility,
+                        ))
+                    }
+                })?;
+
+            if this_thread_expanded.is_some() {
+                span_need_to_expand.emit_text("yes");
+                span_need_to_expand.emit_color(0x00C000);
+            } else {
+                span_need_to_expand.emit_text("no (or blocked)");
+                span_need_to_expand.emit_color(0xC0C000);
+            }
+
+            (node_data, this_thread_expanded)
+        };
+
+        if let Some(value) = this_thread_expanded {
+            // We were the ones to expand, so stop descending here.
+            node_data.incr_visits_and_utility(value);
+            self.fibre_state = TreeSearchWorkFibreState::ReachedExpandedLeaf {
+                leaf_utility: value,
+            };
+            return Ok(true);
+        }
+
+        // Otherwise, the node was already expanded.
+
+        if node_data.is_terminal() {
+            span.emit_text("leaf: terminal node");
+
+            let value = node_data.value::<AssertZeroVirtualLoss>();
+            node_data.incr_visits_and_utility(value);
+            self.fibre_state = TreeSearchWorkFibreState::ReachedExpandedLeaf {
+                leaf_utility: value,
+            };
+            return Ok(true);
+        }
+
+        // The node is not a leaf. We need to keep descending.
+
+        let _span = self
+            .tracy_client
+            .clone()
+            .span(tracy_client::span_location!("real node"), 0);
+
+        let next_updates = self.state.as_ref().unwrap().next_updates().ok().unwrap();
+
+        let default_value_for_unexpanded_child = {
+            let first_play_urgency_reduction = if is_root {
+                // root has no first play urgency reduction if
+                // Dirichlet noise is disabled
+                // TODO: dirichlet noise
+                0.
+            } else {
+                0.2 * node_data
+                    .policy
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        if node_data
+                            .get_child(ChildId(i as u32))
+                            .visits::<WithVirtualLoss>()
+                            > 0
+                        {
+                            Some(p)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum::<f32>()
+                    .sqrt()
+            };
+            node_data.value::<WithVirtualLoss>() - first_play_urgency_reduction
+        };
+
+        // pick a child based on PUCT
+        let child_id = (0..next_updates.len().try_into().unwrap())
+            .map(ChildId)
+            .max_by_key(|&child_id| {
+                node_data.puct::<WithVirtualLoss>(child_id, default_value_for_unexpanded_child)
+            })
+            .unwrap();
+
+        // We wait until now to add virtual loss, to avoid messing up PUCT
+        // computations.
+        self.virtual_loss_incurred.push(node_data);
+        node_data.incr_virtual_loss_count();
+
+        // move to child, update the state
+        self.node = node_data.get_child(child_id);
+        let update = next_updates.get(child_id.0 as usize).unwrap();
+        self.state.as_mut().unwrap().update(*update);
+
+        return Ok(true);
+    }
+
+    fn do_backprop(&mut self, leaf_utility: f32) {
         let _span = self
             .tracy_client
             .clone()
             .span(tracy_client::span_location!("backprop"), 0);
 
         // backpropagate
-        for node_data in virtual_loss_incurred.iter().rev() {
+        for node_data in self.virtual_loss_incurred.iter().rev() {
             node_data.incr_visits_and_utility(leaf_utility);
             node_data.decr_virtual_loss_count();
         }
-        let this_depth = virtual_loss_incurred.len();
-        self.sum_depth
+        let this_depth = self.virtual_loss_incurred.len();
+        self.tree_search
+            .sum_depth
             .fetch_add(this_depth, atomic::Ordering::Relaxed);
         // `fetch_update` returns `Err` on closure returning `None`, but we
         // don't care
-        let (Ok(_) | Err(_)) = self.max_depth.fetch_update(
+        let (Ok(_) | Err(_)) = self.tree_search.max_depth.fetch_update(
             atomic::Ordering::Relaxed,
             atomic::Ordering::Relaxed,
             |max_depth| {
@@ -394,150 +582,40 @@ impl TreeSearch {
                 }
             },
         );
+
+        self.fibre_state = TreeSearchWorkFibreState::Finished;
     }
 
-    pub fn search_once(&self) -> Result<()> {
-        let span = self
-            .tracy_client
-            .clone()
-            .span(tracy_client::span_location!("search once"), 0);
-
-        let mut state = Box::new(self.root.clone());
-        let mut node = &self.root_node;
-
-        // Contains all nodes that we added virtual loss to.
-        let mut virtual_loss_incurred: Vec<&NodeData> = Vec::new();
-
-        let leaf_utility = loop {
-            let is_root = virtual_loss_incurred.len() == 0;
-
-            // We need to allow `data_expanding_if_still_unexpanded` to take
-            // ownership of `State` if the callback is called, but we need
-            // to retain ownership otherwise. It's hard to convince Rust at
-            // compile-time, so instead do this ownership check at runtime.
-            let mut state_opt = Some(state);
-
-            let (node_data, this_thread_expanded) = {
-                let span_need_to_expand = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("need to expand?"), 0);
-
-                let (node_data, this_thread_expanded) =
-                    node.data_expanding_if_still_unexpanded(|| {
-                        // if this callback was called, then we are the lucky ones who
-                        // get to expand this previously unexpanded node
-
-                        let state = state_opt.take().unwrap();
-
-                        if let Some(win) = state.evaluate_final_state() {
-                            span.emit_text("leaf: terminal node");
-
-                            Ok((NodeData::new_terminal(win), win))
-                        } else {
-                            let _span = self
-                                .tracy_client
-                                .clone()
-                                .span(tracy_client::span_location!("leaf: expanding node"), 0);
-
-                            let eval_result = self.eval_blocking(*state, is_root)?;
-
-                            Ok((
-                                NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
-                                eval_result.utility,
-                            ))
-                        }
-                    })?;
-
-                if this_thread_expanded.is_some() {
-                    span_need_to_expand.emit_text("yes");
-                    span_need_to_expand.emit_color(0x00C000);
-                } else {
-                    span_need_to_expand.emit_text("no (or blocked)");
-                    span_need_to_expand.emit_color(0xC0C000);
+    /// Returns Ok(true) if finished, Ok(false) if blocked.
+    fn do_some_work(&mut self) -> Result<bool> {
+        loop {
+            match self.fibre_state {
+                TreeSearchWorkFibreState::Descending => {
+                    let unblocked = self.do_one_descent()?;
+                    if !unblocked {
+                        return Ok(false);
+                    }
                 }
-
-                (node_data, this_thread_expanded)
-            };
-
-            if let Some(value) = this_thread_expanded {
-                // We were the ones to expand, so stop descending here.
-                node_data.incr_visits_and_utility(value);
-                break value;
+                TreeSearchWorkFibreState::ReachedExpandedLeaf { leaf_utility } => {
+                    self.do_backprop(leaf_utility);
+                    assert!(matches!(
+                        self.fibre_state,
+                        TreeSearchWorkFibreState::Finished
+                    ));
+                }
+                TreeSearchWorkFibreState::Finished => {
+                    return Ok(true);
+                }
             }
+        }
+    }
+}
 
-            state = state_opt.unwrap();
-
-            // Otherwise, the node was already expanded.
-
-            if node_data.is_terminal() {
-                span.emit_text("leaf: terminal node");
-
-                let value = node_data.value::<AssertZeroVirtualLoss>();
-                node_data.incr_visits_and_utility(value);
-                break value;
-            }
-
-            // The node is not a leaf. We need to keep descending.
-
-            let _span = self
-                .tracy_client
-                .clone()
-                .span(tracy_client::span_location!("real node"), 0);
-
-            let next_updates = state.next_updates().ok().unwrap();
-
-            let default_value_for_unexpanded_child = {
-                let first_play_urgency_reduction = if is_root {
-                    // root has no first play urgency reduction if
-                    // Dirichlet noise is disabled
-                    // TODO: dirichlet noise
-                    0.
-                } else {
-                    0.2 * node_data
-                        .policy
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, p)| {
-                            if node_data
-                                .get_child(ChildId(i as u32))
-                                .visits::<WithVirtualLoss>()
-                                > 0
-                            {
-                                Some(p)
-                            } else {
-                                None
-                            }
-                        })
-                        .sum::<f32>()
-                        .sqrt()
-                };
-                node_data.value::<WithVirtualLoss>() - first_play_urgency_reduction
-            };
-
-            // pick a child based on PUCT
-            let child_id = (0..next_updates.len().try_into().unwrap())
-                .map(ChildId)
-                .max_by_key(|&child_id| {
-                    node_data.puct::<WithVirtualLoss>(child_id, default_value_for_unexpanded_child)
-                })
-                .unwrap();
-
-            // We wait until now to add virtual loss, to avoid messing up PUCT
-            // computations.
-            virtual_loss_incurred.push(node_data);
-            node_data.incr_virtual_loss_count();
-
-            // move to child, update the state
-            node = node_data.get_child(child_id);
-            let update = next_updates.get(child_id.0 as usize).unwrap();
-            state.update(*update);
-        };
-
-        span.emit_value(virtual_loss_incurred.len() as u64);
-
-        self.do_backprop(virtual_loss_incurred, leaf_utility);
-
+impl<'a> TreeSearch<'a> {
+    pub fn search_once(&self) -> Result<()> {
+        let mut fibre = TreeSearchWorkFibre::new(self);
+        let finished = fibre.do_some_work()?;
+        assert!(finished, "async resuming of work not yet implemented");
         Ok(())
     }
 
@@ -554,7 +632,7 @@ impl TreeSearch {
     }
 
     pub fn eval_count(&self) -> usize {
-        self.eval_count.load(atomic::Ordering::Relaxed)
+        self.eval_thread.eval_count.load(atomic::Ordering::Relaxed)
     }
 }
 
@@ -586,7 +664,7 @@ impl NextUpdatesWithStats {
     }
 }
 
-impl TreeSearch {
+impl<'a> TreeSearch<'a> {
     pub fn next_updates_with_stats(&self) -> NextUpdatesWithStats {
         let root_node_data = self
             .root_node
