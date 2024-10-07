@@ -212,7 +212,6 @@ pub struct TreeSearch {
     sum_depth: AtomicUsize,
     max_depth: AtomicU32,
     tracy_client: tracy_client::Client,
-    eval_thread: thread::JoinHandle<()>,
     eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
 }
 
@@ -305,7 +304,7 @@ impl TreeSearch {
 
     pub fn new(root: State, eval: Arc<dyn BatchEval>, tracy_client: tracy_client::Client) -> Self {
         let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
-        let eval_thread = thread::spawn({
+        thread::spawn({
             let tracy_client = tracy_client.clone();
             move || Self::eval_thread(eval, eval_thread_rx, tracy_client)
         });
@@ -315,7 +314,6 @@ impl TreeSearch {
             sum_depth: 0.into(),
             max_depth: 0.into(),
             tracy_client,
-            eval_thread,
             eval_thread_tx,
         }
     }
@@ -354,31 +352,48 @@ impl TreeSearch {
             // compile-time, so instead do this ownership check at runtime.
             let mut state_opt = Some(state);
 
-            let (node_data, this_thread_expanded) =
-                node.data_expanding_if_still_unexpanded(|| {
-                    // if this callback was called, then we are the lucky ones who
-                    // get to expand this previously unexpanded node
+            let (node_data, this_thread_expanded) = {
+                let span_need_to_expand = self
+                    .tracy_client
+                    .clone()
+                    .span(tracy_client::span_location!("need to expand?"), 0);
 
-                    let state = state_opt.take().unwrap();
+                let (node_data, this_thread_expanded) =
+                    node.data_expanding_if_still_unexpanded(|| {
+                        // if this callback was called, then we are the lucky ones who
+                        // get to expand this previously unexpanded node
 
-                    if let Some(win) = state.evaluate_final_state() {
-                        span.emit_text("leaf: terminal node");
+                        let state = state_opt.take().unwrap();
 
-                        Ok((NodeData::new_terminal(win), win))
-                    } else {
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("leaf: expanding node"), 0);
+                        if let Some(win) = state.evaluate_final_state() {
+                            span.emit_text("leaf: terminal node");
 
-                        let eval_result = self.eval_blocking(*state, is_root)?;
+                            Ok((NodeData::new_terminal(win), win))
+                        } else {
+                            let _span = self
+                                .tracy_client
+                                .clone()
+                                .span(tracy_client::span_location!("leaf: expanding node"), 0);
 
-                        Ok((
-                            NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
-                            eval_result.utility,
-                        ))
-                    }
-                })?;
+                            let eval_result = self.eval_blocking(*state, is_root)?;
+
+                            Ok((
+                                NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
+                                eval_result.utility,
+                            ))
+                        }
+                    })?;
+
+                if this_thread_expanded.is_some() {
+                    span_need_to_expand.emit_text("yes");
+                    span_need_to_expand.emit_color(0x00C000);
+                } else {
+                    span_need_to_expand.emit_text("no (or blocked)");
+                    span_need_to_expand.emit_color(0xC0C000);
+                }
+
+                (node_data, this_thread_expanded)
+            };
 
             if let Some(value) = this_thread_expanded {
                 // We were the ones to expand, so stop descending here.
