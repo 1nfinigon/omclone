@@ -854,19 +854,6 @@ pub mod model {
         dirichlet_distr: rand_distr::Dirichlet<f32>,
     }
 
-    pub struct Evaluation {
-        /// Softmaxed from policy head
-        pub policy: [f32; BasicInstr::N_TYPES],
-
-        /// Softmaxed outcome prediction from value head
-        pub win: f32,
-        //pub loss_by_cycles: f32,
-        //loss_by_area: f32,
-
-        //cycles_left: f32, -- think about making this N(0, 1) in the raw output. Maybe interpret this as scaled relative to the given cycle limit?
-        //area_left: f32,
-    }
-
     impl Model {
         pub fn load(
             model_path: impl AsRef<Path>,
@@ -917,150 +904,6 @@ pub mod model {
             println!("Using latest model: {:?}", latest_model);
             Self::load(latest_model, device, tracy_client)
         }
-
-        pub fn forward(
-            &self,
-            features: &Features,
-            x: usize,
-            y: usize,
-            is_root: bool,
-        ) -> eyre::Result<Evaluation> {
-            let _span = self
-                .tracy_client
-                .clone()
-                .span(tracy_client::span_location!("nn fwd"), 0);
-
-            assert!(x < constants::N_WIDTH);
-            assert!(y < constants::N_HEIGHT);
-
-            let options = (tch::Kind::Float, self.device);
-
-            let input = {
-                let _span = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("input munging"), 0);
-                [
-                    {
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("spatial"), 0);
-                        tch::IValue::Tensor(
-                            features
-                                .spatial
-                                .to_dense_tensor(self.tracy_client.clone(), options)?
-                                .f_unsqueeze(0)?,
-                        )
-                    },
-                    {
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("spatiotemporal"), 0);
-                        tch::IValue::Tensor(
-                            features
-                                .spatiotemporal
-                                .to_dense_tensor(self.tracy_client.clone(), options)?
-                                .f_unsqueeze(0)?,
-                        )
-                    },
-                    {
-                        let _span = self
-                            .tracy_client
-                            .clone()
-                            .span(tracy_client::span_location!("temporal"), 0);
-                        tch::IValue::Tensor(
-                            features
-                                .temporal
-                                .to_dense_tensor(self.tracy_client.clone(), options)?
-                                .f_unsqueeze(0)?,
-                        )
-                    },
-                    {
-                        let _span = self.tracy_client.clone().span(
-                            tracy_client::span_location!("policy_softmax_temperature"),
-                            0,
-                        );
-                        tch::IValue::Tensor(
-                            tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
-                                .f_to(self.device)?,
-                        )
-                    },
-                ]
-            };
-
-            let output = {
-                let _span = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("exec"), 0);
-                tch::no_grad(|| self.module.forward_is(&input))?
-            };
-
-            {
-                let _span = self
-                    .tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("output munging"), 0);
-                let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) =
-                    output.try_into()?;
-
-                let policy = {
-                    let mut policy = [0f32; BasicInstr::N_TYPES];
-
-                    assert_eq!(
-                        policy_tensor.size4()?,
-                        (
-                            1,
-                            BasicInstr::N_TYPES as i64,
-                            constants::N_HEIGHT as i64,
-                            constants::N_WIDTH as i64
-                        )
-                    );
-
-                    let mut policy_sum = 0.;
-                    let _span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("policy extraction"), 0);
-                    let policy_tensor = policy_tensor
-                        .f_select(3, x as i64)?
-                        .f_select(2, y as i64)?
-                        .f_select(0, 0)?
-                        .f_to(tch::Device::Cpu)?;
-                    for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
-                        let this_policy = policy_tensor.f_double_value(&[i_instr as i64])? as f32;
-                        assert!(this_policy >= 0.);
-                        *policy_elt = this_policy;
-                        policy_sum += this_policy;
-                    }
-                    assert!((policy_sum - 1.).abs() < 1e-6);
-                    policy
-                };
-
-                let win = {
-                    let _span = self
-                        .tracy_client
-                        .clone()
-                        .span(tracy_client::span_location!("value extraction"), 0);
-                    assert_eq!(value_tensor.size2()?, (1, 2));
-                    let win = value_tensor.f_double_value(&[0, 0])? as f32;
-                    assert!(win >= 0.);
-                    let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
-                    assert!(loss_by_cycles >= 0.);
-                    let value_sum = win + loss_by_cycles;
-                    assert!((value_sum - 1.).abs() < 1e-6);
-                    win
-                };
-
-                Ok(Evaluation {
-                    policy,
-                    win,
-                    //loss_by_cycles,
-                })
-            }
-        }
     }
 
     use crate::search;
@@ -1087,7 +930,141 @@ pub mod model {
                 let (x, y) = features::normalize_position(next_arm_pos)
                     .ok_or_eyre("arm out of nn bounds")?;
 
-                let mut eval = self.forward(&state.nn_features, x, y, is_root)?;
+                let _span = self
+                    .tracy_client
+                    .clone()
+                    .span(tracy_client::span_location!("nn fwd"), 0);
+
+                assert!(x < constants::N_WIDTH);
+                assert!(y < constants::N_HEIGHT);
+
+                let options = (tch::Kind::Float, self.device);
+
+                let input = {
+                    let _span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("input munging"), 0);
+                    [
+                        {
+                            let _span = self
+                                .tracy_client
+                                .clone()
+                                .span(tracy_client::span_location!("spatial"), 0);
+                            tch::IValue::Tensor(
+                                state
+                                    .nn_features
+                                    .spatial
+                                    .to_dense_tensor(self.tracy_client.clone(), options)?
+                                    .f_unsqueeze(0)?,
+                            )
+                        },
+                        {
+                            let _span = self
+                                .tracy_client
+                                .clone()
+                                .span(tracy_client::span_location!("spatiotemporal"), 0);
+                            tch::IValue::Tensor(
+                                state
+                                    .nn_features
+                                    .spatiotemporal
+                                    .to_dense_tensor(self.tracy_client.clone(), options)?
+                                    .f_unsqueeze(0)?,
+                            )
+                        },
+                        {
+                            let _span = self
+                                .tracy_client
+                                .clone()
+                                .span(tracy_client::span_location!("temporal"), 0);
+                            tch::IValue::Tensor(
+                                state
+                                    .nn_features
+                                    .temporal
+                                    .to_dense_tensor(self.tracy_client.clone(), options)?
+                                    .f_unsqueeze(0)?,
+                            )
+                        },
+                        {
+                            let _span = self.tracy_client.clone().span(
+                                tracy_client::span_location!("policy_softmax_temperature"),
+                                0,
+                            );
+                            tch::IValue::Tensor(
+                                tch::Tensor::f_from_slice(&[if is_root { 1.03 } else { 1. }])?
+                                    .f_to(self.device)?,
+                            )
+                        },
+                    ]
+                };
+
+                let output = {
+                    let _span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("exec"), 0);
+                    tch::no_grad(|| self.module.forward_is(&input))?
+                };
+
+                let (win, mut policy) = {
+                    let _span = self
+                        .tracy_client
+                        .clone()
+                        .span(tracy_client::span_location!("output munging"), 0);
+                    let (policy_tensor, value_tensor): (tch::Tensor, tch::Tensor) =
+                        output.try_into()?;
+
+                    let policy = {
+                        let mut policy = [0f32; BasicInstr::N_TYPES];
+
+                        assert_eq!(
+                            policy_tensor.size4()?,
+                            (
+                                1,
+                                BasicInstr::N_TYPES as i64,
+                                constants::N_HEIGHT as i64,
+                                constants::N_WIDTH as i64
+                            )
+                        );
+
+                        let mut policy_sum = 0.;
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("policy extraction"), 0);
+                        let policy_tensor = policy_tensor
+                            .f_select(3, x as i64)?
+                            .f_select(2, y as i64)?
+                            .f_select(0, 0)?
+                            .f_to(tch::Device::Cpu)?;
+                        for (i_instr, policy_elt) in policy.iter_mut().enumerate() {
+                            let this_policy =
+                                policy_tensor.f_double_value(&[i_instr as i64])? as f32;
+                            assert!(this_policy >= 0.);
+                            *policy_elt = this_policy;
+                            policy_sum += this_policy;
+                        }
+                        assert!((policy_sum - 1.).abs() < 1e-6);
+                        policy
+                    };
+
+                    let win = {
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("value extraction"), 0);
+                        assert_eq!(value_tensor.size2()?, (1, 2));
+                        let win = value_tensor.f_double_value(&[0, 0])? as f32;
+                        assert!(win >= 0.);
+                        let loss_by_cycles = value_tensor.f_double_value(&[0, 1])? as f32;
+                        assert!(loss_by_cycles >= 0.);
+                        let value_sum = win + loss_by_cycles;
+                        assert!((value_sum - 1.).abs() < 1e-6);
+                        win
+                    };
+
+                    (win, policy)
+                };
 
                 if is_root {
                     // add Dirichlet noise
@@ -1095,15 +1072,15 @@ pub mod model {
                     // Dirichlet noise to more than just the root.
                     // TODO: filter to only valid moves
                     let noise = self.dirichlet_distr.sample(rng);
-                    for (policy, noise) in eval.policy.iter_mut().zip(noise) {
+                    for (policy, noise) in policy.iter_mut().zip(noise) {
                         const EPS: f32 = 0.25;
                         *policy = (1. - EPS) * *policy + EPS * noise;
                     }
                 }
 
                 eval_results.push(search::EvalResult {
-                    utility: eval.win,
-                    policy: eval.policy,
+                    utility: win,
+                    policy,
                 });
             }
 
