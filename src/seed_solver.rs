@@ -131,12 +131,15 @@ fn solve_one_puzzle_seeded(
             .map(|_| -> Result<()> { Ok(tree_search.search_once()?) })
             .collect::<Result<()>>()?;
         let time_diff = time::Instant::now() - time_start;
-        tracy_client.plot(
-            tracy_client::plot_name!("playouts/s"),
-            playouts as f64 / time_diff.as_secs_f64(),
-        );
 
         let stats = tree_search.next_updates_with_stats();
+
+        if stats.eval_count > 0 {
+            tracy_client.plot(
+                tracy_client::plot_name!("nn evals/s"),
+                stats.eval_count as f64 / time_diff.as_secs_f64(),
+            );
+        }
 
         //println!("{:?}", stats);
 

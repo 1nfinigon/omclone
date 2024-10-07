@@ -209,6 +209,7 @@ impl NodeData {
 pub struct TreeSearch {
     root: State,
     root_node: Node,
+    eval_count: AtomicUsize,
     sum_depth: AtomicUsize,
     max_depth: AtomicU32,
     tracy_client: tracy_client::Client,
@@ -334,6 +335,7 @@ impl TreeSearch {
         Self {
             root,
             root_node: Node::new_unexpanded(),
+            eval_count: 0.into(),
             sum_depth: 0.into(),
             max_depth: 0.into(),
             tracy_client,
@@ -344,6 +346,7 @@ impl TreeSearch {
     pub fn clear(&mut self, root: State) {
         self.root = root;
         self.root_node = Node::new_unexpanded();
+        self.eval_count = 0.into();
         self.sum_depth = 0.into();
         self.max_depth = 0.into();
     }
@@ -355,6 +358,9 @@ impl TreeSearch {
             .eval_thread_tx
             .send(EvalThreadRequest { state, is_root, tx })
             .wrap_err("eval thread died, not accepting requests")?;
+
+        self.eval_count.fetch_add(1, atomic::Ordering::Relaxed);
+
         let result = rx
             .recv()
             .wrap_err("eval thread died, never sent response")?;
@@ -544,6 +550,10 @@ impl TreeSearch {
     pub fn max_depth(&self) -> u32 {
         self.max_depth.load(atomic::Ordering::Relaxed)
     }
+
+    pub fn eval_count(&self) -> usize {
+        self.eval_count.load(atomic::Ordering::Relaxed)
+    }
 }
 
 #[derive(Debug)]
@@ -561,6 +571,7 @@ pub struct NextUpdatesWithStats {
     pub updates_with_stats: Vec<UpdateWithStats>,
     pub avg_depth: f32,
     pub max_depth: u32,
+    pub eval_count: usize,
 }
 
 impl NextUpdatesWithStats {
@@ -610,6 +621,7 @@ impl TreeSearch {
             updates_with_stats,
             avg_depth: self.avg_depth(),
             max_depth: self.max_depth(),
+            eval_count: self.eval_count(),
         }
     }
 }
