@@ -123,7 +123,7 @@ fn solve_one_puzzle_seeded(
 
         tree_search.clear(search_state.clone());
 
-        let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
+        let playouts = if rng.gen_bool(0.75) { 1000 } else { 6000 };
 
         let time_start = time::Instant::now();
         (0..playouts)

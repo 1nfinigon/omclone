@@ -159,10 +159,10 @@ fn process_one_solution(
                     [0.1, 0.05, 1.0]
                 };
 
-                // include 50% of these < 200 playouts, and 100% of these
+                // include 50% of these < 2000 playouts, and 100% of these
                 // >= 200 playouts
                 let n_playouts: u32 = history_item.playouts.iter().sum();
-                if rng.gen_bool(if n_playouts < 200 { 0.5 } else { 1.0 }) {
+                if rng.gen_bool(if n_playouts < 2000 { 0.5 } else { 1.0 }) {
                     let visits: Vec<_> = history_item
                         .playouts
                         .iter()
