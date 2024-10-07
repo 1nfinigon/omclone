@@ -367,6 +367,35 @@ impl TreeSearch {
         Ok(result)
     }
 
+    fn do_backprop(&self, virtual_loss_incurred: Vec<&NodeData>, leaf_utility: f32) {
+        let _span = self
+            .tracy_client
+            .clone()
+            .span(tracy_client::span_location!("backprop"), 0);
+
+        // backpropagate
+        for node_data in virtual_loss_incurred.iter().rev() {
+            node_data.incr_visits_and_utility(leaf_utility);
+            node_data.decr_virtual_loss_count();
+        }
+        let this_depth = virtual_loss_incurred.len();
+        self.sum_depth
+            .fetch_add(this_depth, atomic::Ordering::Relaxed);
+        // `fetch_update` returns `Err` on closure returning `None`, but we
+        // don't care
+        let (Ok(_) | Err(_)) = self.max_depth.fetch_update(
+            atomic::Ordering::Relaxed,
+            atomic::Ordering::Relaxed,
+            |max_depth| {
+                if max_depth >= this_depth as u32 {
+                    None
+                } else {
+                    Some(this_depth as u32)
+                }
+            },
+        );
+    }
+
     pub fn search_once(&self) -> Result<()> {
         let span = self
             .tracy_client
@@ -507,34 +536,7 @@ impl TreeSearch {
 
         span.emit_value(virtual_loss_incurred.len() as u64);
 
-        {
-            let _span = self
-                .tracy_client
-                .clone()
-                .span(tracy_client::span_location!("backprop"), 0);
-
-            // backpropagate
-            for node_data in virtual_loss_incurred.iter().rev() {
-                node_data.incr_visits_and_utility(leaf_utility);
-                node_data.decr_virtual_loss_count();
-            }
-            let this_depth = virtual_loss_incurred.len();
-            self.sum_depth
-                .fetch_add(this_depth, atomic::Ordering::Relaxed);
-            // `fetch_update` returns `Err` on closure returning `None`, but we
-            // don't care
-            let (Ok(_) | Err(_)) = self.max_depth.fetch_update(
-                atomic::Ordering::Relaxed,
-                atomic::Ordering::Relaxed,
-                |max_depth| {
-                    if max_depth >= this_depth as u32 {
-                        None
-                    } else {
-                        Some(this_depth as u32)
-                    }
-                },
-            );
-        }
+        self.do_backprop(virtual_loss_incurred, leaf_utility);
 
         Ok(())
     }
