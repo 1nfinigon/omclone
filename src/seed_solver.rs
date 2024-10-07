@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time;
 
 use eyre::Result;
 
@@ -124,10 +125,13 @@ fn solve_one_puzzle_seeded(
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
+        let time_start = time::Instant::now();
         (0..playouts)
             .into_par_iter()
             .map(|_| -> Result<()> { Ok(tree_search.search_once()?) })
             .collect::<Result<()>>()?;
+        let time_diff = time::Instant::now() - time_start;
+        tracy_client.plot(tracy_client::plot_name!("playouts/s"), playouts as f64 / time_diff.as_secs_f64());
 
         let stats = tree_search.next_updates_with_stats();
 
