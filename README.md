@@ -326,7 +326,6 @@ Technical/impl work:
         as a function of _n_?)
     -   how well does it solve with no history?
 -   Train a timesteps-left head on existing solutions
--   Search: Parallelise MCTS, batch NN evaluations
 -   Make net/eval/training board size agnostic
 -   use symmetries to generate more data
 -   Network/code for generating and estimating winrate for layouts
