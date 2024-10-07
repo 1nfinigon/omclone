@@ -283,6 +283,7 @@ pub struct Args {
     threads: Option<usize>,
     forever: Option<()>,
     single: Option<()>,
+    miri: Option<()>,
     seed: Option<u64>,
     reload_model_every: Option<usize>,
     max_cycles: Option<u64>,
@@ -306,6 +307,9 @@ impl Args {
                 }
                 "--single" => {
                     self_.single = Some(());
+                }
+                "--miri" => {
+                    self_.miri = Some(());
                 }
                 "--seed" => {
                     self_.seed = Some(
@@ -421,8 +425,19 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
     println!("Using device {:?}", device);
 
     let mut make_evaluator = || -> Result<Box<dyn eval::AsyncEvaluator>> {
-        let model = nn::Model::load_latest(device, tracy_client.clone())?;
-        Ok(Box::new(eval::EvalThread::new(model, tracy_client.clone())))
+        match args.miri {
+            #[cfg(feature = "torch")]
+            None => {
+                let model = nn::Model::load_latest(device, tracy_client.clone())?;
+                Ok(Box::new(eval::EvalThread::new(model, tracy_client.clone())))
+            }
+            #[cfg(not(feature = "torch"))]
+            None => panic!("not compiled with torch, need to pass --miri for a dummy evaluator"),
+            Some(()) => Ok(Box::new(eval::EvalThread::new(
+                eval::DummyEvaluator::new(Box::new(rand_pcg::Pcg64::seed_from_u64(123))),
+                tracy_client.clone(),
+            ))),
+        }
     };
 
     rayon::ThreadPoolBuilder::new()

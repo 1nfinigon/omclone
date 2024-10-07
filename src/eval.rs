@@ -1,9 +1,10 @@
 use crate::search_state::State;
 use crate::sim::BasicInstr;
-use eyre::{Context, Result};
+use eyre::{Context, OptionExt, Result};
+use rand::{Rng, RngCore};
 use std::sync::{
     atomic::{self, AtomicUsize},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 use std::thread;
 
@@ -155,7 +156,7 @@ impl<BE: BatchEvaluator + 'static> EvalThread<BE> {
 
 impl<BE: BatchEvaluator> AsyncEvaluator for EvalThread<BE> {
     fn model_name(&self) -> &str {
-        &self.model.model_name()
+        self.model.model_name()
     }
 
     fn eval_count(&self) -> usize {
@@ -180,5 +181,44 @@ impl<BE: BatchEvaluator> AsyncEvaluator for EvalThread<BE> {
             .recv()
             .wrap_err("eval thread died, never sent response")?;
         Ok(result)
+    }
+}
+
+pub struct DummyEvaluator {
+    rng: Mutex<Box<dyn RngCore + Send>>,
+}
+
+impl DummyEvaluator {
+    pub fn new(rng: Box<dyn RngCore + Send>) -> Self {
+        Self {
+            rng: Mutex::new(rng),
+        }
+    }
+}
+
+impl BatchEvaluator for DummyEvaluator {
+    fn model_name(&self) -> &str {
+        "dummy-evaluator"
+    }
+
+    fn batch_eval_blocking(&self, states: Vec<(State, bool)>) -> Result<Vec<EvalResult>> {
+        let mut rng = self.rng.lock().ok().ok_or_eyre("can't lock rng")?;
+        Ok(states
+            .into_iter()
+            .map(|_| {
+                let mut policy = [0f32; BasicInstr::N_TYPES];
+                policy.iter_mut().for_each(|elem| {
+                    *elem = rng.sample(rand::distributions::Open01);
+                });
+                let policy_denom: f32 = policy.iter().sum();
+                policy.iter_mut().for_each(|elem| {
+                    *elem /= policy_denom;
+                });
+                EvalResult {
+                    utility: rng.sample(rand::distributions::Open01),
+                    policy,
+                }
+            })
+            .collect())
     }
 }
