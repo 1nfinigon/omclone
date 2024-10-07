@@ -1,4 +1,4 @@
-use crate::eval::Evaluator;
+use crate::eval::AsyncEvaluator;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
@@ -261,7 +261,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
         }
     }
 
-    fn do_one_descent(&mut self, evaluator: &dyn Evaluator) -> Result<bool> {
+    fn do_one_descent(&mut self, evaluator: &dyn AsyncEvaluator) -> Result<bool> {
         let span = self
             .tracy_client
             .clone()
@@ -424,7 +424,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
     }
 
     /// Returns Ok(true) if finished, Ok(false) if blocked.
-    fn do_some_work(&mut self, evaluator: &dyn Evaluator) -> Result<bool> {
+    fn do_some_work(&mut self, evaluator: &dyn AsyncEvaluator) -> Result<bool> {
         loop {
             match self.fibre_state {
                 TreeSearchWorkFibreState::Descending => {
@@ -449,7 +449,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
 }
 
 impl TreeSearch {
-    pub fn search_once(&self, evaluator: &dyn Evaluator) -> Result<()> {
+    pub fn search_once(&self, evaluator: &dyn AsyncEvaluator) -> Result<()> {
         let mut fibre = TreeSearchWorkFibre::new(self);
         let finished = fibre.do_some_work(evaluator)?;
         assert!(finished, "async resuming of work not yet implemented");

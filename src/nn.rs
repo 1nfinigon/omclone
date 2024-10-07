@@ -1,17 +1,10 @@
-use crate::eval::{EvalResult, Evaluator};
+use crate::eval;
 use crate::search_state;
-use crate::search_state::State;
 use crate::sim::{self, BasicInstr};
-use eyre::{ensure, eyre, Context, OptionExt, Result};
+use eyre::{ensure, eyre, OptionExt, Result};
 use rand::prelude::*;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::{
-    atomic::{self, AtomicUsize},
-    mpsc, Arc,
-};
-use std::thread;
-use tch;
 
 pub mod constants {
 
@@ -349,32 +342,26 @@ impl<const N: usize> SparseCoo<N> {
         }
     }
 
+    #[cfg(feature = "torch")]
     fn indices_tensor(&self) -> Result<tch::Tensor> {
         Ok(tch::Tensor::f_from_slice(&self.indices[..])?
             .f_view([-1, N as i64])?
             .f_t_()?)
     }
 
+    #[cfg(feature = "torch")]
     fn values_tensor(&self) -> Result<tch::Tensor> {
         Ok(tch::Tensor::f_from_slice(&self.values[..])?)
     }
 
+    #[cfg(feature = "torch")]
     fn size_tensor(&self) -> Result<tch::Tensor> {
         Ok(tch::Tensor::f_from_slice(&self.size[..])?)
     }
-}
 
-trait ToDenseTensor {
-    fn to_dense_tensor(
-        &self,
-        tracy_client: tracy_client::Client,
-        options: (tch::Kind, tch::Device),
-    ) -> Result<tch::Tensor>;
-}
-
-impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
-    fn to_dense_tensor(
-        &self,
+    #[cfg(feature = "torch")]
+    fn slice_to_dense_tensor(
+        self_: &[&Self],
         tracy_client: tracy_client::Client,
         options: (tch::Kind, tch::Device),
     ) -> Result<tch::Tensor> {
@@ -383,10 +370,10 @@ impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
             0,
         );
 
-        let batch_size = self.len();
+        let batch_size = self_.len();
         ensure!(batch_size > 0);
 
-        let size = self
+        let size = self_
             .iter()
             .map(|sample| sample.size)
             .try_fold(None, |prev_size, this_size| {
@@ -406,7 +393,7 @@ impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
         let mut all_indices = Vec::with_capacity(batch_size);
         let mut all_values = Vec::with_capacity(batch_size);
 
-        for (batch_index, sample) in self.iter().enumerate() {
+        for (batch_index, sample) in self_.iter().enumerate() {
             let indices = sample.indices_tensor()?;
             let values = sample.values_tensor()?;
 
@@ -872,6 +859,7 @@ pub mod features {
 
 pub use features::Features;
 
+#[cfg(feature = "torch")]
 pub fn get_best_device() -> Result<tch::Device> {
     assert_eq!(
         std::env::var_os("CUDA_DEVICE_ORDER"),
@@ -909,6 +897,7 @@ pub fn get_best_device() -> Result<tch::Device> {
     }
 }
 
+#[cfg(feature = "torch")]
 pub struct Model {
     pub name: String,
     module: tch::CModule,
@@ -917,6 +906,7 @@ pub struct Model {
     dirichlet_distr: rand_distr::Dirichlet<f32>,
 }
 
+#[cfg(feature = "torch")]
 impl Model {
     pub fn load(
         model_path: impl AsRef<Path>,
@@ -964,8 +954,18 @@ impl Model {
         println!("Using latest model: {:?}", latest_model);
         Self::load(latest_model, device, tracy_client)
     }
+}
 
-    fn batch_eval(&self, states: Vec<(search_state::State, bool)>) -> Result<Vec<EvalResult>> {
+#[cfg(feature = "torch")]
+impl eval::BatchEvaluator for Model {
+    fn model_name(&self) -> &str {
+        &self.name
+    }
+
+    fn batch_eval_blocking(
+        &self,
+        states: Vec<(search_state::State, bool)>,
+    ) -> Result<Vec<eval::EvalResult>> {
         let rng = &mut rand::thread_rng();
         let batch_size = states.len();
 
@@ -981,18 +981,23 @@ impl Model {
                 .iter()
                 .map(|(state, _)| &state.nn_features.spatial)
                 .collect();
-            let spatial = spatial.to_dense_tensor(self.tracy_client.clone(), options)?;
+            let spatial =
+                SparseCoo::slice_to_dense_tensor(&spatial, self.tracy_client.clone(), options)?;
             let spatiotemporal: Vec<_> = states
                 .iter()
                 .map(|(state, _)| &state.nn_features.spatiotemporal)
                 .collect();
-            let spatiotemporal =
-                spatiotemporal.to_dense_tensor(self.tracy_client.clone(), options)?;
+            let spatiotemporal = SparseCoo::slice_to_dense_tensor(
+                &spatiotemporal,
+                self.tracy_client.clone(),
+                options,
+            )?;
             let temporal: Vec<_> = states
                 .iter()
                 .map(|(state, _)| &state.nn_features.temporal)
                 .collect();
-            let temporal = temporal.to_dense_tensor(self.tracy_client.clone(), options)?;
+            let temporal =
+                SparseCoo::slice_to_dense_tensor(&temporal, self.tracy_client.clone(), options)?;
 
             let policy_softmax_temperature: Vec<_> = states
                 .iter()
@@ -1103,159 +1108,11 @@ impl Model {
                     }
                 }
 
-                Ok(EvalResult {
+                Ok(eval::EvalResult {
                     utility: win,
                     policy,
                 })
             })
             .collect()
-    }
-}
-
-struct EvalThreadRequest {
-    state: State,
-    is_root: bool,
-    tx: mpsc::SyncSender<EvalResult>,
-}
-
-pub struct EvalThread {
-    model: Arc<Model>,
-    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
-    eval_count: AtomicUsize,
-}
-
-impl EvalThread {
-    const MAX_EVAL_BATCH_SIZE: usize = 128;
-
-    fn thread_main(
-        model: Arc<Model>,
-        rx: mpsc::Receiver<EvalThreadRequest>,
-        tracy_client: tracy_client::Client,
-    ) {
-        let _span = tracy_client
-            .clone()
-            .span(tracy_client::span_location!("eval thread"), 0);
-
-        let tracy_eval_batch_size_plot = tracy_client::plot_name!("eval batch size");
-
-        loop {
-            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
-
-            // These two should always be the same length.
-            let mut batch_to_evaluate = Vec::new();
-            let mut result_txs = Vec::new();
-
-            // First, let's accumulate as many eval requests as possible
-            loop {
-                if batch_to_evaluate.len() >= Self::MAX_EVAL_BATCH_SIZE {
-                    break;
-                }
-
-                let EvalThreadRequest { state, is_root, tx } = {
-                    if batch_to_evaluate.is_empty() {
-                        match rx.recv() {
-                            Ok(request) => request,
-                            Err(mpsc::RecvError) => {
-                                // no more data will ever come; nothing we can do but
-                                // terminate
-                                return;
-                            }
-                        }
-                    } else {
-                        match rx.try_recv() {
-                            Ok(request) => request,
-                            Err(mpsc::TryRecvError::Disconnected) => {
-                                // no more data will ever come; nothing we can do but
-                                // terminate
-                                return;
-                            }
-                            Err(mpsc::TryRecvError::Empty) => {
-                                // end of this batch
-                                break;
-                            }
-                        }
-                    }
-                };
-
-                batch_to_evaluate.push((state, is_root));
-                result_txs.push(tx);
-            }
-
-            assert!(!batch_to_evaluate.is_empty());
-            assert_eq!(batch_to_evaluate.len(), result_txs.len());
-
-            // workaround tracy_client not allowing stairstep plot config
-            tracy_client.plot(tracy_eval_batch_size_plot, 0.);
-
-            tracy_client.plot(tracy_eval_batch_size_plot, batch_to_evaluate.len() as f64);
-
-            // Now, let's process our batch.
-            let results = {
-                let span = tracy_client
-                    .clone()
-                    .span(tracy_client::span_location!("batch eval"), 0);
-                span.emit_value(result_txs.len() as u64);
-
-                // We can't do much with errors (it would be noisy to pass the
-                // same error back to every search thread), so just panic
-                model
-                    .batch_eval(batch_to_evaluate)
-                    .expect("batch evaluation failed")
-            };
-            assert_eq!(result_txs.len(), results.len());
-            let len = results.len();
-
-            for (result_tx, result) in result_txs.into_iter().zip(results.into_iter()) {
-                let (Ok(()) | Err(_)) = result_tx.send(result);
-            }
-
-            // workaround tracy_client not allowing stairstep plot config
-            tracy_client.plot(tracy_eval_batch_size_plot, len as f64);
-        }
-    }
-
-    pub fn new(model: Model, tracy_client: tracy_client::Client) -> Self {
-        let model = Arc::new(model);
-        let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
-        thread::spawn({
-            let model = model.clone();
-            let tracy_client = tracy_client.clone();
-            move || Self::thread_main(model, eval_thread_rx, tracy_client)
-        });
-        Self {
-            model,
-            eval_count: 0.into(),
-            eval_thread_tx,
-        }
-    }
-}
-
-impl Evaluator for EvalThread {
-    fn model_name(&self) -> &str {
-        &self.model.name
-    }
-
-    fn eval_count(&self) -> usize {
-        self.eval_count.load(atomic::Ordering::Relaxed)
-    }
-
-    fn clear(&mut self) {
-        self.eval_count = 0.into();
-    }
-
-    /// Queues an evaluation on the eval thread, and waits for the result
-    fn eval_blocking(&self, state: State, is_root: bool) -> Result<EvalResult> {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let () = self
-            .eval_thread_tx
-            .send(EvalThreadRequest { state, is_root, tx })
-            .wrap_err("eval thread died, not accepting requests")?;
-
-        self.eval_count.fetch_add(1, atomic::Ordering::Relaxed);
-
-        let result = rx
-            .recv()
-            .wrap_err("eval thread died, never sent response")?;
-        Ok(result)
     }
 }

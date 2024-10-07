@@ -25,7 +25,7 @@ fn solve_one_puzzle_seeded(
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
     seed_solution: &parser::FullSolution,
-    eval_thread: &mut dyn eval::Evaluator,
+    evaluator: &mut dyn eval::AsyncEvaluator,
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(seed_puzzle, seed_solution)?;
@@ -41,7 +41,7 @@ fn solve_one_puzzle_seeded(
         "====== starting {:?}, seeding with {:?}, model {}",
         puzzle_fpath.as_ref(),
         solution_fpath.as_ref(),
-        eval_thread.model_name(),
+        evaluator.model_name(),
     );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
@@ -120,7 +120,7 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        eval_thread.clear();
+        evaluator.clear();
         tree_search.clear(search_state.clone());
 
         let playouts = if rng.gen_bool(0.75) { 1000 } else { 6000 };
@@ -128,12 +128,12 @@ fn solve_one_puzzle_seeded(
         let time_start = time::Instant::now();
         (0..playouts)
             .into_par_iter()
-            .map(|_| tree_search.search_once(eval_thread))
+            .map(|_| tree_search.search_once(evaluator))
             .collect::<Result<()>>()?;
         let time_diff = time::Instant::now() - time_start;
 
         let stats = tree_search.next_updates_with_stats();
-        let eval_count = eval_thread.eval_count();
+        let eval_count = evaluator.eval_count();
 
         if eval_count > 0 {
             tracy_client.plot(
@@ -258,7 +258,7 @@ fn solve_one_puzzle_seeded(
 
     // save solution and search history
 
-    let out_basedir = PathBuf::from(format!("test/games/{}", eval_thread.model_name()));
+    let out_basedir = PathBuf::from(format!("test/games/{}", evaluator.model_name()));
     if !std::fs::exists(&out_basedir)? {
         std::fs::create_dir(&out_basedir)?;
     }
@@ -342,20 +342,19 @@ impl Args {
     }
 }
 
-fn run_one_epoch(
+fn run_one_epoch<F: FnMut() -> Result<Box<dyn eval::AsyncEvaluator>>>(
     args: &Args,
     tracy_client: tracy_client::Client,
     rng: &mut impl Rng,
-    device: tch::Device,
+    make_evaluator: &mut F,
     puzzle_map: &utils::PuzzleMap,
     seed_solution_paths: &mut Vec<PathBuf>,
 ) -> Result<()> {
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
-    let mut model = nn::Model::load_latest(device, tracy_client.clone())?;
-    let mut eval_thread = nn::EvalThread::new(model, tracy_client.clone());
     let mut solves_since_model_reload = 0;
+    let mut evaluator = make_evaluator()?;
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
@@ -367,15 +366,14 @@ fn run_one_epoch(
                 seed_puzzle,
                 solution_fpath,
                 &seed_solution,
-                &mut eval_thread,
+                &mut *evaluator,
                 rng,
             )?;
 
             solves_since_model_reload += 1;
             if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
                 solves_since_model_reload = 0;
-                model = nn::Model::load_latest(device, tracy_client.clone())?;
-                eval_thread = nn::EvalThread::new(model, tracy_client.clone());
+                evaluator = make_evaluator()?;
             }
         }
     }
@@ -422,6 +420,11 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
     let device = nn::get_best_device()?;
     println!("Using device {:?}", device);
 
+    let mut make_evaluator = || -> Result<Box<dyn eval::AsyncEvaluator>> {
+        let model = nn::Model::load_latest(device, tracy_client.clone())?;
+        Ok(Box::new(eval::EvalThread::new(model, tracy_client.clone())))
+    };
+
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads.unwrap_or(4))
         .thread_name(|i| format!("search thread {}", i))
@@ -440,7 +443,7 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
                         &args,
                         tracy_client.clone(),
                         rng,
-                        device,
+                        &mut make_evaluator,
                         &puzzle_map,
                         &mut seed_solution_paths,
                     )?;
@@ -450,7 +453,7 @@ pub fn main(args: std::env::Args, tracy_client: tracy_client::Client) -> Result<
                         &args,
                         tracy_client.clone(),
                         rng,
-                        device,
+                        &mut make_evaluator,
                         &puzzle_map,
                         &mut seed_solution_paths,
                     )?;
