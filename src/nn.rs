@@ -450,7 +450,7 @@ impl<const N: usize> ToDenseTensor for [&SparseCoo<N>] {
                     tch::Tensor::f_full(
                         [1, num_nonzero],
                         batch_index as i64,
-                        (tch::Kind::Int64, options.1),
+                        (tch::Kind::Int64, tch::Device::Cpu),
                     )?,
                     indices,
                 ],
