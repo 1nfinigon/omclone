@@ -843,7 +843,7 @@ pub mod model {
 
     use super::*;
     use crate::sim::BasicInstr;
-    use eyre;
+    use eyre::{self, OptionExt};
     use tch;
 
     pub struct Model {
@@ -851,6 +851,7 @@ pub mod model {
         module: tch::CModule,
         device: tch::Device,
         tracy_client: tracy_client::Client,
+        dirichlet_distr: rand_distr::Dirichlet<f32>,
     }
 
     pub struct Evaluation {
@@ -886,6 +887,7 @@ pub mod model {
                 module,
                 device,
                 tracy_client,
+                dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
             })
         }
 
@@ -1058,6 +1060,54 @@ pub mod model {
                     //loss_by_cycles,
                 })
             }
+        }
+    }
+
+    use crate::search;
+    use crate::search_state;
+    use rand::prelude::*;
+
+    impl search::BatchEval for Model {
+        fn max_batch_size(&self) -> usize {
+            128
+        }
+
+        fn batch_eval(
+            &self,
+            states: Vec<(search_state::State, bool)>,
+        ) -> Result<Vec<search::EvalResult>> {
+            // TODO: actually batch it
+
+            let rng = &mut rand::thread_rng();
+            let mut eval_results = Vec::with_capacity(states.len());
+
+            for (state, is_root) in states {
+                let next_arm_index = state.instr_buffer.len();
+                let next_arm_pos = state.world.arms[next_arm_index].pos;
+                let (x, y) = features::normalize_position(next_arm_pos)
+                    .ok_or_eyre("arm out of nn bounds")?;
+
+                let mut eval = self.forward(&state.nn_features, x, y, is_root)?;
+
+                if is_root {
+                    // add Dirichlet noise
+                    // TODO: for this problem, we should stretch out the
+                    // Dirichlet noise to more than just the root.
+                    // TODO: filter to only valid moves
+                    let noise = self.dirichlet_distr.sample(rng);
+                    for (policy, noise) in eval.policy.iter_mut().zip(noise) {
+                        const EPS: f32 = 0.25;
+                        *policy = (1. - EPS) * *policy + EPS * noise;
+                    }
+                }
+
+                eval_results.push(search::EvalResult {
+                    utility: eval.win,
+                    policy: eval.policy,
+                });
+            }
+
+            Ok(eval_results)
         }
     }
 }

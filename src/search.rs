@@ -1,12 +1,16 @@
-use crate::nn;
 use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
 use atomic_float::AtomicF32;
-use eyre::{OptionExt, Result};
+use eyre::{Context, Result};
 use once_cell::sync::OnceCell;
-use rand::prelude::*;
-use std::sync::atomic::{self, AtomicU32, AtomicUsize};
+use std::{
+    sync::{
+        atomic::{self, AtomicU32, AtomicUsize},
+        mpsc, Arc,
+    },
+    thread,
+};
 
 /// How many virtual visits should an in-progress thread count for (in an
 /// attempt to avoid multiple threads descending exactly the same line)?
@@ -207,29 +211,135 @@ pub struct TreeSearch {
     root_node: Node,
     sum_depth: AtomicUsize,
     max_depth: AtomicU32,
-    dirichlet_distr: rand_distr::Dirichlet<f32>,
     tracy_client: tracy_client::Client,
+    eval_thread: thread::JoinHandle<()>,
+    eval_thread_tx: mpsc::SyncSender<EvalThreadRequest>,
+}
+
+pub struct EvalResult {
+    pub utility: f32,
+    pub policy: [f32; BasicInstr::N_TYPES],
+}
+
+pub trait BatchEval: Sync + Send {
+    fn max_batch_size(&self) -> usize;
+
+    /// `states` contains a bool `is_root`
+    /// Must return a Vec of the same length
+    fn batch_eval(&self, states: Vec<(State, bool)>) -> Result<Vec<EvalResult>>;
+}
+
+struct EvalThreadRequest {
+    state: State,
+    is_root: bool,
+    tx: mpsc::SyncSender<EvalResult>,
 }
 
 impl TreeSearch {
-    pub fn new(root: State, tracy_client: tracy_client::Client) -> Self {
+    const MAX_EVAL_BATCH_SIZE: usize = 128;
+
+    fn eval_thread(
+        eval: Arc<dyn BatchEval>,
+        rx: mpsc::Receiver<EvalThreadRequest>,
+        tracy_client: tracy_client::Client,
+    ) {
+        let _span = tracy_client
+            .clone()
+            .span(tracy_client::span_location!("eval thread"), 0);
+
+        let max_batch_size = eval.max_batch_size();
+
+        loop {
+            let span = tracy_client
+                .clone()
+                .span(tracy_client::span_location!("batch"), 0);
+
+            // These two should always be the same length.
+            let mut batch_to_evaluate = Vec::new();
+            let mut result_txs = Vec::new();
+
+            // First, let's accumulate as many eval requests as possible
+            loop {
+                if batch_to_evaluate.len() >= max_batch_size {
+                    break;
+                }
+
+                match rx.try_recv() {
+                    Ok(EvalThreadRequest { state, is_root, tx }) => {
+                        batch_to_evaluate.push((state, is_root));
+                        result_txs.push(tx);
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // no more data will ever come; nothing we can do but
+                        // terminate
+                        return;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // end of this batch
+                        break;
+                    }
+                }
+            }
+
+            assert_eq!(batch_to_evaluate.len(), result_txs.len());
+            span.emit_value(result_txs.len() as u64);
+
+            // Now, let's process our batch.
+            let results = {
+                let _span = tracy_client
+                    .clone()
+                    .span(tracy_client::span_location!("eval"), 0);
+
+                // We can't do much with errors (it would be noisy to pass the
+                // same error back to every search thread), so just panic
+                eval.batch_eval(batch_to_evaluate)
+                    .expect("batch evaluation failed")
+            };
+            assert_eq!(result_txs.len(), results.len());
+
+            for (result_tx, result) in result_txs.into_iter().zip(results.into_iter()) {
+                let (Ok(()) | Err(_)) = result_tx.send(result);
+            }
+        }
+    }
+
+    pub fn new(root: State, eval: Arc<dyn BatchEval>, tracy_client: tracy_client::Client) -> Self {
+        let (eval_thread_tx, eval_thread_rx) = mpsc::sync_channel(Self::MAX_EVAL_BATCH_SIZE);
+        let eval_thread = thread::spawn({
+            let tracy_client = tracy_client.clone();
+            move || Self::eval_thread(eval, eval_thread_rx, tracy_client)
+        });
         Self {
             root,
             root_node: Node::new_unexpanded(),
             sum_depth: 0.into(),
             max_depth: 0.into(),
-            dirichlet_distr: rand_distr::Dirichlet::new(&[1.0; BasicInstr::N_TYPES]).unwrap(),
             tracy_client,
+            eval_thread,
+            eval_thread_tx,
         }
     }
 
-    pub fn search_once<RngT: Rng>(&self, rng: &mut RngT, model: &nn::Model) -> Result<()> {
+    /// Queues an evaluation on the eval thread, and waits for the result
+    fn eval_blocking(&self, state: State, is_root: bool) -> Result<EvalResult> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let () = self
+            .eval_thread_tx
+            .send(EvalThreadRequest { state, is_root, tx })
+            .wrap_err("eval thread died, not accepting requests")?;
+        let result = rx
+            .recv()
+            .wrap_err("eval thread died, never sent response")?;
+        Ok(result)
+    }
+
+    pub fn search_once(&self) -> Result<()> {
         let span = self
             .tracy_client
             .clone()
             .span(tracy_client::span_location!("search once"), 0);
 
-        let mut state = self.root.clone();
+        let mut state = Box::new(self.root.clone());
         let mut node = &self.root_node;
 
         // Contains all nodes that we added virtual loss to.
@@ -238,41 +348,35 @@ impl TreeSearch {
         let leaf_utility = loop {
             let is_root = virtual_loss_incurred.len() == 0;
 
+            // We need to allow `data_expanding_if_still_unexpanded` to take
+            // ownership of `State` if the callback is called, but we need
+            // to retain ownership otherwise. It's hard to convince Rust at
+            // compile-time, so instead do this ownership check at runtime.
+            let mut state_opt = Some(state);
+
             let (node_data, this_thread_expanded) =
                 node.data_expanding_if_still_unexpanded(|| {
                     // if this callback was called, then we are the lucky ones who
                     // get to expand this previously unexpanded node
+
+                    let state = state_opt.take().unwrap();
 
                     if let Some(win) = state.evaluate_final_state() {
                         span.emit_text("leaf: terminal node");
 
                         Ok((NodeData::new_terminal(win), win))
                     } else {
-                        let _span = self.tracy_client.clone().span(
-                            tracy_client::span_location!("leaf: unexpanded nonterminal node"),
-                            0,
-                        );
+                        let _span = self
+                            .tracy_client
+                            .clone()
+                            .span(tracy_client::span_location!("leaf: expanding node"), 0);
 
-                        let next_arm_index = state.instr_buffer.len();
-                        let next_arm_pos = state.world.arms[next_arm_index].pos;
-                        let (x, y) = nn::features::normalize_position(next_arm_pos)
-                            .ok_or_eyre("arm out of nn bounds")?;
+                        let eval_result = self.eval_blocking(*state, is_root)?;
 
-                        let mut eval = model.forward(&state.nn_features, x, y, is_root)?;
-
-                        if is_root {
-                            // add Dirichlet noise
-                            // TODO: for this problem, we should stretch out the
-                            // Dirichlet noise to more than just the root.
-                            // TODO: filter to only valid moves
-                            let noise = self.dirichlet_distr.sample(rng);
-                            for (policy, noise) in eval.policy.iter_mut().zip(noise) {
-                                const EPS: f32 = 0.25;
-                                *policy = (1. - EPS) * *policy + EPS * noise;
-                            }
-                        }
-
-                        Ok((NodeData::new_nonterminal(eval.win, eval.policy), eval.win))
+                        Ok((
+                            NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
+                            eval_result.utility,
+                        ))
                     }
                 })?;
 
@@ -281,6 +385,8 @@ impl TreeSearch {
                 node_data.incr_visits_and_utility(value);
                 break value;
             }
+
+            state = state_opt.unwrap();
 
             // Otherwise, the node was already expanded.
 

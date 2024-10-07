@@ -13,6 +13,7 @@ use rayon::iter::ParallelIterator;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use eyre::Result;
 
@@ -23,7 +24,7 @@ fn solve_one_puzzle_seeded(
     seed_puzzle: &parser::FullPuzzle,
     solution_fpath: impl AsRef<Path>,
     seed_solution: &parser::FullSolution,
-    model: &nn::Model,
+    model: Arc<nn::Model>,
     rng: &mut impl Rng,
 ) -> Result<()> {
     let mut seed_init = parser::puzzle_prep(seed_puzzle, seed_solution)?;
@@ -116,16 +117,14 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
-        let tree_search = search::TreeSearch::new(search_state.clone(), tracy_client.clone());
+        let tree_search =
+            search::TreeSearch::new(search_state.clone(), model.clone(), tracy_client.clone());
 
         let playouts = if rng.gen_bool(0.75) { 100 } else { 600 };
 
         (0..playouts)
             .into_par_iter()
-            .map_init(
-                || rand::thread_rng(),
-                |rng, _| -> Result<()> { Ok(tree_search.search_once(rng, model)?) },
-            )
+            .map(|_| -> Result<()> { Ok(tree_search.search_once()?) })
             .collect::<Result<()>>()?;
 
         let stats = tree_search.next_updates_with_stats();
@@ -337,7 +336,7 @@ fn run_one_epoch(
     println!("shuffling seed solutions");
     seed_solution_paths.shuffle(rng);
 
-    let mut model = nn::Model::load_latest(device, tracy_client.clone())?;
+    let mut model = Arc::new(nn::Model::load_latest(device, tracy_client.clone())?);
     let mut solves_since_model_reload = 0;
     for solution_fpath in seed_solution_paths.iter() {
         if let Some(seed_solution) = utils::verify_solution(solution_fpath, &puzzle_map) {
@@ -350,14 +349,14 @@ fn run_one_epoch(
                 seed_puzzle,
                 solution_fpath,
                 &seed_solution,
-                &model,
+                model.clone(),
                 rng,
             )?;
 
             solves_since_model_reload += 1;
             if solves_since_model_reload > args.reload_model_every.unwrap_or(usize::MAX) {
                 solves_since_model_reload = 0;
-                model = nn::Model::load_latest(device, tracy_client.clone())?;
+                model = Arc::new(nn::Model::load_latest(device, tracy_client.clone())?);
             }
         }
     }
