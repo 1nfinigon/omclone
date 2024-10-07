@@ -206,12 +206,11 @@ impl NodeData {
     }
 }
 
-pub struct TreeSearch<'a> {
+pub struct TreeSearch {
     root: State,
     root_node: Node,
     sum_depth: AtomicUsize,
     max_depth: AtomicU32,
-    eval_thread: &'a mut EvalThread,
     tracy_client: tracy_client::Client,
 }
 
@@ -352,6 +351,10 @@ impl EvalThread {
         self.eval.name()
     }
 
+    pub fn eval_count(&self) -> usize {
+        self.eval_count.load(atomic::Ordering::Relaxed)
+    }
+
     pub fn clear(&mut self) {
         self.eval_count = 0.into();
     }
@@ -373,18 +376,13 @@ impl EvalThread {
     }
 }
 
-impl<'a> TreeSearch<'a> {
-    pub fn new(
-        root: State,
-        eval_thread: &'a mut EvalThread,
-        tracy_client: tracy_client::Client,
-    ) -> Self {
+impl TreeSearch {
+    pub fn new(root: State, tracy_client: tracy_client::Client) -> Self {
         Self {
             root,
             root_node: Node::new_unexpanded(),
             sum_depth: 0.into(),
             max_depth: 0.into(),
-            eval_thread,
             tracy_client,
         }
     }
@@ -394,7 +392,6 @@ impl<'a> TreeSearch<'a> {
         self.root_node = Node::new_unexpanded();
         self.sum_depth = 0.into();
         self.max_depth = 0.into();
-        self.eval_thread.clear();
     }
 }
 
@@ -416,7 +413,7 @@ struct TreeSearchWorkFibre<'a> {
     virtual_loss_incurred: Vec<&'a NodeData>,
     node: &'a Node,
     tracy_client: tracy_client::Client,
-    tree_search: &'a TreeSearch<'a>,
+    tree_search: &'a TreeSearch,
 }
 
 impl<'a> TreeSearchWorkFibre<'a> {
@@ -431,7 +428,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
         }
     }
 
-    fn do_one_descent(&mut self) -> Result<bool> {
+    fn do_one_descent(&mut self, eval_thread: &EvalThread) -> Result<bool> {
         let span = self
             .tracy_client
             .clone()
@@ -461,10 +458,7 @@ impl<'a> TreeSearchWorkFibre<'a> {
                             .clone()
                             .span(tracy_client::span_location!("leaf: expanding node"), 0);
 
-                        let eval_result = self
-                            .tree_search
-                            .eval_thread
-                            .eval_blocking(*state, is_root)?;
+                        let eval_result = eval_thread.eval_blocking(*state, is_root)?;
 
                         Ok((
                             NodeData::new_nonterminal(eval_result.utility, eval_result.policy),
@@ -597,11 +591,11 @@ impl<'a> TreeSearchWorkFibre<'a> {
     }
 
     /// Returns Ok(true) if finished, Ok(false) if blocked.
-    fn do_some_work(&mut self) -> Result<bool> {
+    fn do_some_work(&mut self, eval_thread: &EvalThread) -> Result<bool> {
         loop {
             match self.fibre_state {
                 TreeSearchWorkFibreState::Descending => {
-                    let unblocked = self.do_one_descent()?;
+                    let unblocked = self.do_one_descent(eval_thread)?;
                     if !unblocked {
                         return Ok(false);
                     }
@@ -621,10 +615,10 @@ impl<'a> TreeSearchWorkFibre<'a> {
     }
 }
 
-impl<'a> TreeSearch<'a> {
-    pub fn search_once(&self) -> Result<()> {
+impl TreeSearch {
+    pub fn search_once(&self, eval_thread: &EvalThread) -> Result<()> {
         let mut fibre = TreeSearchWorkFibre::new(self);
-        let finished = fibre.do_some_work()?;
+        let finished = fibre.do_some_work(eval_thread)?;
         assert!(finished, "async resuming of work not yet implemented");
         Ok(())
     }
@@ -639,10 +633,6 @@ impl<'a> TreeSearch<'a> {
 
     pub fn max_depth(&self) -> u32 {
         self.max_depth.load(atomic::Ordering::Relaxed)
-    }
-
-    pub fn eval_count(&self) -> usize {
-        self.eval_thread.eval_count.load(atomic::Ordering::Relaxed)
     }
 }
 
@@ -661,7 +651,6 @@ pub struct NextUpdatesWithStats {
     pub updates_with_stats: Vec<UpdateWithStats>,
     pub avg_depth: f32,
     pub max_depth: u32,
-    pub eval_count: usize,
 }
 
 impl NextUpdatesWithStats {
@@ -674,7 +663,7 @@ impl NextUpdatesWithStats {
     }
 }
 
-impl<'a> TreeSearch<'a> {
+impl TreeSearch {
     pub fn next_updates_with_stats(&self) -> NextUpdatesWithStats {
         let root_node_data = self
             .root_node
@@ -711,7 +700,6 @@ impl<'a> TreeSearch<'a> {
             updates_with_stats,
             avg_depth: self.avg_depth(),
             max_depth: self.max_depth(),
-            eval_count: self.eval_count(),
         }
     }
 }

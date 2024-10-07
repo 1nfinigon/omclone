@@ -110,8 +110,7 @@ fn solve_one_puzzle_seeded(
 
     // search for a solution
 
-    let mut tree_search =
-        search::TreeSearch::new(search_state.clone(), eval_thread, tracy_client.clone());
+    let mut tree_search = search::TreeSearch::new(search_state.clone(), tracy_client.clone());
 
     let mut still_following_premoves = true;
     let result_is_success = loop {
@@ -120,6 +119,7 @@ fn solve_one_puzzle_seeded(
             break result > 0.;
         }
 
+        eval_thread.clear();
         tree_search.clear(search_state.clone());
 
         let playouts = if rng.gen_bool(0.75) { 1000 } else { 6000 };
@@ -127,16 +127,17 @@ fn solve_one_puzzle_seeded(
         let time_start = time::Instant::now();
         (0..playouts)
             .into_par_iter()
-            .map(|_| tree_search.search_once())
+            .map(|_| tree_search.search_once(eval_thread))
             .collect::<Result<()>>()?;
         let time_diff = time::Instant::now() - time_start;
 
         let stats = tree_search.next_updates_with_stats();
+        let eval_count = eval_thread.eval_count();
 
-        if stats.eval_count > 0 {
+        if eval_count > 0 {
             tracy_client.plot(
                 tracy_client::plot_name!("nn evals/s"),
-                stats.eval_count as f64 / time_diff.as_secs_f64(),
+                eval_count as f64 / time_diff.as_secs_f64(),
             );
         }
 
