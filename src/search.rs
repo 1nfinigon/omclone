@@ -8,6 +8,31 @@ use once_cell::sync::OnceCell;
 use rand::prelude::*;
 use std::sync::atomic::{self, AtomicU32};
 
+/// How many virtual visits should an in-progress thread count for (in an
+/// attempt to avoid multiple threads descending exactly the same line)?
+const VIRTUAL_LOSS_MULTIPLIER: u32 = 1;
+
+trait VisitCount {
+    fn visits(node_data: &NodeData) -> u32;
+}
+struct WithVirtualLoss;
+impl VisitCount for WithVirtualLoss {
+    fn visits(node_data: &NodeData) -> u32 {
+        node_data.visits.load(atomic::Ordering::Relaxed)
+            + node_data.virtual_loss_count.load(atomic::Ordering::Relaxed) * VIRTUAL_LOSS_MULTIPLIER
+    }
+}
+struct AssertZeroVirtualLoss;
+impl VisitCount for AssertZeroVirtualLoss {
+    fn visits(node_data: &NodeData) -> u32 {
+        assert_eq!(
+            node_data.virtual_loss_count.load(atomic::Ordering::Relaxed),
+            0
+        );
+        node_data.visits.load(atomic::Ordering::Relaxed)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ChildId(u32);
 
@@ -31,16 +56,17 @@ impl Node {
     /// initialization, in which case this function will block). If `false`,
     /// then it is guaranteed that `f` was not called. It is also guaranteed
     /// that after this call, `data` will return `Some`.
-    fn data_expanding_if_still_unexpanded<F: FnOnce() -> Result<NodeData>>(
+    fn data_expanding_if_still_unexpanded<V, F: FnOnce() -> Result<(NodeData, V)>>(
         &self,
         f: F,
-    ) -> Result<(&NodeData, bool)> {
-        let mut this_thread_expanded = false;
-        let data = self.0.get_or_try_init(|| -> Result<_> {
-            this_thread_expanded = true;
-            Ok(Box::new(f()?))
+    ) -> Result<(&NodeData, Option<V>)> {
+        let mut this_thread_expanded = None;
+        let node_data = self.0.get_or_try_init(|| -> Result<_> {
+            let (node_data, value) = f()?;
+            this_thread_expanded = Some(value);
+            Ok(Box::new(node_data))
         })?;
-        Ok((data, this_thread_expanded))
+        Ok((node_data, this_thread_expanded))
     }
 
     /// Returns `None` if unexpanded.
@@ -48,8 +74,8 @@ impl Node {
         self.0.get().map(|b| b.as_ref())
     }
 
-    fn visits(&self) -> u32 {
-        self.data().map_or(0, |data| data.visits())
+    fn visits<V: VisitCount>(&self) -> u32 {
+        self.data().map_or(0, |data| data.visits::<V>())
     }
 }
 
@@ -76,6 +102,8 @@ struct NodeData {
     /// = N
     visits: AtomicU32,
 
+    virtual_loss_count: AtomicU32,
+
     /// = Q-value * N
     value_sum: AtomicF32,
 }
@@ -88,6 +116,7 @@ impl NodeData {
             utility: value,
             policy: [0.; BasicInstr::N_TYPES],
             visits: 0.into(),
+            virtual_loss_count: 0.into(),
             value_sum: 0.0.into(),
         }
     }
@@ -99,6 +128,7 @@ impl NodeData {
             utility: nn_utility,
             policy: nn_policy,
             visits: 0.into(),
+            virtual_loss_count: 0.into(),
             value_sum: 0.0.into(),
         }
     }
@@ -112,11 +142,11 @@ impl NodeData {
         self.utility
     }
 
-    fn value(&self) -> f32 {
+    fn value<V: VisitCount>(&self) -> f32 {
         if self.terminal {
             self.utility
         } else {
-            let visits = self.visits();
+            let visits = self.visits::<V>();
             if visits == 0 {
                 self.utility
             } else {
@@ -126,22 +156,41 @@ impl NodeData {
         }
     }
 
-    fn visits(&self) -> u32 {
-        self.visits.load(atomic::Ordering::Relaxed)
+    /// Asserts that virtual loss is zero.
+    fn visits<V: VisitCount>(&self) -> u32 {
+        V::visits(self)
+    }
+
+    fn incr_virtual_loss_count(&self) {
+        self.virtual_loss_count
+            .fetch_add(1, atomic::Ordering::Relaxed);
+    }
+
+    fn decr_virtual_loss_count(&self) {
+        let old_value = self
+            .virtual_loss_count
+            .fetch_sub(1, atomic::Ordering::Relaxed);
+        assert!(old_value != 0, "BUG: virtual loss count underflow");
     }
 
     fn get_child(&self, child_id: ChildId) -> &Node {
         &self.children[child_id.0 as usize]
     }
 
-    fn puct(&self, child_id: ChildId, default_value_for_unexpanded_child: f32) -> NonNan {
+    fn puct<V: VisitCount>(
+        &self,
+        child_id: ChildId,
+        default_value_for_unexpanded_child: f32,
+    ) -> NonNan {
         let child = self.get_child(child_id);
         let policy = self.policy[child_id.0 as usize];
         let child_value = child
             .data()
-            .map_or(default_value_for_unexpanded_child, |child| child.value());
-        let visits = self.visits.load(atomic::Ordering::Relaxed);
-        let prior = policy * (visits as f32).sqrt() / (1. + child.visits() as f32);
+            .map_or(default_value_for_unexpanded_child, |child| {
+                child.value::<V>()
+            });
+        let visits = self.visits::<V>();
+        let prior = policy * (visits as f32).sqrt() / (1. + child.visits::<V>() as f32);
         NonNan::new(child_value + 1.4 * prior).unwrap()
     }
 
@@ -183,12 +232,11 @@ impl TreeSearch {
         let mut state = self.root.clone();
         let mut node = &self.root_node;
 
-        // Contains all nodes from the root, including the newly expanded node
-        // that we stopped descending at.
-        let mut path: Vec<&NodeData> = Vec::new();
+        // Contains all nodes that we added virtual loss to.
+        let mut virtual_loss_incurred: Vec<&NodeData> = Vec::new();
 
         let leaf_utility = loop {
-            let is_root = path.len() == 0;
+            let is_root = virtual_loss_incurred.len() == 0;
 
             let (node_data, this_thread_expanded) =
                 node.data_expanding_if_still_unexpanded(|| {
@@ -198,7 +246,7 @@ impl TreeSearch {
                     if let Some(win) = state.evaluate_final_state() {
                         span.emit_text("leaf: terminal node");
 
-                        Ok(NodeData::new_terminal(win))
+                        Ok((NodeData::new_terminal(win), win))
                     } else {
                         let _span = self.tracy_client.clone().span(
                             tracy_client::span_location!("leaf: unexpanded nonterminal node"),
@@ -224,15 +272,14 @@ impl TreeSearch {
                             }
                         }
 
-                        Ok(NodeData::new_nonterminal(eval.win, eval.policy))
+                        Ok((NodeData::new_nonterminal(eval.win, eval.policy), eval.win))
                     }
                 })?;
 
-            path.push(node_data);
-
-            if this_thread_expanded {
+            if let Some(value) = this_thread_expanded {
                 // We were the ones to expand, so stop descending here.
-                break node_data.value();
+                node_data.incr_visits_and_utility(value);
+                break value;
             }
 
             // Otherwise, the node was already expanded.
@@ -240,7 +287,9 @@ impl TreeSearch {
             if node_data.is_terminal() {
                 span.emit_text("leaf: terminal node");
 
-                break node_data.value();
+                let value = node_data.value::<AssertZeroVirtualLoss>();
+                node_data.incr_visits_and_utility(value);
+                break value;
             }
 
             // The node is not a leaf. We need to keep descending.
@@ -254,7 +303,6 @@ impl TreeSearch {
 
             let default_value_for_unexpanded_child = {
                 let first_play_urgency_reduction = if is_root {
-                    assert!(path.len() == 1);
                     // root has no first play urgency reduction if
                     // Dirichlet noise is disabled
                     // TODO: dirichlet noise
@@ -265,7 +313,11 @@ impl TreeSearch {
                         .iter()
                         .enumerate()
                         .filter_map(|(i, p)| {
-                            if node_data.get_child(ChildId(i as u32)).visits() > 0 {
+                            if node_data
+                                .get_child(ChildId(i as u32))
+                                .visits::<WithVirtualLoss>()
+                                > 0
+                            {
                                 Some(p)
                             } else {
                                 None
@@ -274,16 +326,21 @@ impl TreeSearch {
                         .sum::<f32>()
                         .sqrt()
                 };
-                node_data.value() - first_play_urgency_reduction
+                node_data.value::<WithVirtualLoss>() - first_play_urgency_reduction
             };
 
             // pick a child based on PUCT
             let child_id = (0..next_updates.len().try_into().unwrap())
                 .map(ChildId)
                 .max_by_key(|&child_id| {
-                    node_data.puct(child_id, default_value_for_unexpanded_child)
+                    node_data.puct::<WithVirtualLoss>(child_id, default_value_for_unexpanded_child)
                 })
                 .unwrap();
+
+            // We wait until now to add virtual loss, to avoid messing up PUCT
+            // computations.
+            virtual_loss_incurred.push(node_data);
+            node_data.incr_virtual_loss_count();
 
             // move to child, update the state
             node = node_data.get_child(child_id);
@@ -291,7 +348,7 @@ impl TreeSearch {
             state.update(*update);
         };
 
-        span.emit_value(path.len() as u64);
+        span.emit_value(virtual_loss_incurred.len() as u64);
 
         {
             let _span = self
@@ -300,10 +357,11 @@ impl TreeSearch {
                 .span(tracy_client::span_location!("backprop"), 0);
 
             // backpropagate
-            for node_data in path.iter().rev() {
+            for node_data in virtual_loss_incurred.iter().rev() {
                 node_data.incr_visits_and_utility(leaf_utility);
+                node_data.decr_virtual_loss_count();
             }
-            let this_depth = path.len().saturating_sub(1);
+            let this_depth = virtual_loss_incurred.len();
             self.sum_depth += this_depth;
             self.max_depth = self.max_depth.max(this_depth as u32);
         }
@@ -312,7 +370,7 @@ impl TreeSearch {
     }
 
     pub fn sum_visits(&self) -> u32 {
-        self.root_node.visits()
+        self.root_node.visits::<AssertZeroVirtualLoss>()
     }
 
     pub fn avg_depth(&self) -> f32 {
@@ -373,15 +431,17 @@ impl TreeSearch {
                     value: NonNan::new(
                         child
                             .data()
-                            .map_or(root_node_data.value(), |child| child.value()),
+                            .map_or(root_node_data.value::<AssertZeroVirtualLoss>(), |child| {
+                                child.value::<AssertZeroVirtualLoss>()
+                            }),
                     )
                     .unwrap(),
-                    visits: child.visits(),
+                    visits: child.visits::<AssertZeroVirtualLoss>(),
                 }
             })
             .collect();
         NextUpdatesWithStats {
-            root_value: root_node_data.value(),
+            root_value: root_node_data.value::<AssertZeroVirtualLoss>(),
             root_raw_utility: root_node_data.raw_utility(),
             updates_with_stats,
             avg_depth: self.avg_depth(),
