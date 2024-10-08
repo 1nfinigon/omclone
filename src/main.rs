@@ -8,21 +8,21 @@ mod utils;
 #[cfg(feature = "benchmark")]
 mod benchmark;
 
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod eval;
-#[cfg(all(feature = "nn", feature = "torch"))]
+#[cfg(all(feature = "search", feature = "torch"))]
 mod gen_train;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod nn;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod search;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod search_history;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod search_state;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod seed_solver;
-#[cfg(feature = "nn")]
+#[cfg(feature = "search")]
 mod tb_trim;
 
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
     }
     */
 
-    #[cfg(feature = "nn")]
+    #[cfg(feature = "search")]
     unsafe {
         std::env::set_var("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
     }
@@ -70,13 +70,13 @@ fn main() -> Result<()> {
         #[cfg(feature = "benchmark")]
         Some("benchmark") => benchmark::main(),
 
-        #[cfg(feature = "nn")]
+        #[cfg(feature = "search")]
         Some("seed-solver") => seed_solver::main(args, tracy_client),
 
-        #[cfg(all(feature = "nn", feature = "torch"))]
+        #[cfg(all(feature = "search", feature = "torch"))]
         Some("gen-train") => gen_train::main(),
 
-        #[cfg(feature = "nn")]
+        #[cfg(feature = "search")]
         Some("tb-trim") => tb_trim::main(),
 
         Some("revgen") => revgen::main(),
