@@ -307,11 +307,32 @@ Introduced to mainline the parallel search speedups at 172M, and increased
 playouts from 100/600 to 1000/6000.
 
 Currently at 172M:
-- window size = 350k
-- probability of including human sample: 0.024 if nonempty, else 0.006
-- human loss weights: [v = 0.00001, p = 1.0, l2 = 1.0]
-- probability of including mcts sample: 0.5 if 1000 playouts else 1.0
-- mcts loss weights: [v = 0.1, p = 1.0 if win else 0.4, l2 = 1.0]
+-   window size = 350k
+-   probability of including human sample: 0.024 if nonempty, else 0.006
+-   human loss weights: [v = 0.00001, p = 1.0, l2 = 1.0]
+-   probability of including mcts sample: 0.5 if 1000 playouts else 1.0
+-   mcts loss weights: [v = 0.1, p = 1.0 if win else 0.4, l2 = 1.0]
+-   workers:
+    -   cycles=0..90 from_optimal=0..50
+    -   cycles=0..70 from_optimal=0..50 x 2
+    -   cycles=0..60 from_optimal=0..40 x 2
+    -   cycles=0..50 from_optimal=0..30
+    -   cycles=0..30 from_optimal=0..10
+-   workers lowconf configuration: lowconf(knee = 0.3, sharp = 6., y-intercept = 0.9)
+    -   lowconf function is: https://graphtoy.com/?f1(x,t)=0.1&v1=false&f2(x,t)=6&v2=false&f3(x,t)=0.95&v3=false&f4(x,t)=clamp(log(1+exp(f2(x)*(1-(x/f1(x)))))%20*%20f3(t)/f2(t),0,1)&v4=true&f5(x,t)=&v5=true&f6(x,t)=&v6=false&grid=1&coords=0.12138102701428793,0.4379643401200462,0.9153322133263117
+    -   low confidence moves get played out (and training data generated) as if
+        human-seeded
+        -   this does mean that these don't train value ~at all, and they have a
+            high chance of getting filtered out -- TODO fix this
+
+
+At 198M:
+-   increase window size = 500k
+-   increase frequency of human policys to 0.03 if nonempty, else 0.01
+-   tweak workers lowconf configuration: lowconf(knee = 0.1, sharp = 6., y-intercept = 0.97)
+    -   to try to stem the fact that previously the winrate was around 70-90%,
+        and all the "hard" cases (e.g. long single arm sequence) were just
+        getting lowconf'd and not ending up as training data
 
 # Future work
 
