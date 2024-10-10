@@ -2298,13 +2298,6 @@ impl World {
         Ok(())
     }
 
-    /// Remove {0,0} track offsets that were used to block track overlaps
-    fn clean_track(track_maps: &mut TrackMaps) {
-        let pos_nil = Pos::new(0, 0);
-        track_maps.plus.retain(|_, v| -> bool { v != &pos_nil });
-        track_maps.minus.retain(|_, v| -> bool { v != &pos_nil });
-    }
-
     /// The main initialization function. Creates the initial state of the world
     /// given an `InitialWorld`.
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
@@ -2338,7 +2331,6 @@ impl World {
                 World::add_track(&mut world.track_maps, track_data)?;
             }
         }
-        World::clean_track(&mut world.track_maps);
         for a in &mut world.arms {
             use ArmType::*;
             world.cost += match a.arm_type {
@@ -2428,27 +2420,12 @@ impl WorldWithTapes {
         let mut repeat_ending = 0;
         let mut any_nonrepeat = false;
         let mut curr = 0;
-        let mut track_steps = 0;
+        let mut track_steps: i64 = 0;
+        let mut total_track_steps: i64 = 0;
         let mut rot_diff = 0;
         let mut len = original_arm.len;
         let mut known_grab = false;
         let mut position_check = original_arm.pos;
-        fn get_track_loop_length(track_map: &TrackMap, pos: Pos) -> Option<i32> {
-            let mut my_pos = pos;
-            let mut loop_length = 0;
-            loop {
-                let offset = track_map.get(&my_pos)?;
-                my_pos += offset;
-                loop_length += 1;
-                if my_pos == pos {
-                    return Some(loop_length);
-                }
-                if loop_length as usize > track_map.len() {
-                    return None;
-                }
-            }
-        }
-        let track_loop = get_track_loop_length(&track_maps.plus, original_arm.pos);
         while curr < old_instructions.len() {
             let instr = old_instructions[curr];
             if !any_nonrepeat && !matches!(instr, Repeat | Empty) {
@@ -2482,13 +2459,21 @@ impl WorldWithTapes {
                     BasicInstr::Forward => {
                         if let Some(offset) = track_maps.plus.get(&position_check) {
                             track_steps += 1;
+                            total_track_steps += 1;
                             position_check += offset;
+                            if position_check == original_arm.pos {
+                                track_steps = 0;
+                            }
                         }
                     }
                     BasicInstr::Back => {
                         if let Some(offset) = track_maps.minus.get(&position_check) {
                             track_steps -= 1;
+                            total_track_steps -= 1;
                             position_check += offset;
+                            if position_check == original_arm.pos {
+                                track_steps = 0;
+                            }
                         }
                     }
                     BasicInstr::PivotCounterClockwise
@@ -2569,14 +2554,32 @@ impl WorldWithTapes {
                         reset_vec.push(BasicInstr::RotateCounterClockwise);
                         rot_diff += 1;
                     }
-                    // look for a path forward on the track that's shorter than
-                    // the path backward.
-                    if let Some(loop_len) = track_loop {
-                        while track_steps > loop_len / 2 {
-                            track_steps -= loop_len;
+                    if track_steps != 0 {
+                        // look for a path forward on the track that's shorter than
+                        // the path backward.
+                        let mut search_depth = track_steps.abs();
+                        let (direction, track_map) =
+                            if track_steps >= 0 {
+                                (1, &track_maps.plus)
+                            } else {
+                                (-1, &track_maps.minus)
+                            };
+                        // if taking into account looping steps changes the sign,
+                        // resolve ties in the opposite way.
+                        if track_steps.signum() != total_track_steps.signum() {
+                            search_depth += 1;
                         }
-                        while track_steps < -loop_len / 2 {
-                            track_steps += loop_len
+                        let mut position = position_check;
+                        for i in 0..search_depth {
+                            if position == original_arm.pos {
+                                track_steps = -i * direction;
+                                break;
+                            }
+                            if let Some(offset) = track_map.get(&position) {
+                                position += offset;
+                            } else {
+                                break;
+                            }
                         }
                     }
                     while track_steps > 0 {
