@@ -718,8 +718,9 @@ pub mod features {
             }
         }
 
-        /// Sets the temporal data at relative time `time` to reflect the current world.
-        /// Does _not_ set `arm_base_instr`; see `set_temporal_instr` for that.
+        /// Sets the temporal data at history idx `history_idx` (0 = current, 1
+        /// = previous cycle, ...) to reflect the current world.  Does _not_ set
+        /// `arm_base_instr`; see `set_temporal_instr` for that.
         #[deny(unused_variables)]
         pub fn set_temporal_except_instr(
             &mut self,

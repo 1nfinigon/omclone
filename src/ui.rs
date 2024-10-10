@@ -112,9 +112,9 @@ struct Loaded {
     curr_world: WorldWithTapes,
     backup_world: WorldWithTapes,
     curr_cycle: f64,
-    curr_substep: usize,
+    curr_subcycle: usize,
     backup_cycle: u64,
-    substep_count: usize,
+    subcycle_count: usize,
     float_world: FloatWorld,
     saved_motions: WorldStepInfo,
 
@@ -145,8 +145,8 @@ impl Loaded {
         self.saved_motions.clear();
         self.curr_world = self.base_world.clone();
         self.curr_cycle = 0.;
-        self.substep_count = 8;
-        self.curr_substep = 0;
+        self.subcycle_count = 8;
+        self.curr_subcycle = 0;
         self.message = None;
 
         self.backup_world = self.base_world.clone();
@@ -159,8 +159,8 @@ impl Loaded {
         self.saved_motions.clear();
         self.curr_world = self.backup_world.clone();
         self.curr_cycle = self.backup_cycle as f64;
-        self.substep_count = 8;
-        self.curr_substep = 0;
+        self.subcycle_count = 8;
+        self.curr_subcycle = 0;
         self.message = None;
     }
     fn try_set_target_cycle(&mut self, target: usize) {
@@ -173,16 +173,16 @@ impl Loaded {
         }
     }
     fn advance(&mut self) -> SimResult<()> {
-        if self.curr_substep == 0 {
+        if self.curr_subcycle == 0 {
             let failcheck = self.curr_world.prepare_step(&mut self.saved_motions);
             if failcheck.is_err() {
                 self.saved_motions.clear();
                 return failcheck;
             }
-            self.substep_count = self.curr_world.world.subcycle_count(&self.saved_motions);
+            self.subcycle_count = self.curr_world.world.subcycle_count(&self.saved_motions);
         }
-        self.curr_substep += 1;
-        let portion = self.curr_substep as f32 / self.substep_count as f32;
+        self.curr_subcycle += 1;
+        let portion = self.curr_subcycle as f32 / self.subcycle_count as f32;
         if self.show_area {
             self.float_world
                 .regenerate(&self.curr_world.world, &self.saved_motions, portion);
@@ -191,8 +191,8 @@ impl Loaded {
                 self.saved_motions.spawning_atoms.iter(),
             )?;
         }
-        if self.curr_substep == self.substep_count {
-            self.curr_substep = 0;
+        if self.curr_subcycle == self.subcycle_count {
+            self.curr_subcycle = 0;
             self.curr_world
                 .world
                 .finalize_step(&mut self.saved_motions)?;
@@ -221,36 +221,36 @@ impl Loaded {
             }
         }
 
-        let backup_target_timestep = (target_cycle.floor() as u64).max(100) - 100;
-        if self.curr_world.world.cycle < backup_target_timestep {
-            while self.curr_world.world.cycle < backup_target_timestep {
+        let backup_target_cycle = (target_cycle.floor() as u64).max(100) - 100;
+        if self.curr_world.world.cycle < backup_target_cycle {
+            while self.curr_world.world.cycle < backup_target_cycle {
                 let output = self.advance();
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed;
                     self.message = Some(output.to_string());
                     self.curr_cycle = self.curr_world.world.cycle as f64
-                        + (self.curr_substep as f64 / self.substep_count as f64);
+                        + (self.curr_subcycle as f64 / self.subcycle_count as f64);
                     return;
                 }
             }
-            self.backup_cycle = backup_target_timestep;
+            self.backup_cycle = backup_target_cycle;
             self.backup_world = self.curr_world.clone();
-            assert_eq!(self.curr_substep, 0);
-            assert_eq!(backup_target_timestep, self.curr_world.world.cycle);
+            assert_eq!(self.curr_subcycle, 0);
+            assert_eq!(backup_target_cycle, self.curr_world.world.cycle);
         }
 
-        let target_timestep = target_cycle.floor() as u64;
-        let target_substep = (target_cycle.fract() * self.substep_count as f64).floor() as usize;
-        while self.curr_world.world.cycle < target_timestep
-            || (self.curr_world.world.cycle == target_timestep
-                && self.curr_substep < target_substep)
+        let target_cycle_int = target_cycle.floor() as u64;
+        let target_subcycle = (target_cycle.fract() * self.subcycle_count as f64).floor() as usize;
+        while self.curr_world.world.cycle < target_cycle_int
+            || (self.curr_world.world.cycle == target_cycle_int
+                && self.curr_subcycle < target_subcycle)
         {
             let output = self.advance();
             if let Err(output) = output {
                 self.run_state = RunState::Crashed;
                 self.message = Some(output.to_string());
                 self.curr_cycle = self.curr_world.world.cycle as f64
-                    + (self.curr_substep as f64 / self.substep_count as f64);
+                    + (self.curr_subcycle as f64 / self.subcycle_count as f64);
                 return;
             }
         }
@@ -326,9 +326,9 @@ impl MyMiniquadApp {
             backup_world: world.clone(),
             curr_world: world,
             curr_cycle: 0.,
-            curr_substep: 0,
+            curr_subcycle: 0,
             backup_cycle: 0,
-            substep_count: 8,
+            subcycle_count: 8,
             float_world,
             saved_motions,
 
