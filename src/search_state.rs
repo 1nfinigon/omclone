@@ -8,21 +8,21 @@ pub struct State {
     /// check this field first!!
     pub errored: bool,
 
-    pub timestep_limit: u64,
+    pub cycle_limit: u64,
     pub world: Box<World>,
     pub instr_buffer: Vec<BasicInstr>,
     pub nn_features: Box<nn::Features>,
 }
 
 impl State {
-    pub fn new(world: World, timestep_limit: u64) -> Self {
+    pub fn new(world: World, cycle_limit: u64) -> Self {
         let n_arms = world.arms.len();
         let mut nn_features = Box::new(nn::Features::new());
         nn_features.set_nontemporal(&world);
-        nn_features.init_all_temporal(&world, timestep_limit.saturating_sub(world.cycle));
+        nn_features.init_all_temporal(&world, cycle_limit.saturating_sub(world.cycle));
         Self {
             errored: false,
-            timestep_limit,
+            cycle_limit,
             world: Box::new(world),
             instr_buffer: Vec::with_capacity(n_arms),
             nn_features,
@@ -54,7 +54,7 @@ impl State {
                     self.nn_features.set_temporal_except_instr(
                         0,
                         &new_world,
-                        self.timestep_limit.saturating_sub(self.world.cycle),
+                        self.cycle_limit.saturating_sub(self.world.cycle),
                     );
                     self.world = Box::new(new_world);
                 }
@@ -72,7 +72,7 @@ impl State {
             if self.world.is_complete() {
                 // TODO: take into account score (cost, cycles, area).
                 Some(1.)
-            } else if self.world.cycle >= self.timestep_limit {
+            } else if self.world.cycle >= self.cycle_limit {
                 Some(0.)
             } else {
                 None

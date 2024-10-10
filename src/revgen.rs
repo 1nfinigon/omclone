@@ -154,8 +154,8 @@ enum RevStepArmBase {
 }
 
 /// A type of "reverse step" that can be taken, i.e. an action that, given a
-/// current `GenState`, can potentially generate a new `GenState` with an
-/// earlier timestep.
+/// current `GenState`, can potentially generate a new `GenState` at an
+/// earlier cycle.
 ///
 /// The intention of a `RevStep` is that each will be focused on doing something
 /// potentially productive, targeted at (but not necessarily only affecting)
@@ -164,8 +164,8 @@ enum RevStepArmBase {
 /// hovered over", which means that in order to generate this `RevStep` in the
 /// first place, we need to select an arm that is over an output glyph (or
 /// conjure such an arm out of thin air), and then in order to apply this
-/// `RevStep` backwards (to take us from the current timestep T to the previous
-/// timestep T-1) we need to synthesize the molecule on the output glyph, and
+/// `RevStep` backwards (to take us from the current cycle T to the previous
+/// cycle T-1) we need to synthesize the molecule on the output glyph, and
 /// set the arm as grabbing.
 ///
 /// Sometimes, after applying a `RevStep` successfully to generate a previous
@@ -184,7 +184,7 @@ enum RevStepArmBase {
 /// -   A function `with_revstep_applied` takes the current `GenState` and a
 ///     selected `RevStep`, and returns a new `GenState`. This operation is
 ///     deterministic. (In other words, given a seed `GenState` at the final
-///     timestep, and a list of valid `RevStep`s, that's all that's needed to
+///     cycle, and a list of valid `RevStep`s, that's all that's needed to
 ///     walk back to the start state.)
 /// -   A function `with_schedule_applied` that takes the current `GenState`
 ///     and:
@@ -211,21 +211,21 @@ enum RevStepArmBase {
 /// -   eval
 /// -   beam_search
 ///
-/// A single forward timestep is:
+/// A single forward cycle is:
 /// -   execute instructions (grab/drop immediate, others buffered)
 /// -   spawn inputs, do glyphs (first half -- consuming inputs), consume outputs
 /// -   (in substeps) collision detection in float world
 /// -   apply buffered motion to world
 /// -   spawn inputs, do glyphs (second half -- spawning outputs)
 ///
-/// So, a reverse timestep without collision detection is:
+/// So, a reverse step without collision detection is:
 /// -   execute inverse instructions (grab/drop buffer 1, others buffer 2)
 /// -   consume inputs, rev glyphs (second half -- consuming outputs)
 /// -   apply buffer 2 motion to world
 /// -   consume inputs, rev glyphs (first half -- spawning inputs), spawn outputs
 /// -   apply buffer 1 motion to world
 ///
-/// (Recall that a `RevStep` is zero-or-more timesteps, though.)
+/// (Recall that a `RevStep` is zero-or-more cycles, though.)
 #[derive(Clone, Debug)]
 enum RevStep {
     /// Required current state:
@@ -849,10 +849,10 @@ impl GenState {
 
         // move in the world
         let mut motion = WorldStepInfo::new();
-        for timestep in (0..n_insns_to_prepend).rev() {
+        for cycle in (0..n_insns_to_prepend).rev() {
             motion.clear();
             for arm_idx in 0..self.world.arms.len() {
-                let rev_insn = match self.tapes[arm_idx].instructions[timestep] {
+                let rev_insn = match self.tapes[arm_idx].instructions[cycle] {
                     BasicInstr::Extend => BasicInstr::Retract,
                     BasicInstr::Retract => BasicInstr::Extend,
                     BasicInstr::RotateCounterClockwise => BasicInstr::RotateClockwise,

@@ -68,7 +68,7 @@ impl History {
 pub struct HistoryFile {
     pub solution_name: String,
     pub history: History,
-    pub timestep_limit: u32,
+    pub cycle_limit: u32,
     pub final_outcome: f32,
 }
 
@@ -83,7 +83,7 @@ impl HistoryFile {
                     r.read_exact(&mut dat)?;
                     String::from_utf8(dat)?
                 };
-                let timestep_limit = read_u32_le(r)?;
+                let cycle_limit = read_u32_le(r)?;
                 let final_outcome = read_f32_le(r)?;
                 let len = read_u32_le(r)? as usize;
                 assert!(len < 100000, "unreasonable len");
@@ -99,7 +99,7 @@ impl HistoryFile {
                 Ok(Self {
                     solution_name,
                     history: History(history),
-                    timestep_limit,
+                    cycle_limit,
                     final_outcome,
                 })
             }
@@ -111,7 +111,7 @@ impl HistoryFile {
         let HistoryFile {
             solution_name,
             history: History(history),
-            timestep_limit,
+            cycle_limit,
             final_outcome,
         } = self;
         write_u32_le(w, 2)?;
@@ -120,7 +120,7 @@ impl HistoryFile {
             write_u32_le(w, dat.len().try_into()?)?;
             w.write_all(dat)?;
         }
-        write_u32_le(w, *timestep_limit)?;
+        write_u32_le(w, *cycle_limit)?;
         write_f32_le(w, *final_outcome)?;
         write_u32_le(w, history.len().try_into().unwrap())?;
         for item in history.iter() {

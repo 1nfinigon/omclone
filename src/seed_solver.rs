@@ -68,21 +68,21 @@ fn solve_one_puzzle_seeded(
 
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
-    let first_timestep = seed_world.world.cycle;
+    let first_cycle = seed_world.world.cycle;
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
     let n_moves_to_search = rng.gen_range(1..=args.max_cycles_from_optimal.unwrap_or(15)); // how many moves to leave behind for MCTS to find
 
     let mut search_state = search_state::State::new(
         seed_world.world.clone(),
-        first_timestep
+        first_cycle
             + (n_moves + rng.gen_range(1..=args.max_cycles.unwrap_or(30)) + n_arms - 1) / n_arms,
     );
     let mut search_history = search_history::History::new();
     let mut tapes: Vec<sim::Tape<sim::BasicInstr>> = Vec::new();
     for _ in 0..seed_world.tapes.len() {
         tapes.push(sim::Tape {
-            first: first_timestep as usize,
+            first: first_cycle as usize,
             instructions: Vec::new(),
         });
     }
@@ -229,7 +229,7 @@ fn solve_one_puzzle_seeded(
     };
     let solution_stats = if result_is_success {
         Some(sim::SolutionStats {
-            cycles: (search_state.world.cycle - first_timestep)
+            cycles: (search_state.world.cycle - first_cycle)
                 .try_into()
                 .unwrap(),
             cost: search_state.world.cost,
@@ -258,7 +258,7 @@ fn solve_one_puzzle_seeded(
     let out_history = search_history::HistoryFile {
         solution_name: solution_name.clone(),
         history: search_history,
-        timestep_limit: search_state.timestep_limit.try_into().unwrap(),
+        cycle_limit: search_state.cycle_limit.try_into().unwrap(),
         final_outcome: if result_is_success { 1.0 } else { 0.0 },
     };
 

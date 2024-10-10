@@ -206,7 +206,7 @@ pub mod feature_offsets {
         pub arm_base_is_berlo: Binary,
         pub arm_in_orientation: [Binary; N_ORIENTATIONS],
         pub arm_in_orientation_and_holding_atom: [Binary; N_ORIENTATIONS],
-        /// What instruction is this arm about to execute this timestep
+        /// What instruction is this arm about to execute this cycle
         pub arm_base_instr: OneHot<{ BasicInstr::N_TYPES }>,
 
         /// Information about the atom that is in this space
@@ -536,11 +536,11 @@ pub mod features {
 
         fn get_spatiotemporal_mut(
             &mut self,
-            time: usize,
+            history_idx: usize,
             pos: sim::Pos,
         ) -> Option<SparseCoo1DSlice> {
             normalize_position(pos)
-                .map(|(x, y)| self.spatiotemporal.slice_all_but_one_dim(0, &[time, y, x]))
+                .map(|(x, y)| self.spatiotemporal.slice_all_but_one_dim(0, &[history_idx, y, x]))
         }
 
         /// Helper function for setting features relating to an Atom.
@@ -721,7 +721,7 @@ pub mod features {
         #[deny(unused_variables)]
         pub fn set_temporal_except_instr(
             &mut self,
-            time: usize,
+            history_idx: usize,
             world: &sim::World,
             cycles_remaining_value: u64,
         ) {
@@ -740,7 +740,7 @@ pub mod features {
             } = Spatiotemporal::OFFSETS;
 
             for position in world.area_touched.iter() {
-                if let Some(mut features) = self.get_spatiotemporal_mut(time, *position) {
+                if let Some(mut features) = self.get_spatiotemporal_mut(history_idx, *position) {
                     features.set(used.get_offset(), 1.);
                 }
             }
@@ -754,7 +754,7 @@ pub mod features {
                     grabbing,
                     atoms_grabbed,
                 } = arm;
-                if let Some(mut features) = self.get_spatiotemporal_mut(time, *pos) {
+                if let Some(mut features) = self.get_spatiotemporal_mut(history_idx, *pos) {
                     features.set(
                         arm_base_length.get_onehot_offset((len - 1).try_into().unwrap()),
                         1.,
@@ -784,7 +784,7 @@ pub mod features {
 
             for atom in world.atoms.atom_map.values() {
                 let pos = atom.pos;
-                if let Some(mut features) = self.get_spatiotemporal_mut(time, pos) {
+                if let Some(mut features) = self.get_spatiotemporal_mut(history_idx, pos) {
                     Self::set_atom(
                         atom,
                         &mut features,
@@ -800,16 +800,16 @@ pub mod features {
                 cycles_remaining,
             } = Temporal::OFFSETS;
             self.temporal.set(
-                &[cycles.get_offset(), time],
+                &[cycles.get_offset(), history_idx],
                 (world.cycle as f64 / 100.).tanh() as f32,
             );
             self.temporal.set(
-                &[cycles_remaining.get_offset(), time],
+                &[cycles_remaining.get_offset(), history_idx],
                 (cycles_remaining_value as f64 / 100.).tanh() as f32,
             );
         }
 
-        /// Set all timesteps' data to this world. Used for initialization.
+        /// Set all history cycles' data to this world. Used for initialization.
         pub fn init_all_temporal(&mut self, world: &sim::World, cycles_remaining_value: u64) {
             // TODO: minor optim, could do just time and then do a blind copy for all other ts
             for t in 0..N_HISTORY_CYCLES {
@@ -819,7 +819,7 @@ pub mod features {
 
         pub fn set_temporal_instr(
             &mut self,
-            time: usize,
+            history_idx: usize,
             world: &sim::World,
             arm_idx: usize,
             instr: sim::BasicInstr,
@@ -827,7 +827,7 @@ pub mod features {
             let Spatiotemporal { arm_base_instr, .. } = Spatiotemporal::OFFSETS;
             let arm = &world.arms[arm_idx];
             let pos = arm.pos;
-            if let Some(mut features) = self.get_spatiotemporal_mut(time, pos) {
+            if let Some(mut features) = self.get_spatiotemporal_mut(history_idx, pos) {
                 use num_traits::ToPrimitive;
                 features.set(
                     arm_base_instr.get_onehot_offset(instr.to_usize().unwrap()),
@@ -836,7 +836,7 @@ pub mod features {
             }
         }
 
-        /// Copies all temporal data one timestep later. The current timestep's
+        /// Copies all temporal data one history cycle later. The current cycle's
         /// temporal data is cleared.
         pub fn shift_temporal(&mut self) {
             self.spatiotemporal.retain_coords_mut(|c| {
