@@ -1589,13 +1589,10 @@ impl World {
                         Move(Linear(x))
                     }
                 } else {
-                    if !self.track_maps.minus.contains_key(&arm.pos) {
-                        return Err(sim_error_pos(
-                            "Forward on arm that's not on a track",
-                            arm.pos,
-                        ));
-                    }
-                    STILL
+                    return Err(sim_error_pos(
+                        "Forward on arm that's not on a track",
+                        arm.pos,
+                    ));
                 }
             }
             Back => {
@@ -1606,10 +1603,7 @@ impl World {
                         Move(Linear(x))
                     }
                 } else {
-                    if !self.track_maps.plus.contains_key(&arm.pos) {
-                        return Err(sim_error_pos("Back on arm that's not on a track", arm.pos));
-                    }
-                    STILL
+                    return Err(sim_error_pos("Back on arm that's not on a track", arm.pos));
                 }
             }
             Empty => STILL,
@@ -2458,21 +2452,25 @@ impl WorldWithTapes {
                     BasicInstr::Drop => known_grab = false,
                     BasicInstr::Forward => {
                         if let Some(offset) = track_maps.plus.get(&position_check) {
-                            track_steps += 1;
-                            total_track_steps += 1;
-                            position_check += offset;
-                            if position_check == original_arm.pos {
-                                track_steps = 0;
+                            if offset != &Pos::new(0, 0) {
+                                track_steps += 1;
+                                total_track_steps += 1;
+                                position_check += offset;
+                                if position_check == original_arm.pos {
+                                    track_steps = 0;
+                                }
                             }
                         }
                     }
                     BasicInstr::Back => {
                         if let Some(offset) = track_maps.minus.get(&position_check) {
-                            track_steps -= 1;
-                            total_track_steps -= 1;
-                            position_check += offset;
-                            if position_check == original_arm.pos {
-                                track_steps = 0;
+                            if offset != &Pos::new(0, 0) {
+                                track_steps -= 1;
+                                total_track_steps -= 1;
+                                position_check += offset;
+                                if position_check == original_arm.pos {
+                                    track_steps = 0;
+                                }
                             }
                         }
                     }
