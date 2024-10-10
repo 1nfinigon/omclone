@@ -112,8 +112,7 @@ fn process_one_solution(
     let init = parser::puzzle_prep(puzzle, &solution)?;
     let world = sim::WorldWithTapes::setup_sim(&init)?;
 
-    let mut search_state =
-        search_state::State::new(world.world, history_file.cycle_limit as u64);
+    let mut search_state = search_state::State::new(world.world, history_file.cycle_limit as u64);
 
     let mut tensors = Vec::new();
 

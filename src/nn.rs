@@ -539,8 +539,10 @@ pub mod features {
             history_idx: usize,
             pos: sim::Pos,
         ) -> Option<SparseCoo1DSlice> {
-            normalize_position(pos)
-                .map(|(x, y)| self.spatiotemporal.slice_all_but_one_dim(0, &[history_idx, y, x]))
+            normalize_position(pos).map(|(x, y)| {
+                self.spatiotemporal
+                    .slice_all_but_one_dim(0, &[history_idx, y, x])
+            })
         }
 
         /// Helper function for setting features relating to an Atom.

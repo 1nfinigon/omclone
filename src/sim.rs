@@ -2556,12 +2556,11 @@ impl WorldWithTapes {
                         // look for a path forward on the track that's shorter than
                         // the path backward.
                         let mut search_depth = track_steps.abs();
-                        let (direction, track_map) =
-                            if track_steps >= 0 {
-                                (1, &track_maps.plus)
-                            } else {
-                                (-1, &track_maps.minus)
-                            };
+                        let (direction, track_map) = if track_steps >= 0 {
+                            (1, &track_maps.plus)
+                        } else {
+                            (-1, &track_maps.minus)
+                        };
                         // if taking into account looping steps changes the sign,
                         // resolve ties in the opposite way.
                         if track_steps.signum() != total_track_steps.signum() {

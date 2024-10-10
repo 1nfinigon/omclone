@@ -172,7 +172,7 @@ impl Loaded {
             self.run_state = RunState::Manual(target);
         }
     }
-    fn advance(&mut self, substep_time: &mut f64) -> SimResult<()> {
+    fn advance(&mut self) -> SimResult<()> {
         if self.curr_substep == 0 {
             let failcheck = self.curr_world.prepare_step(&mut self.saved_motions);
             if failcheck.is_err() {
@@ -180,7 +180,6 @@ impl Loaded {
                 return failcheck;
             }
             self.substep_count = self.curr_world.world.subcycle_count(&self.saved_motions);
-            *substep_time = 1.0 / (self.substep_count as f64);
         }
         self.curr_substep += 1;
         let portion = self.curr_substep as f32 / self.substep_count as f32;
@@ -222,16 +221,15 @@ impl Loaded {
             }
         }
 
-        let mut substep_time = 1.0 / (self.substep_count as f64);
         let backup_target_timestep = (target_cycle.floor() as u64).max(100) - 100;
         if self.curr_world.world.cycle < backup_target_timestep {
             while self.curr_world.world.cycle < backup_target_timestep {
-                let output = self.advance(&mut substep_time);
+                let output = self.advance();
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed;
                     self.message = Some(output.to_string());
                     self.curr_cycle = self.curr_world.world.cycle as f64
-                        + (substep_time * self.curr_substep as f64);
+                        + (self.curr_substep as f64 / self.substep_count as f64);
                     return;
                 }
             }
@@ -247,12 +245,12 @@ impl Loaded {
             || (self.curr_world.world.cycle == target_timestep
                 && self.curr_substep < target_substep)
         {
-            let output = self.advance(&mut substep_time);
+            let output = self.advance();
             if let Err(output) = output {
                 self.run_state = RunState::Crashed;
                 self.message = Some(output.to_string());
                 self.curr_cycle = self.curr_world.world.cycle as f64
-                    + (substep_time * self.curr_substep as f64);
+                    + (self.curr_substep as f64 / self.substep_count as f64);
                 return;
             }
         }

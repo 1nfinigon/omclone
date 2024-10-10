@@ -100,10 +100,8 @@ fn solve_one_puzzle_seeded(
 
     for _ in 0..n_premoves {
         let arm_index = search_state.next_arm_index();
-        let instr = seed_world.tapes[arm_index].get(
-            search_state.world.cycle as usize,
-            seed_world.repeat_length,
-        );
+        let instr = seed_world.tapes[arm_index]
+            .get(search_state.world.cycle as usize, seed_world.repeat_length);
         tapes[arm_index].instructions.push(instr);
         search_state.update(instr);
         search_history.append_from_optimal_solution(instr);
@@ -200,10 +198,8 @@ fn solve_one_puzzle_seeded(
         if still_following_premoves && rng.gen_bool(lowconf(stats.root_value.into(), 0.5, 6., 0.9))
         {
             let arm_index = search_state.next_arm_index();
-            let instr = seed_world.tapes[arm_index].get(
-                search_state.world.cycle as usize,
-                seed_world.repeat_length,
-            );
+            let instr = seed_world.tapes[arm_index]
+                .get(search_state.world.cycle as usize, seed_world.repeat_length);
             println!("Applying true update due to low confidence: {:?}", instr);
             tapes[arm_index].instructions.push(instr);
             search_state.update(instr);
@@ -229,9 +225,7 @@ fn solve_one_puzzle_seeded(
     };
     let solution_stats = if result_is_success {
         Some(sim::SolutionStats {
-            cycles: (search_state.world.cycle - first_cycle)
-                .try_into()
-                .unwrap(),
+            cycles: (search_state.world.cycle - first_cycle).try_into().unwrap(),
             cost: search_state.world.cost,
             area: search_state.world.area_touched.len().try_into().unwrap(),
             instructions: sim::compute_tape_instruction_count(&tapes)
