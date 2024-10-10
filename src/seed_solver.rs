@@ -68,7 +68,7 @@ fn solve_one_puzzle_seeded(
 
     let seed_world = sim::WorldWithTapes::setup_sim(&seed_init)?;
 
-    let first_timestep = seed_world.world.timestep;
+    let first_timestep = seed_world.world.cycle;
     let n_arms = seed_world.world.arms.len() as u64;
     let n_moves = seed_solution.stats.as_ref().unwrap().cycles as u64 * n_arms;
     let n_moves_to_search = rng.gen_range(1..=args.max_cycles_from_optimal.unwrap_or(15)); // how many moves to leave behind for MCTS to find
@@ -101,7 +101,7 @@ fn solve_one_puzzle_seeded(
     for _ in 0..n_premoves {
         let arm_index = search_state.next_arm_index();
         let instr = seed_world.tapes[arm_index].get(
-            search_state.world.timestep as usize,
+            search_state.world.cycle as usize,
             seed_world.repeat_length,
         );
         tapes[arm_index].instructions.push(instr);
@@ -201,7 +201,7 @@ fn solve_one_puzzle_seeded(
         {
             let arm_index = search_state.next_arm_index();
             let instr = seed_world.tapes[arm_index].get(
-                search_state.world.timestep as usize,
+                search_state.world.cycle as usize,
                 seed_world.repeat_length,
             );
             println!("Applying true update due to low confidence: {:?}", instr);
@@ -229,7 +229,7 @@ fn solve_one_puzzle_seeded(
     };
     let solution_stats = if result_is_success {
         Some(sim::SolutionStats {
-            cycles: (search_state.world.timestep - first_timestep)
+            cycles: (search_state.world.cycle - first_timestep)
                 .try_into()
                 .unwrap(),
             cost: search_state.world.cost,

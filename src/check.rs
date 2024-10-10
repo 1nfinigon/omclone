@@ -33,12 +33,12 @@ pub fn check_solution(sol: &FullSolution, puzzle: &FullPuzzle, skip_overlap: boo
     };
     let mut float_world = FloatWorld::new();
     let mut motions = WorldStepInfo::new();
-    while !world.world.is_complete() && world.world.timestep < 500_000 {
+    while !world.world.is_complete() && world.world.cycle < 500_000 {
         let step = world.run_step(CHECK_AREA, &mut motions, &mut float_world);
         if let Err(e) = step {
             return CheckResult::FailedSim(format!(
                 "Simulation error on step {}: {}",
-                world.world.timestep, e
+                world.world.cycle, e
             ));
         }
     }

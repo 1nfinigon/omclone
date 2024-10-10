@@ -140,7 +140,7 @@ impl Loaded {
     }
     fn reset_world(&mut self) {
         if let RunState::Crashed = self.run_state {
-            self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
+            self.run_state = RunState::Manual(self.curr_world.world.cycle as usize);
         }
         self.saved_motions.clear();
         self.curr_world = self.base_world.clone();
@@ -154,7 +154,7 @@ impl Loaded {
     }
     fn reset_to_backup(&mut self) {
         if let RunState::Crashed = self.run_state {
-            self.run_state = RunState::Manual(self.curr_world.world.timestep as usize);
+            self.run_state = RunState::Manual(self.curr_world.world.cycle as usize);
         }
         self.saved_motions.clear();
         self.curr_world = self.backup_world.clone();
@@ -165,7 +165,7 @@ impl Loaded {
     }
     fn try_set_target_time(&mut self, target: usize) {
         if let RunState::Crashed = self.run_state {
-            if self.curr_world.world.timestep as usize > target {
+            if self.curr_world.world.cycle as usize > target {
                 self.run_state = RunState::Manual(target);
             }
         } else {
@@ -179,7 +179,7 @@ impl Loaded {
                 self.saved_motions.clear();
                 return failcheck;
             }
-            self.substep_count = self.curr_world.world.substep_count(&self.saved_motions);
+            self.substep_count = self.curr_world.world.subcycle_count(&self.saved_motions);
             *substep_time = 1.0 / (self.substep_count as f64);
         }
         self.curr_substep += 1;
@@ -224,13 +224,13 @@ impl Loaded {
 
         let mut substep_time = 1.0 / (self.substep_count as f64);
         let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
-        if self.curr_world.world.timestep < backup_target_timestep {
-            while self.curr_world.world.timestep < backup_target_timestep {
+        if self.curr_world.world.cycle < backup_target_timestep {
+            while self.curr_world.world.cycle < backup_target_timestep {
                 let output = self.advance(&mut substep_time);
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed;
                     self.message = Some(output.to_string());
-                    self.curr_time = self.curr_world.world.timestep as f64
+                    self.curr_time = self.curr_world.world.cycle as f64
                         + (substep_time * self.curr_substep as f64);
                     return;
                 }
@@ -238,20 +238,20 @@ impl Loaded {
             self.backup_step = backup_target_timestep;
             self.backup_world = self.curr_world.clone();
             assert_eq!(self.curr_substep, 0);
-            assert_eq!(backup_target_timestep, self.curr_world.world.timestep);
+            assert_eq!(backup_target_timestep, self.curr_world.world.cycle);
         }
 
         let target_timestep = target_time.floor() as u64;
         let target_substep = (target_time.fract() * self.substep_count as f64).floor() as usize;
-        while self.curr_world.world.timestep < target_timestep
-            || (self.curr_world.world.timestep == target_timestep
+        while self.curr_world.world.cycle < target_timestep
+            || (self.curr_world.world.cycle == target_timestep
                 && self.curr_substep < target_substep)
         {
             let output = self.advance(&mut substep_time);
             if let Err(output) = output {
                 self.run_state = RunState::Crashed;
                 self.message = Some(output.to_string());
-                self.curr_time = self.curr_world.world.timestep as f64
+                self.curr_time = self.curr_world.world.cycle as f64
                     + (substep_time * self.curr_substep as f64);
                 return;
             }
@@ -688,7 +688,7 @@ impl EventHandler for MyMiniquadApp {
                                 loaded.backup_world.tapes[arm_id] = loaded.base_world.tapes[arm_id].clone();
                                 if edit_step <= loaded.curr_time as usize {
                                     if let RunState::Crashed = loaded.run_state {
-                                        loaded.run_state = RunState::Manual(loaded.curr_world.world.timestep as usize);
+                                        loaded.run_state = RunState::Manual(loaded.curr_world.world.cycle as usize);
                                     }
                                     loaded.reset_to(edit_step as u64);
                                 } else {

@@ -41,7 +41,7 @@ fn sim_error_pos(error_str: &'static str, location: Pos) -> SimError {
 /// Convention: +x right, +y up
 pub type Pos = Vector2<i32>;
 
-/// A basic instruction that can be executed in one timestep (i.e. no Repeat,
+/// A basic instruction that can be executed in one cycle (i.e. no Repeat,
 /// Reset, Noop)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Primitive)]
 #[repr(u8)]
@@ -258,10 +258,10 @@ pub fn compute_tape_instruction_count(tapes: &[Tape<BasicInstr>]) -> usize {
 }
 
 impl<InstrT: Copy + From<BasicInstr>> Tape<InstrT> {
-    pub fn get(&self, timestep: usize, loop_len: usize) -> InstrT {
+    pub fn get(&self, cycle: usize, loop_len: usize) -> InstrT {
         use BasicInstr::Empty;
-        if timestep >= self.first && loop_len > 0 {
-            let after_first = timestep - self.first;
+        if cycle >= self.first && loop_len > 0 {
+            let after_first = cycle - self.first;
             *self
                 .instructions
                 .get(after_first % loop_len)
@@ -1012,7 +1012,7 @@ pub struct ConduitInfo {
 }
 #[derive(Debug, Clone)]
 pub struct World {
-    pub timestep: u64,
+    pub cycle: u64,
     pub atoms: WorldAtoms,
     pub area_touched: FxHashSet<Pos>,
     pub glyphs: Vec<Glyph>,
@@ -1197,7 +1197,7 @@ impl<'a> Iterator for WorldAtomMoleculesIterator<'a> {
     }
 }
 
-/// Contains information about what changes during the current timestep,
+/// Contains information about what changes during the current cycle,
 /// including motion information.
 pub struct WorldStepInfo {
     pub atoms: SecondaryMap<AtomKey, Movement>,
@@ -2174,9 +2174,9 @@ impl World {
     ) -> SimResult<()> {
         self.prepare_step(motion, instructions)?;
         if mark_area {
-            let substep_count = self.substep_count(motion);
-            for substep in 0..substep_count {
-                let portion = substep as f32 / substep_count as f32;
+            let subcycle_count = self.subcycle_count(motion);
+            for subcycle in 0..subcycle_count {
+                let portion = subcycle as f32 / subcycle_count as f32;
                 float_world.regenerate(self, motion, portion);
                 self.mark_area_and_collide(float_world, motion.spawning_atoms.iter())?;
             }
@@ -2222,9 +2222,9 @@ impl World {
         Ok(())
     }
 
-    /// Returns the substep count to be used for the current step, i.e. how many
-    /// intermediate timesteps should be checked.
-    pub fn substep_count(&self, motion: &WorldStepInfo) -> usize {
+    /// Returns the subcycle count to be used for the current step, i.e. how many
+    /// intermediate cycles should be checked.
+    pub fn subcycle_count(&self, motion: &WorldStepInfo) -> usize {
         let mut max_radius: f64 = 1.;
         for (atom_key, movement) in &motion.atoms {
             if let Movement::Rotation(_rot, center) = movement {
@@ -2254,7 +2254,7 @@ impl World {
         }
         self.process_outputs(motion);
         motion.clear();
-        self.timestep += 1;
+        self.cycle += 1;
         Ok(())
     }
 
@@ -2310,7 +2310,7 @@ impl World {
     pub fn setup_sim(init: &InitialWorld) -> Result<Self> {
         let (area_touched, _has_overlap) = init.mark_initial_area_and_detect_overlap();
         let mut world = World {
-            timestep: 0,
+            cycle: 0,
             atoms: WorldAtoms::new(),
             area_touched,
             glyphs: init.glyphs.clone(),
@@ -2638,22 +2638,22 @@ impl WorldWithTapes {
             let tape = Self::normalize_instructions(arm, init_tape, &self_.world.track_maps)?;
             self_.tapes.push(tape);
         }
-        self_.world.timestep = self_.get_first_timestep();
+        self_.world.cycle = self_.get_first_cycle();
         self_.repeat_length = compute_tape_repeat_length(&self_.tapes);
         Ok(self_)
     }
 
-    /// Get the instructions for the given timestep.
-    pub fn get_instructions_at(&self, timestep: u64) -> Vec<BasicInstr> {
+    /// Get the instructions for the given cycle.
+    pub fn get_instructions_at(&self, cycle: u64) -> Vec<BasicInstr> {
         self.tapes
             .iter()
-            .map(|tape| tape.get(timestep as usize, self.repeat_length))
+            .map(|tape| tape.get(cycle as usize, self.repeat_length))
             .collect()
     }
 
-    /// Get the instructions for the current timestep.
+    /// Get the instructions for the current cycle.
     pub fn get_instructions(&self) -> Vec<BasicInstr> {
-        self.get_instructions_at(self.world.timestep)
+        self.get_instructions_at(self.world.cycle)
     }
 
     pub fn run_step(
@@ -2670,7 +2670,7 @@ impl WorldWithTapes {
         self.world.prepare_step(motion, &self.get_instructions())
     }
 
-    fn get_first_timestep(&self) -> u64 {
+    fn get_first_cycle(&self) -> u64 {
         if self.tapes.is_empty() {
             return 0;
         }
@@ -2681,7 +2681,7 @@ impl WorldWithTapes {
     }
 
     pub fn get_stats(&self) -> SolutionStats {
-        let cycles = (self.world.timestep - self.get_first_timestep())
+        let cycles = (self.world.cycle - self.get_first_cycle())
             .try_into()
             .unwrap();
         let cost = self.world.cost;

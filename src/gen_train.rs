@@ -120,7 +120,7 @@ fn process_one_solution(
     for (move_idx, history_item) in history_file.history.0.iter().enumerate() {
         let arm_index = search_state.next_arm_index();
         let instr =
-            world.tapes[arm_index].get(search_state.world.timestep as usize, world.repeat_length);
+            world.tapes[arm_index].get(search_state.world.cycle as usize, world.repeat_length);
 
         let next_arm_pos = search_state.world.arms[arm_index].pos;
         let (x, y) = nn::features::normalize_position(next_arm_pos).expect("arm out of nn bounds");

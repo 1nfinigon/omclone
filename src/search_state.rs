@@ -19,7 +19,7 @@ impl State {
         let n_arms = world.arms.len();
         let mut nn_features = Box::new(nn::Features::new());
         nn_features.set_nontemporal(&world);
-        nn_features.init_all_temporal(&world, timestep_limit.saturating_sub(world.timestep));
+        nn_features.init_all_temporal(&world, timestep_limit.saturating_sub(world.cycle));
         Self {
             errored: false,
             timestep_limit,
@@ -54,7 +54,7 @@ impl State {
                     self.nn_features.set_temporal_except_instr(
                         0,
                         &new_world,
-                        self.timestep_limit.saturating_sub(self.world.timestep),
+                        self.timestep_limit.saturating_sub(self.world.cycle),
                     );
                     self.world = Box::new(new_world);
                 }
@@ -72,7 +72,7 @@ impl State {
             if self.world.is_complete() {
                 // TODO: take into account score (cost, cycles, area).
                 Some(1.)
-            } else if self.world.timestep >= self.timestep_limit {
+            } else if self.world.cycle >= self.timestep_limit {
                 Some(0.)
             } else {
                 None

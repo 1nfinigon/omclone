@@ -801,7 +801,7 @@ pub mod features {
             } = Temporal::OFFSETS;
             self.temporal.set(
                 &[cycles.get_offset(), time],
-                (world.timestep as f64 / 100.).tanh() as f32,
+                (world.cycle as f64 / 100.).tanh() as f32,
             );
             self.temporal.set(
                 &[cycles_remaining.get_offset(), time],

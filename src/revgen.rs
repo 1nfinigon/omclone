@@ -372,7 +372,7 @@ impl GenState {
     fn new(outputs: Vec<(AtomPattern, i32)>) -> Self {
         Self {
             world: World {
-                timestep: 0,
+                cycle: 0,
                 atoms: WorldAtoms::new(),
                 area_touched: FxHashSet::default(),
                 glyphs: outputs
