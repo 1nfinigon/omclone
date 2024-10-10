@@ -111,14 +111,14 @@ struct Loaded {
     base_world: WorldWithTapes,
     curr_world: WorldWithTapes,
     backup_world: WorldWithTapes,
-    curr_time: f64,
+    curr_cycle: f64,
     curr_substep: usize,
-    backup_step: u64,
+    backup_cycle: u64,
     substep_count: usize,
     float_world: FloatWorld,
     saved_motions: WorldStepInfo,
 
-    max_timestep: usize,
+    max_cycle: usize,
     camera: CameraSetup,
     tracks: TrackBindings,
     solution: parser::FullSolution,
@@ -132,7 +132,7 @@ struct Loaded {
 }
 impl Loaded {
     fn reset_to(&mut self, reset_to: u64) {
-        if self.backup_step < reset_to {
+        if self.backup_cycle < reset_to {
             self.reset_to_backup();
         } else {
             self.reset_world();
@@ -144,13 +144,13 @@ impl Loaded {
         }
         self.saved_motions.clear();
         self.curr_world = self.base_world.clone();
-        self.curr_time = 0.;
+        self.curr_cycle = 0.;
         self.substep_count = 8;
         self.curr_substep = 0;
         self.message = None;
 
         self.backup_world = self.base_world.clone();
-        self.backup_step = 0;
+        self.backup_cycle = 0;
     }
     fn reset_to_backup(&mut self) {
         if let RunState::Crashed = self.run_state {
@@ -158,12 +158,12 @@ impl Loaded {
         }
         self.saved_motions.clear();
         self.curr_world = self.backup_world.clone();
-        self.curr_time = self.backup_step as f64;
+        self.curr_cycle = self.backup_cycle as f64;
         self.substep_count = 8;
         self.curr_substep = 0;
         self.message = None;
     }
-    fn try_set_target_time(&mut self, target: usize) {
+    fn try_set_target_cycle(&mut self, target: usize) {
         if let RunState::Crashed = self.run_state {
             if self.curr_world.world.cycle as usize > target {
                 self.run_state = RunState::Manual(target);
@@ -201,48 +201,48 @@ impl Loaded {
         Ok(())
     }
     fn update(&mut self) {
-        let target_time = match self.run_state {
-            RunState::Manual(target_timestep) => {
-                let target_timestep = target_timestep as f64;
-                if target_timestep > self.curr_time + 1.001 {
-                    target_timestep
+        let target_cycle = match self.run_state {
+            RunState::Manual(target_cycle) => {
+                let target_cycle = target_cycle as f64;
+                if target_cycle > self.curr_cycle + 1.001 {
+                    target_cycle
                 } else {
-                    f64::min(self.curr_time + self.run_speed, target_timestep)
+                    f64::min(self.curr_cycle + self.run_speed, target_cycle)
                 }
             }
-            RunState::FreeRun => self.curr_time + self.run_speed,
+            RunState::FreeRun => self.curr_cycle + self.run_speed,
             RunState::Crashed => return,
         };
-        if target_time < self.curr_time {
-            self.reset_to(target_time as u64);
+        if target_cycle < self.curr_cycle {
+            self.reset_to(target_cycle as u64);
         } else {
             //If backup is too out-of-date, catch up
-            if self.curr_time as u64 >= self.backup_step + 200 {
+            if self.curr_cycle as u64 >= self.backup_cycle + 200 {
                 self.reset_to_backup()
             }
         }
 
         let mut substep_time = 1.0 / (self.substep_count as f64);
-        let backup_target_timestep = (target_time.floor() as u64).max(100) - 100;
+        let backup_target_timestep = (target_cycle.floor() as u64).max(100) - 100;
         if self.curr_world.world.cycle < backup_target_timestep {
             while self.curr_world.world.cycle < backup_target_timestep {
                 let output = self.advance(&mut substep_time);
                 if let Err(output) = output {
                     self.run_state = RunState::Crashed;
                     self.message = Some(output.to_string());
-                    self.curr_time = self.curr_world.world.cycle as f64
+                    self.curr_cycle = self.curr_world.world.cycle as f64
                         + (substep_time * self.curr_substep as f64);
                     return;
                 }
             }
-            self.backup_step = backup_target_timestep;
+            self.backup_cycle = backup_target_timestep;
             self.backup_world = self.curr_world.clone();
             assert_eq!(self.curr_substep, 0);
             assert_eq!(backup_target_timestep, self.curr_world.world.cycle);
         }
 
-        let target_timestep = target_time.floor() as u64;
-        let target_substep = (target_time.fract() * self.substep_count as f64).floor() as usize;
+        let target_timestep = target_cycle.floor() as u64;
+        let target_substep = (target_cycle.fract() * self.substep_count as f64).floor() as usize;
         while self.curr_world.world.cycle < target_timestep
             || (self.curr_world.world.cycle == target_timestep
                 && self.curr_substep < target_substep)
@@ -251,12 +251,12 @@ impl Loaded {
             if let Err(output) = output {
                 self.run_state = RunState::Crashed;
                 self.message = Some(output.to_string());
-                self.curr_time = self.curr_world.world.cycle as f64
+                self.curr_cycle = self.curr_world.world.cycle as f64
                     + (substep_time * self.curr_substep as f64);
                 return;
             }
         }
-        self.curr_time = target_time;
+        self.curr_cycle = target_cycle;
     }
 }
 enum AppState {
@@ -310,13 +310,13 @@ impl MyMiniquadApp {
         let solution = parser::parse_solution(&mut BufReader::new(f_sol))?;
         println!("Check: {:?}", solution.stats);
         let init = parser::puzzle_prep(&puzzle, &solution)?;
-        let mut max_timestep = 0;
+        let mut max_cycle = 0;
         for (a_num, tape) in init.tapes.iter().enumerate() {
             println!("Arms {:02}: {:?}", a_num, tape.to_string());
-            max_timestep = max_timestep.max(tape.first);
+            max_cycle = max_cycle.max(tape.first);
         }
         let world = WorldWithTapes::setup_sim(&init)?;
-        max_timestep += world.repeat_length * 2 + 100;
+        max_cycle += world.repeat_length * 2 + 100;
 
         let float_world = FloatWorld::new();
         let mut saved_motions = WorldStepInfo::new();
@@ -327,14 +327,14 @@ impl MyMiniquadApp {
             base_world: world.clone(),
             backup_world: world.clone(),
             curr_world: world,
-            curr_time: 0.,
+            curr_cycle: 0.,
             curr_substep: 0,
-            backup_step: 0,
+            backup_cycle: 0,
             substep_count: 8,
             float_world,
             saved_motions,
 
-            max_timestep,
+            max_cycle,
             camera,
             tracks,
             solution,
@@ -391,7 +391,7 @@ impl EventHandler for MyMiniquadApp {
     fn update(&mut self) {
         if let Loaded(loaded) = &mut self.app_state {
             loaded.update();
-            let display_portion = loaded.curr_time.fract() as f32;
+            let display_portion = loaded.curr_cycle.fract() as f32;
             if loaded.saved_motions.arms.is_empty() {
                 loaded.float_world.generate_static(&loaded.curr_world.world);
             } else {
@@ -436,32 +436,32 @@ impl EventHandler for MyMiniquadApp {
                 Loaded(loaded) => {
                     egui::Window::new("World loaded").default_pos((0.,0.)).show(egui_ctx, |ui| {
                         ui.style_mut().spacing.slider_width = 500.;
-                        let mut target_time = loaded.curr_time.floor() as usize;
-                        loaded.max_timestep = loaded.max_timestep.max(target_time);
+                        let mut target_cycle = loaded.curr_cycle.floor() as usize;
+                        loaded.max_cycle = loaded.max_cycle.max(target_cycle);
                         ui.horizontal(|ui| {
-                            ui.add(egui::Slider::new(&mut target_time, 0..=loaded.max_timestep)
+                            ui.add(egui::Slider::new(&mut target_cycle, 0..=loaded.max_cycle)
                                 .show_value(false));
-                            ui.add(egui::DragValue::new(&mut target_time)
-                                .clamp_range(0..=loaded.max_timestep)
+                            ui.add(egui::DragValue::new(&mut target_cycle)
+                                .clamp_range(0..=loaded.max_cycle)
                                 .speed(0.1));
-                            ui.label("Timestep");
+                            ui.label("Cycle");
                         });
                         ui.horizontal(|ui| {
                             if ui.button("-1").clicked() {
-                                target_time = target_time.saturating_sub(1);
+                                target_cycle = target_cycle.saturating_sub(1);
                             }
                             if ui.button("+1").clicked() {
-                                target_time = target_time.saturating_add(1);
+                                target_cycle = target_cycle.saturating_add(1);
                             }
-                            ui.label("Max Timestep:");
-                            ui.add(egui::DragValue::new(&mut loaded.max_timestep)
+                            ui.label("Max cycle:");
+                            ui.add(egui::DragValue::new(&mut loaded.max_cycle)
                                 .speed(0.1));
                             ui.separator();
-                            if loaded.max_timestep < target_time{
-                                loaded.max_timestep = target_time;
+                            if loaded.max_cycle < target_cycle{
+                                loaded.max_cycle = target_cycle;
                             }
-                            if target_time != loaded.curr_time.floor() as usize{
-                                loaded.try_set_target_time(target_time);
+                            if target_cycle != loaded.curr_cycle.floor() as usize{
+                                loaded.try_set_target_cycle(target_cycle);
                             }
 
                             let min_size = loaded.base_world.tapes.iter()
@@ -474,10 +474,10 @@ impl EventHandler for MyMiniquadApp {
                                 let length = loaded.base_world.repeat_length;
                                 loaded.backup_world.repeat_length = length;
                                 loaded.curr_world.repeat_length = length;
-                                if loaded.max_timestep < length{
-                                    loaded.max_timestep = length;
+                                if loaded.max_cycle < length{
+                                    loaded.max_cycle = length;
                                 }
-                                if length <= loaded.curr_time as usize{
+                                if length <= loaded.curr_cycle as usize{
                                     loaded.reset_to(length as u64);
                                 }
                             }
@@ -503,7 +503,7 @@ impl EventHandler for MyMiniquadApp {
                             if running_free{
                                 loaded.run_state = RunState::FreeRun;
                             } else if was_freerun{
-                                loaded.try_set_target_time(loaded.curr_time.ceil() as usize);
+                                loaded.try_set_target_cycle(loaded.curr_cycle.ceil() as usize);
                             }
                         });
                     });
@@ -632,12 +632,12 @@ impl EventHandler for MyMiniquadApp {
                                     ui.separator();
                                 }
                             });
-                            let curr_timestep = loaded.curr_time.floor() as usize;
-                            let end_spacing = loaded.max_timestep.saturating_sub(curr_timestep);
-                            let marker = " ".repeat(curr_timestep+3)+"V"+&" ".repeat(end_spacing);
-                            //+&(" ".repeat(loaded.max_timestep-loaded.curr_timestep));
+                            let curr_cycle = loaded.curr_cycle.floor() as usize;
+                            let end_spacing = loaded.max_cycle.saturating_sub(curr_cycle);
+                            let marker = " ".repeat(curr_cycle+3)+"V"+&" ".repeat(end_spacing);
+                            //+&(" ".repeat(loaded.max_cycle-loaded.curr_cycle));
                             let mut earliest_edit = None;
-                            let mut target_time = None;
+                            let mut target_cycle = None;
                             let mut change_arm_id = None;
                             egui::ScrollArea::horizontal().show(ui, |ui| {
                                 ui.add(egui::Label::new(egui::RichText::new(marker).monospace()).wrap(false));
@@ -659,7 +659,7 @@ impl EventHandler for MyMiniquadApp {
                                             }
                                             let text_output = line_edit.show(ui);
                                             if let Some(cursor) = text_output.cursor_range{
-                                                target_time = Some(cursor.primary.ccursor.index);
+                                                target_cycle = Some(cursor.primary.ccursor.index);
                                             }
                                             if text_output.response.changed(){
                                                 change_arm_id = Some(a_num);
@@ -668,15 +668,15 @@ impl EventHandler for MyMiniquadApp {
                                     }
                                 });
                             });
-                            if let Some(target) = target_time {
-                                loaded.try_set_target_time(target);
+                            if let Some(target) = target_cycle {
+                                loaded.try_set_target_cycle(target);
                             }
                             if let Some(edit_step) = earliest_edit {
                                 let arm_id = change_arm_id.unwrap();//If edit is performed, the change must be recorded
-                                let min_time = loaded.base_world.tapes.iter()
+                                let min_cycle = loaded.base_world.tapes.iter()
                                     .fold(0, |val, tape| usize::max(val, tape.instructions.len()+tape.first));
-                                if loaded.max_timestep < min_time{
-                                    loaded.max_timestep = min_time;
+                                if loaded.max_cycle < min_cycle{
+                                    loaded.max_cycle = min_cycle;
                                 }
                                 let min_loop = loaded.base_world.tapes.iter()
                                     .fold(0, |val, tape| usize::max(val, tape.instructions.len()));
@@ -686,7 +686,7 @@ impl EventHandler for MyMiniquadApp {
                                     loaded.curr_world.repeat_length = min_loop;
                                 }
                                 loaded.backup_world.tapes[arm_id] = loaded.base_world.tapes[arm_id].clone();
-                                if edit_step <= loaded.curr_time as usize {
+                                if edit_step <= loaded.curr_cycle as usize {
                                     if let RunState::Crashed = loaded.run_state {
                                         loaded.run_state = RunState::Manual(loaded.curr_world.world.cycle as usize);
                                     }
@@ -698,8 +698,8 @@ impl EventHandler for MyMiniquadApp {
                         });
                     }
                     /*egui::Window::new("debug").min_width(128.).show(egui_ctx, |ui|{
-                        ui.label(format!("curr time: {}",loaded.curr_time as u64));
-                        ui.label(format!("backup time: {}",loaded.backup_step));
+                        ui.label(format!("curr cycle: {}",loaded.curr_cycle as u64));
+                        ui.label(format!("backup cycle: {}",loaded.backup_cycle));
                     });*/
                     egui::Window::new("Reload?").open(&mut loaded.popup_reload).show(egui_ctx, |ui| {
                         #[cfg(not(target_arch = "wasm32"))]{
