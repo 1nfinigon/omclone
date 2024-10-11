@@ -1,3 +1,6 @@
+//! A history of values and policies generated during MCTS gameplay, suitable
+//! for training on.
+
 use crate::search;
 use crate::sim::BasicInstr;
 use enum_primitive_derive::Primitive;

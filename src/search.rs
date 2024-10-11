@@ -1,3 +1,5 @@
+//! Parallel MCTS search implementation
+
 use crate::eval::AsyncEvaluator;
 use crate::nonnan::NonNan;
 use crate::search_state::State;

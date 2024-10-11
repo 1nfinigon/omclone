@@ -1,3 +1,5 @@
+//! Binary for trimming excessively large events from TensorBoard files
+
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::mem;

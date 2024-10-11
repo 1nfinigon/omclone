@@ -1,3 +1,6 @@
+//! Utilities for reading files from the directory layout as set up by
+//! `setup.sh`
+
 use crate::parser;
 use crate::sim::*;
 use std::collections::HashMap;

@@ -1,3 +1,7 @@
+//! Uses human solutions as a seed, playing out all except a suffix of the
+//! cycles, and using a tree-search with NN eval to try to finish the solution
+//! from that point.
+
 use crate::check;
 use crate::eval;
 use crate::nn;

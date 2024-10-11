@@ -1,3 +1,6 @@
+//! WIP attempt at generating meaningful randomized solutions by starting from
+//! the final state and stepping backwards
+
 use crate::parser::*;
 use crate::sim::*;
 

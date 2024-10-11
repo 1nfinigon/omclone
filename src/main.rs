@@ -1,3 +1,32 @@
+//! Opus Magnum simulator, tree-search, NN training utils.
+//!
+//! Binaries:
+//! -   [ui] (`cargo run`)
+//! -   [seed_solver] (`cargo run seed-solver`)
+//! -   [gen_train] (`cargo run gen-train`)
+//! -   [check] (`cargo run check`)
+//! -   [benchmark] (`cargo run benchmark`)
+//!
+//! All binaries are run as subcommands, e.g. `cargo run seed-solver`
+//!
+//! Important modules:
+//!
+//! -   Simulator backend
+//!     -   [sim]
+//!     -   [parser]
+//! -   Tree-search
+//!     -   [search]
+//!     -   [eval]
+//! -   NN and training
+//!     -   [nn]
+//!     -   [gen_train]
+//!
+//! <details><summary>README.md</summary>
+//!
+#![doc = include_str!("../README.md")]
+//!
+//! </details>
+
 mod check;
 mod nonnan;
 mod parser;

@@ -1,11 +1,14 @@
+//! Utility types for rendering with [miniquad]
+
 use miniquad::*;
 
 pub type GFXPos = [f32; 2];
 
+/// Vertex format: (x, y)
 pub type Vert = [f32; 2];
-//Vertex format: (x, y)
+
+/// UV format: (x, y), (u, v)
 pub type UvVert = [f32; 4];
-//(x, y), (u, v)
 
 #[repr(C)]
 pub struct BasicUniforms {
@@ -129,7 +132,8 @@ impl FontStorage {
     pub fn set_pipeline(&self, ctx: &mut dyn RenderingBackend) {
         ctx.apply_pipeline(&self.pipeline);
     }
-    //WARNING: Assumes pipeline has been set already
+
+    /// WARNING: Assumes pipeline has been set already
     pub fn render_text_centered(
         &self,
         ctx: &mut dyn RenderingBackend,

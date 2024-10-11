@@ -1,3 +1,5 @@
+//! Simulator benchmark
+
 use crate::parser;
 use crate::sim;
 use crate::utils;

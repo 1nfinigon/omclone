@@ -1,3 +1,5 @@
+//! NN-specific code: features, tensors, model loading and evaluation
+
 use crate::eval;
 use crate::search_state;
 use crate::sim::{self, BasicInstr};

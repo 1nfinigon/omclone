@@ -1,3 +1,6 @@
+//! [sim::WorldWithTapes](crate::sim::WorldWithTapes) but augmented to be
+//! suitable for MCTS search
+
 use crate::nn;
 use crate::sim::*;
 

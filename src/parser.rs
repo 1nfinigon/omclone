@@ -1,3 +1,5 @@
+//! Functions for reading and writing `.puzzle` and `.solution` files
+
 use crate::sim::*;
 
 use eyre::{bail, ensure, eyre, Result};

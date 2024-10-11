@@ -1,3 +1,8 @@
+//! Utility functions for checking that a solution is valid.
+//!
+//! Also a binary for running all community solutions from external repos as a
+//! test suite, as setup by `setup.sh`.
+
 use crate::parser::*;
 use crate::sim::*;
 use crate::utils::*;

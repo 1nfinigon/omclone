@@ -1,3 +1,6 @@
+//! Generate NN training data from games played out by
+//! [seed_solver](crate::seed_solver)
+
 use crate::nn;
 use crate::parser;
 use crate::search_history;

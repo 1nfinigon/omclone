@@ -1,3 +1,5 @@
+//! Simulator state and functions for stepping forwards
+
 use bitflags::bitflags;
 use enum_primitive_derive::Primitive;
 use eyre::{ensure, Result};

@@ -1,3 +1,5 @@
+//! Render [sim::World](crate::sim::World) into a [miniquad::Context]
+
 use crate::sim::*;
 use miniquad::*;
 

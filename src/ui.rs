@@ -1,3 +1,5 @@
+//! Graphical simulator and tape editor
+
 use crate::{parser, render_library::GFXPos, render_sim::*, sim::*, utils};
 use miniquad::*;
 use std::{io::prelude::*, io::BufReader, io::BufWriter};

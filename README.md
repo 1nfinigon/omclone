@@ -239,7 +239,7 @@ Notes:
 -   The AdamW run had increasing L2 norm in weights immediately, but no change
     in L2 norm in the failed SGD runs. I think this points towards bad weight
     initializations.
-    -   https://www.cs.toronto.edu/~fritz/absps/momentum.pdf
+    -   <https://www.cs.toronto.edu/~fritz/absps/momentum.pdf>
     -   This suggests that 0.999 momentum is reasonable to try
 -   TODO: rerun 0.9 momentum experiment after I have better weights init.
 -   Run F clearly had too high of an lr rate; at batch 9k diverged to a spot
@@ -319,7 +319,7 @@ Currently at 172M:
     -   cycles=0..50 from_optimal=0..30
     -   cycles=0..30 from_optimal=0..10
 -   workers lowconf configuration: lowconf(knee = 0.3, sharp = 6., y-intercept = 0.9)
-    -   lowconf function is: https://graphtoy.com/?f1(x,t)=0.1&v1=false&f2(x,t)=6&v2=false&f3(x,t)=0.95&v3=false&f4(x,t)=clamp(log(1+exp(f2(x)*(1-(x/f1(x)))))%20*%20f3(t)/f2(t),0,1)&v4=true&f5(x,t)=&v5=true&f6(x,t)=&v6=false&grid=1&coords=0.12138102701428793,0.4379643401200462,0.9153322133263117
+    -   lowconf function is: [graph](https://graphtoy.com/?f1(x,t)=0.1&v1=false&f2(x,t)=6&v2=false&f3(x,t)=0.95&v3=false&f4(x,t)=clamp(log(1+exp(f2(x)*(1-(x/f1(x)))))%20*%20f3(t)/f2(t),0,1)&v4=true&f5(x,t)=&v5=true&f6(x,t)=&v6=false&grid=1&coords=0.12138102701428793,0.4379643401200462,0.9153322133263117)
     -   low confidence moves get played out (and training data generated) as if
         human-seeded
         -   this does mean that these don't train value ~at all, and they have a
@@ -370,7 +370,7 @@ Science-y investigation work:
 -   find/monitor dead neurons
 -   keep more notes/observations for experiments, be more scientific about this
 -   run same NN several times to get an idea of consistency
--   Batch size? https://arxiv.org/pdf/1812.06162
+-   Batch size? <https://arxiv.org/pdf/1812.06162>
 
 # idk
 

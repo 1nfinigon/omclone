@@ -1,3 +1,5 @@
+//! Non-NN-specific code for evaluating value/policy for leaves in parallel
+
 use crate::search_state::State;
 use crate::sim::BasicInstr;
 use eyre::{Context, OptionExt, Result};
