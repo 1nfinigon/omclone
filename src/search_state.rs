@@ -1,6 +1,14 @@
 use crate::nn;
 use crate::sim::*;
 
+/// The current state of the world at a given search ply. Can represent
+/// intermediate states where half of the arms in the current cycle have been
+/// assigned an instruction, but not all. The cycle is committed (the `world` is
+/// updated and collision detection performed) automatically when all arms have
+/// been assigned an instruction.
+///
+/// Also caches and updates `nn_features` incrementally to stay in sync with
+/// `world`.
 #[derive(Clone)]
 pub struct State {
     /// `true` if a previous update caused a crash -- in this case none of the
