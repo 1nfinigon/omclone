@@ -334,7 +334,35 @@ At 198M:
         and all the "hard" cases (e.g. long single arm sequence) were just
         getting lowconf'd and not ending up as training data
 
+At 398M:
+-   tweak workers lowconf configuration: lowconf(knee = 0.06, sharp = 6., y-intercept = 0.996)
+-   increase frequency of human policys to 0.3 if track OR piston instruction, 0.03 if nonempty, else 0.01
+-   tweak workers:
+    -   cycles=0..160 from_optimal=0..100 x 2
+    -   cycles=0..120 from_optimal=0..80 x 3
+    -   cycles=0..50 from_optimal=0..30 x 2
+-   increase root policy temperature from 1.03 to 1.5
+
+Observations at 398M:
+-   the network struggles to get out of basins, and ends up shuffling a lot in
+    this situation (just randomly grabbing/dropping, or rotating clockwise and
+    anticlockwise aimlessly). it sometimes gets stuck in an area where its value
+    is high but there's a "magic" move that moves it closer to the solution that
+    its policy can't see. the only force that currently exists to motivate it to
+    actually make progress is the `cycles_left` event horizon, which when it's
+    sufficiently far away is insufficient motivation for progress (any penalty
+    it has on the value gets drowned out in noise), and when it's too close, it
+    means that the network simply gives up because it knows it can't make it any
+    more.
+    -   need a better way to incentivise progress. some form of long term
+        planning / intermediate objectives is required
+
 # Future work
+
+Aux heads:
+-   cycles until next output (global? or per position? maybe both?)
+-   visualization of state in 1/2/4/8 steps in the future
+-   mask out invalid moves before softmaxing
 
 Technical/impl work:
 
