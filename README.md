@@ -11,12 +11,13 @@ $ cargo run train
 
 # Done
 
--   Simple MCTS solver (without transpositions), choosing actions for a single
+-   Parallel MCTS solver (without transpositions), choosing actions for a single
     arm at a time in order
 -   ResNet network architecture and basic training loop, with win-probability
     and policy heads
     -   Input features use sparse tensors for evaluation and training, to save
         bandwidth/space
+    -   Batched evaluation of multiple positions at once
 -   Seed-solver that plays games starting from a human "seed solution",
     following human moves until a few moves from the end, and then uses the MCTS
     solver to play out the rest
@@ -360,6 +361,15 @@ Observations at 398M:
         state, predict value/policy of trying to achieve this state, as well as
         predicted # cycles?
 
+Between 398M and 413M I accidentally killed the gen-train process so it's been
+training on the same window of 500k games for a few hours. Observations: =
+Policy loss drops sharply, as expected
+-   L2 loss rises sharply, which is an interesting result
+
+I'll keep an eye on it, but won't roll back to 398M, or deleting the games or
+11k training samples played with this net. (Training sample IDs from
+11032997..11044227)
+
 # Future work
 
 Aux heads:
@@ -369,6 +379,8 @@ Aux heads:
 
 Technical/impl work:
 
+-   Tree-search: should ignore invalid instructions, not treat them as game-end.
+    This should make the search more efficient.
 -   Seed-solver: Generate solutions that have low cycles-left but still fail
     -   ...because the layout is bad
     -   ...because the layout is good but there's just not enough cycles left
