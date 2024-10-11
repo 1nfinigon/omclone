@@ -43,7 +43,7 @@ pub type Pos = Vector2<i32>;
 
 /// A basic instruction that can be executed in one cycle (i.e. no Repeat,
 /// Reset, Noop)
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Primitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Primitive, enum_iterator::Sequence)]
 #[repr(u8)]
 pub enum BasicInstr {
     Empty = 0,
@@ -60,14 +60,7 @@ pub enum BasicInstr {
 }
 
 impl BasicInstr {
-    pub const N_TYPES: usize = 11;
-}
-
-#[test]
-fn basic_instr_len() {
-    use num_traits::FromPrimitive;
-    assert!(BasicInstr::from_u8(BasicInstr::N_TYPES.try_into().unwrap()).is_none());
-    assert!(BasicInstr::from_u8((BasicInstr::N_TYPES - 1).try_into().unwrap()).is_some());
+    pub const N_TYPES: usize = enum_iterator::cardinality::<Self>();
 }
 
 impl BasicInstr {
@@ -503,12 +496,14 @@ pub fn rotate_around(pos: Pos, angle: Rot, pivot: Pos) -> Pos {
 /// aka "bestagon" metric
 pub fn hex_distance(pos: Pos) -> u32 {
     let xy = pos.x + pos.y;
-    [pos.x.abs(), pos.y.abs(), xy.abs()]
-        .into_iter()
-        .max()
-        .unwrap()
-        .try_into()
-        .unwrap()
+    [
+        pos.x.unsigned_abs(),
+        pos.y.unsigned_abs(),
+        xy.unsigned_abs(),
+    ]
+    .into_iter()
+    .max()
+    .unwrap()
 }
 
 #[test]
