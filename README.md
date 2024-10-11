@@ -356,6 +356,9 @@ Observations at 398M:
     more.
     -   need a better way to incentivise progress. some form of long term
         planning / intermediate objectives is required
+    -   can I train the network to, given a current state and a desired future
+        state, predict value/policy of trying to achieve this state, as well as
+        predicted # cycles?
 
 # Future work
 
