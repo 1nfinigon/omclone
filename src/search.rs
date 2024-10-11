@@ -1,12 +1,12 @@
 //! Parallel MCTS search implementation
 
 use crate::eval::AsyncEvaluator;
-use crate::nonnan::NonNan;
 use crate::search_state::State;
 use crate::sim::BasicInstr;
 use atomic_float::AtomicF32;
 use eyre::Result;
 use once_cell::sync::OnceCell;
+use ordered_float::NotNan;
 use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 
 /// How many virtual visits should an in-progress thread count for (in an
@@ -182,7 +182,7 @@ impl NodeData {
         &self,
         child_id: ChildId,
         default_value_for_unexpanded_child: f32,
-    ) -> NonNan {
+    ) -> NotNan<f32> {
         let child = self.get_child(child_id);
         let policy = self.policy[child_id.0 as usize];
         let child_value = child
@@ -192,7 +192,7 @@ impl NodeData {
             });
         let visits = self.visits::<V>();
         let prior = policy * (visits as f32).sqrt() / (1. + child.visits::<V>() as f32);
-        NonNan::new(child_value + 1.4 * prior).unwrap()
+        NotNan::new(child_value + 1.4 * prior).unwrap()
     }
 
     fn incr_visits_and_utility(&self, utility: f32) {
@@ -475,7 +475,7 @@ impl TreeSearch {
 pub struct UpdateWithStats {
     pub instr: BasicInstr,
     pub is_terminal: bool,
-    pub value: NonNan,
+    pub value: NotNan<f32>,
     pub visits: u32,
 }
 
@@ -517,7 +517,7 @@ impl TreeSearch {
                 UpdateWithStats {
                     instr,
                     is_terminal: child.data().is_some_and(|child| child.is_terminal()),
-                    value: NonNan::new(
+                    value: NotNan::new(
                         child
                             .data()
                             .map_or(root_node_data.value::<AssertZeroVirtualLoss>(), |child| {

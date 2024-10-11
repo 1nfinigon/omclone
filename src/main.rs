@@ -28,7 +28,6 @@
 //! </details>
 
 mod check;
-mod nonnan;
 mod parser;
 mod revgen;
 mod sim;
