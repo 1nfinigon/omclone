@@ -370,7 +370,30 @@ I'll keep an eye on it, but won't roll back to 398M, or deleting the games or
 11k training samples played with this net. (Training sample IDs from
 11032997..11044227)
 
-# Future work
+# Review of experiments to date (2024-10-20)
+
+Problems identified:
+
+-   not sure whether the network is actually getting better at the highest-level
+    objective, which is solving puzzles end-to-end
+    -   solution: write seed_evaluator, to plot highest-level objective
+        performance over the course of the previously conducted training
+-   as training progressed and as I manually tweaked problem-generation
+    parameters, I didn't keep the "difficulty" constant, so the average game outcome
+    value swung wildly between 0 and 1
+    -   solution: ???
+-   progress in learning tactics longer than ~4-5 moves slowed down
+    -   solution: ???
+-   not sure how the network actually works under the hood, how well the layers
+    are doing their jobs, how and how effectively the temporal history is being
+    used, which direction to tweak parameters
+    -   solution: write a graphical visualiser of NN
+        inputs/intermediates/outputs
+-   it seems the network never grokked how to use extend/retract/track
+    instructions
+    -   solution: ???
+
+# Backlog of future work
 
 Aux heads:
 -   cycles until next output (global? or per position? maybe both?)
@@ -414,6 +437,7 @@ Science-y investigation work:
 -   keep more notes/observations for experiments, be more scientific about this
 -   run same NN several times to get an idea of consistency
 -   Batch size? <https://arxiv.org/pdf/1812.06162>
+-   Auxiliary/adversarial NN training a diffusion model for generating examples that maximise "uncertainty"
 
 # idk
 
