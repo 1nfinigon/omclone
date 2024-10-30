@@ -1,6 +1,10 @@
 //! Graphical simulator and tape editor
 
-use crate::{parser, render_library::GFXPos, render_sim::*, sim::*, utils};
+use crate::parser;
+use crate::render_library::GFXPos;
+use crate::render_sim::*;
+use crate::sim::*;
+use crate::utils;
 use miniquad::*;
 use std::{io::prelude::*, io::BufReader, io::BufWriter};
 
@@ -413,6 +417,7 @@ impl EventHandler for MyMiniquadApp {
             let float_world = &loaded.float_world;
             self.render_data.draw(
                 ctx,
+                window::screen_size(),
                 &loaded.camera,
                 &loaded.tracks,
                 loaded.show_area,

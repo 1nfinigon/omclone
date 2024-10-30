@@ -440,8 +440,14 @@ fn atom_color(t: AtomType) -> [f32; 3] {
 }
 
 impl RenderDataBase {
-    fn draw_atoms(&self, ctx: &mut Context, atoms: &[FloatAtom], camera: &CameraSetup) {
-        let scale = camera.scale(window::screen_size());
+    fn draw_atoms(
+        &self,
+        ctx: &mut Context,
+        screen_size: (f32, f32),
+        atoms: &[FloatAtom],
+        camera: &CameraSetup,
+    ) {
+        let scale = camera.scale(screen_size);
         let world_offset = camera.offset;
         ctx.apply_pipeline(&self.pipeline_textured);
 
@@ -506,13 +512,14 @@ impl RenderDataBase {
     pub fn draw(
         &self,
         ctx: &mut Context,
+        screen_size: (f32, f32),
         camera: &CameraSetup,
         tracks: &TrackBindings,
         show_area: bool,
         world: &World,
         float_world: &FloatWorld,
     ) {
-        let scale = camera.scale(window::screen_size());
+        let scale = camera.scale(screen_size);
         let world_offset = camera.offset;
 
         //Draw input/output atoms
@@ -527,7 +534,7 @@ impl RenderDataBase {
                     for atom in pattern {
                         temp_atoms_vec.push(atom.into());
                     }
-                    self.draw_atoms(ctx, &temp_atoms_vec, camera);
+                    self.draw_atoms(ctx, screen_size, &temp_atoms_vec, camera);
                 }
                 _ => continue,
             };
@@ -662,7 +669,7 @@ impl RenderDataBase {
 
         //Draw atoms
         let atoms_slice = &float_world.atoms_xy[..];
-        self.draw_atoms(ctx, atoms_slice, camera);
+        self.draw_atoms(ctx, screen_size, atoms_slice, camera);
 
         //Draw arms
         ctx.apply_pipeline(&self.pipeline);
