@@ -1090,6 +1090,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "sapp-jsutils",
+ "shlex",
  "simple-eyre",
  "slotmap",
  "smallvec",

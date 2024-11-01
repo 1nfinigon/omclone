@@ -364,7 +364,7 @@ fn run_one_epoch<F: FnMut() -> Result<Box<dyn eval::AsyncEvaluator>>>(
     let mut solves_since_model_reload = 0;
     let mut evaluator = make_evaluator()?;
     for solution_fpath in seed_solution_paths.iter() {
-        if let Some(seed_solution) = utils::verify_solution(solution_fpath, puzzle_map) {
+        if let Ok((Some(_), seed_solution)) = utils::get_solution(solution_fpath, puzzle_map) {
             let (puzzle_fpath, seed_puzzle) = puzzle_map.get(&seed_solution.puzzle_name).unwrap();
 
             solve_one_puzzle_seeded(

@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use eyre::Result;
+use eyre::{eyre, Context, Result};
 
 pub const PUZZLE_DIR: &str = "test/puzzle";
 
@@ -68,24 +68,14 @@ pub fn read_file_suffix_recurse<F: FnMut(PathBuf)>(
     }
 }
 
-pub fn verify_solution(
+pub fn get_solution(
     fpath: impl AsRef<Path>,
     puzzle_map: &PuzzleMap,
-) -> Option<parser::FullSolution> {
-    let f_sol = File::open(fpath.as_ref()).unwrap();
-    let sol_maybe = parser::parse_solution(&mut BufReader::new(f_sol));
-    let sol = match sol_maybe {
-        Err(e) => {
-            println!("Failed to parse solution {:?}: {}", fpath.as_ref(), e);
-            return None;
-        }
-        Ok(s) => s,
-    };
-    if !puzzle_map.contains_key(&sol.puzzle_name) {
-        /*println!("Can't find puzzle {}",sol.puzzle_name);*/
-        return None;
-    }
-    Some(sol)
+) -> Result<(Option<&parser::FullPuzzle>, parser::FullSolution)> {
+    let f_sol = File::open(fpath.as_ref())?;
+    let sol = parser::parse_solution(&mut BufReader::new(f_sol))
+        .wrap_err(eyre!("Failed to parse solution {:?}", fpath.as_ref()))?;
+    Ok((puzzle_map.get(&sol.puzzle_name).map(|(_, puz)| puz), sol))
 }
 
 pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
@@ -95,7 +85,7 @@ pub fn read_solution_recurse<F: FnMut(PathBuf, parser::FullSolution)>(
 ) {
     read_file_suffix_recurse(
         &mut |fpath: PathBuf| {
-            if let Some(sol) = verify_solution(&fpath, puzzle_map) {
+            if let Ok((Some(_), sol)) = get_solution(&fpath, puzzle_map) {
                 cb(fpath, sol)
             }
         },

@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use bitflags::bitflags;
 bitflags! {
     #[repr(transparent)]
+    #[derive(Clone, Copy)]
     pub struct AllowedParts: u64 {
         const ALLOW_ARM                  = 1<<0 ;
         const ALLOW_MULTIARM_EQUILIBRIUM = 1<<1 ;
@@ -493,6 +494,7 @@ pub fn write_solution(f: &mut impl Write, sol: &FullSolution) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
 pub struct FullPuzzle {
     pub puzzle_name: String,
     pub creator_id: u64,

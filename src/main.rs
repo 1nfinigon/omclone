@@ -54,11 +54,11 @@ mod seed_solver;
 mod tb_trim;
 
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
-mod export_png;
-#[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod render_library;
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod render_sim;
+#[cfg(any(feature = "editor_ui", feature = "display_ui",))]
+mod repl;
 #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
 mod ui;
 
@@ -112,7 +112,7 @@ fn main() -> Result<()> {
         Some("revgen") => revgen::main(),
 
         #[cfg(any(feature = "editor_ui", feature = "display_ui",))]
-        Some("export-png") => export_png::main(),
+        Some("repl") => repl::main(),
 
         Some(subcommand) => Err(eyre!("unsupported subcommand {}", subcommand)),
 
