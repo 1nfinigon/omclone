@@ -76,8 +76,41 @@ impl ReplState {
     fn cmd_render<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
         let world = &self.world.as_ref().ok_or_eyre("no world loaded")?.world;
 
-        let width = 256u32;
-        let height = 256u32;
+        let mut width = 256u32;
+        let mut height = 256u32;
+        let mut output_filename = "output.png".to_string();
+
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_ref() {
+                "--filename" => {
+                    output_filename = args
+                        .next()
+                        .ok_or_eyre("--output missing filename")?
+                        .as_ref()
+                        .to_owned();
+                }
+                "--size" => {
+                    let size_str: Vec<_> = args
+                        .next()
+                        .ok_or_eyre("--output missing filename")?
+                        .as_ref()
+                        .split('x')
+                        .collect();
+                    let (w, h) = if let [w_str, h_str] = &size_str[..] {
+                        Ok((w_str.parse::<u32>()?, h_str.parse::<u32>()?))
+                    } else {
+                        Err(eyre!("bad size string format, expected wxh"))
+                    }?;
+                    width = w;
+                    height = h;
+                }
+                arg => {
+                    return Err(eyre!("unknown arg {}", arg));
+                }
+            }
+        }
+
         let screen_size = (width as f32, height as f32);
 
         let color_img = self.mq_ctx.new_render_texture(TextureParams {
@@ -113,14 +146,15 @@ impl ReplState {
 
         self.mq_ctx.end_render_pass();
 
-        let mut color_img_bytes = vec![0u8; (width * height * 4).try_into().unwrap()];
+        let mut color_img_bytes = vec![0u8; (width * height * 4).try_into()?];
         self.mq_ctx
             .texture_read_pixels(color_img, &mut color_img_bytes);
 
-        let color_img = image::RgbaImage::from_raw(width, height, color_img_bytes).unwrap();
+        let color_img = image::RgbaImage::from_raw(width, height, color_img_bytes)
+            .ok_or_eyre("failed creating image from raw data")?;
         let mut color_img = image::DynamicImage::ImageRgba8(color_img);
         color_img.apply_orientation(image::metadata::Orientation::FlipVertical);
-        color_img.save("output.png").unwrap();
+        color_img.save(output_filename)?;
 
         Ok(())
     }
