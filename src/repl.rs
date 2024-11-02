@@ -1,15 +1,13 @@
 use std::fs::File;
-use std::io::BufReader;
-use std::io::IsTerminal;
-use std::io::Write;
-use std::sync::mpsc;
-use std::sync::Arc;
+use std::io::{BufReader, IsTerminal, Write};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use crate::parser;
 use crate::render_sim;
 use crate::sim;
 use crate::utils;
+
 use eyre::{eyre, OptionExt, Result, WrapErr};
 use miniquad::*;
 use once_cell::sync::OnceCell;
