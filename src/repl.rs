@@ -1,3 +1,5 @@
+//! REPL for scripting the sim. Primarily useful for exporting to PNG
+
 use std::fs::File;
 use std::io::{BufReader, IsTerminal, Write};
 use std::sync::{mpsc, Arc};
