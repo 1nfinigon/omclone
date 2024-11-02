@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::BufReader;
+use std::io::IsTerminal;
 use std::io::Write;
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -32,15 +33,19 @@ impl Handler {
             let mut stdout = std::io::stdout();
             loop {
                 let mut buf = String::new();
-                write!(stdout, "> ")?;
-                stdout.flush()?;
+                if stdin.is_terminal() {
+                    write!(stdout, "> ")?;
+                    stdout.flush()?;
+                }
                 if stdin.read_line(&mut buf)? == 0 {
                     break Ok(());
                 }
 
                 let complete = Arc::new(OnceCell::new());
                 stdin_tx.send((buf, complete.clone()))?;
-                complete.wait();
+                if stdin.is_terminal() {
+                    complete.wait();
+                }
             }
         });
 
@@ -208,15 +213,20 @@ impl Handler {
 
 impl EventHandler for Handler {
     fn update(&mut self) {
-        match self.stdin_rx.try_recv() {
-            Ok((buf, complete)) => {
-                self.cmd(&buf).unwrap();
-                complete.set(()).unwrap();
-            }
-            Err(mpsc::TryRecvError::Empty) => (),
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.stdin_thread.take().map(|thread| thread.join());
-                window::order_quit();
+        loop {
+            match self.stdin_rx.try_recv() {
+                Ok((buf, complete)) => {
+                    self.cmd(&buf).unwrap();
+                    complete.set(()).unwrap();
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    break;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.stdin_thread.take().map(|thread| thread.join());
+                    window::order_quit();
+                    return;
+                }
             }
         }
     }
