@@ -1,6 +1,9 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Write;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 
 use crate::parser;
 use crate::render_sim;
@@ -8,23 +11,47 @@ use crate::sim;
 use crate::utils;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 use miniquad::*;
+use once_cell::sync::OnceCell;
 
-struct ReplState {
+struct Handler {
     mq_ctx: Box<dyn RenderingBackend>,
     puzzle_map: Option<utils::PuzzleMap>,
     puzzle: Option<parser::FullPuzzle>,
     solution: Option<parser::FullSolution>,
     world: Option<sim::WorldWithTapes>,
+
+    stdin_thread: Option<thread::JoinHandle<Result<()>>>,
+    stdin_rx: mpsc::Receiver<(String, Arc<OnceCell<()>>)>,
 }
 
-impl ReplState {
+impl Handler {
     fn new(mq_ctx: Box<dyn RenderingBackend>) -> Self {
+        let (stdin_tx, stdin_rx) = mpsc::sync_channel(0);
+        let stdin_thread = thread::spawn(move || {
+            let stdin = std::io::stdin();
+            let mut stdout = std::io::stdout();
+            loop {
+                let mut buf = String::new();
+                write!(stdout, "> ")?;
+                stdout.flush()?;
+                if stdin.read_line(&mut buf)? == 0 {
+                    break Ok(());
+                }
+
+                let complete = Arc::new(OnceCell::new());
+                stdin_tx.send((buf, complete.clone()))?;
+                complete.wait();
+            }
+        });
+
         Self {
             mq_ctx,
             puzzle_map: None,
             puzzle: None,
             solution: None,
             world: None,
+            stdin_thread: Some(stdin_thread),
+            stdin_rx,
         }
     }
 
@@ -159,40 +186,41 @@ impl ReplState {
         Ok(())
     }
 
-    fn run(&mut self) -> Result<()> {
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        loop {
-            let mut buf = String::new();
-            write!(stdout, "> ")?;
-            stdout.flush()?;
-            if stdin.read_line(&mut buf)? == 0 {
-                break Ok(());
-            }
-
-            let mut shlex = shlex::Shlex::new(&buf);
-            if let Some(cmd) = shlex.next() {
-                let args: Vec<_> = shlex.collect();
-                let result = match cmd.as_ref() {
-                    "load" => self.cmd_load(&args),
-                    "render" => self.cmd_render(&args),
-                    _ => Err(eyre!("unknown command {}", cmd)),
-                };
-                match result {
-                    Ok(()) => (),
-                    Err(e) => {
-                        eprintln!("{:#}", e);
-                    }
+    fn cmd(&mut self, input: &str) -> Result<()> {
+        let mut shlex = shlex::Shlex::new(input);
+        if let Some(cmd) = shlex.next() {
+            let args: Vec<_> = shlex.collect();
+            let result = match cmd.as_ref() {
+                "load" => self.cmd_load(&args),
+                "render" => self.cmd_render(&args),
+                _ => Err(eyre!("unknown command {}", cmd)),
+            };
+            match result {
+                Ok(()) => (),
+                Err(e) => {
+                    eprintln!("{:#}", e);
                 }
             }
         }
+        Ok(())
     }
 }
 
-struct DummyHandler;
+impl EventHandler for Handler {
+    fn update(&mut self) {
+        match self.stdin_rx.try_recv() {
+            Ok((buf, complete)) => {
+                self.cmd(&buf).unwrap();
+                complete.set(()).unwrap();
+            }
+            Err(mpsc::TryRecvError::Empty) => (),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.stdin_thread.take().map(|thread| thread.join());
+                window::order_quit();
+            }
+        }
+    }
 
-impl EventHandler for DummyHandler {
-    fn update(&mut self) {}
     fn draw(&mut self) {}
 }
 
@@ -206,14 +234,17 @@ pub fn main() -> Result<()> {
             ..Default::default()
         },
         move || {
-            let mq_ctx = window::new_rendering_backend();
-            let mut repl_state = ReplState::new(mq_ctx);
+            #[cfg(target_os = "macos")]
+            {
+                use objc::{runtime::*, *};
+                unsafe {
+                    let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                    let ns_application_activation_policy_prohibited = 2;
+                    let () = msg_send![ns_app, setActivationPolicy: ns_application_activation_policy_prohibited];
+                }
+            }
 
-            repl_state.run().unwrap();
-
-            window::order_quit();
-
-            Box::new(DummyHandler)
+            Box::new(Handler::new(window::new_rendering_backend()))
         },
     );
 

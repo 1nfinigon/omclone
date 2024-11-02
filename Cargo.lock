@@ -1082,6 +1082,7 @@ dependencies = [
  "nalgebra",
  "num-traits",
  "nvml-wrapper",
+ "objc",
  "once_cell",
  "ordered-float",
  "rand",
