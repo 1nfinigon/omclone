@@ -284,11 +284,7 @@ impl CameraSetup {
         let offset = [-(lowx + highx) / 2., -(lowy + highy) / 2.];
         let world_width_scale = screen_size.0 / 1000. * 2. / (highx - lowx);
         let world_height_scale = screen_size.1 / 1000. * 2. / (highy - lowy);
-        let scale_base = if world_width_scale < world_height_scale {
-            world_width_scale
-        } else {
-            world_height_scale
-        };
+        let scale_base = world_width_scale.min(world_height_scale);
         println!(
             "camera debug: screen {:?}, scales {:?},{:?} wh {:?},{:?}",
             screen_size,
