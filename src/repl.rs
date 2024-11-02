@@ -192,11 +192,15 @@ impl Handler {
     fn cmd(&mut self, input: &str) -> Result<()> {
         let mut shlex = shlex::Shlex::new(input);
         if let Some(cmd) = shlex.next() {
-            let args: Vec<_> = shlex.collect();
-            let result = match cmd.as_ref() {
-                "load" => self.cmd_load(&args),
-                "render" => self.cmd_render(&args),
-                _ => Err(eyre!("unknown command {}", cmd)),
+            let args: Vec<_> = shlex.by_ref().collect();
+            let result = if shlex.had_error {
+                Err(eyre!("bad syntax (unclosed quote?)"))
+            } else {
+                match cmd.as_ref() {
+                    "load" => self.cmd_load(&args),
+                    "render" => self.cmd_render(&args),
+                    _ => Err(eyre!("unknown command {}", cmd)),
+                }
             };
             match result {
                 Ok(()) => (),
