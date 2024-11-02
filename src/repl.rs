@@ -8,7 +8,7 @@ use crate::render_sim;
 use crate::sim;
 use crate::utils;
 
-use eyre::{eyre, OptionExt, Result, WrapErr};
+use eyre::{ensure, eyre, OptionExt, Result, WrapErr};
 use miniquad::*;
 use once_cell::sync::OnceCell;
 
@@ -66,11 +66,19 @@ impl Handler {
         })
     }
 
+    fn reload(&mut self) -> Result<()> {
+        let init = parser::puzzle_prep(
+            self.puzzle.as_ref().ok_or_eyre("puzzle not loaded")?,
+            self.solution.as_ref().ok_or_eyre("solution not loaded")?,
+        )?;
+        self.world = Some(sim::WorldWithTapes::setup_sim(&init)?);
+        Ok(())
+    }
+
     fn load(&mut self, puzzle: parser::FullPuzzle, solution: parser::FullSolution) -> Result<()> {
-        let init = parser::puzzle_prep(&puzzle, &solution)?;
         self.puzzle = Some(puzzle);
         self.solution = Some(solution);
-        self.world = Some(sim::WorldWithTapes::setup_sim(&init)?);
+        self.reload()?;
         Ok(())
     }
 
@@ -100,6 +108,31 @@ impl Handler {
                 self.load(puzzle, solution)
             }
             _ => Err(eyre!("bad args to load")),
+        }
+    }
+
+    fn cmd_cycle<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
+        match args {
+            [cycle_string] => {
+                let world = self.world.as_ref().ok_or_eyre("world not loaded")?;
+                let cycle = cycle_string.as_ref().parse::<u64>()?;
+                if world.world.cycle > cycle {
+                    self.reload()?;
+                }
+
+                let world = self.world.as_mut().ok_or_eyre("world not loaded")?;
+                ensure!(world.world.cycle <= cycle);
+                let mut float_world = sim::FloatWorld::new();
+                let mut motion = sim::WorldStepInfo::new();
+                while world.world.cycle < cycle {
+                    world.run_step(false, &mut motion, &mut float_world)?;
+                }
+
+                ensure!(world.world.cycle == cycle);
+
+                Ok(())
+            }
+            _ => Err(eyre!("bad args to cycle")),
         }
     }
 
@@ -199,6 +232,7 @@ impl Handler {
                 match cmd.as_ref() {
                     "load" => self.cmd_load(&args),
                     "render" => self.cmd_render(&args),
+                    "cycle" => self.cmd_cycle(&args),
                     _ => Err(eyre!("unknown command {}", cmd)),
                 }
             };
