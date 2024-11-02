@@ -269,11 +269,12 @@ impl CameraSetup {
                 f32::NEG_INFINITY,
             ),
             |(lowx, lowy, highx, highy), [thisx, thisy]| {
-                let new_lowx = if thisx < lowx { thisx } else { lowx };
-                let new_highx = if thisx > highx { thisx } else { highx };
-                let new_lowy = if thisy < lowy { thisy } else { lowy };
-                let new_highy = if thisy > highy { thisy } else { highy };
-                (new_lowx, new_lowy, new_highx, new_highy)
+                (
+                    lowx.min(thisx),
+                    lowy.min(thisy),
+                    highx.max(thisx),
+                    highy.max(thisy),
+                )
             },
         );
         const BORDER: f32 = 6.;
