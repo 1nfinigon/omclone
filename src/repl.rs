@@ -35,26 +35,29 @@ struct Handler {
 impl Handler {
     fn new(mq_ctx: Box<dyn RenderingBackend>) -> Self {
         let (stdin_tx, stdin_rx) = mpsc::sync_channel(0);
-        let stdin_thread = thread::spawn(move || {
-            let stdin = std::io::stdin();
-            let mut stdout = std::io::stdout();
-            loop {
-                let mut buf = String::new();
-                if stdin.is_terminal() {
-                    write!(stdout, "omclone> ")?;
-                    stdout.flush()?;
-                }
-                if stdin.read_line(&mut buf)? == 0 {
-                    break Ok(());
-                }
+        let stdin_thread = thread::Builder::new()
+            .name("stdin handler".to_string())
+            .spawn(move || {
+                let stdin = std::io::stdin();
+                let mut stdout = std::io::stdout();
+                loop {
+                    let mut buf = String::new();
+                    if stdin.is_terminal() {
+                        write!(stdout, "omclone> ")?;
+                        stdout.flush()?;
+                    }
+                    if stdin.read_line(&mut buf)? == 0 {
+                        break Ok(());
+                    }
 
-                let complete = Arc::new(OnceCell::new());
-                stdin_tx.send((buf, complete.clone()))?;
-                if stdin.is_terminal() {
-                    complete.wait();
+                    let complete = Arc::new(OnceCell::new());
+                    stdin_tx.send((buf, complete.clone()))?;
+                    if stdin.is_terminal() {
+                        complete.wait();
+                    }
                 }
-            }
-        });
+            })
+            .expect("couldn't spawn stdin thread");
 
         Self {
             mq_ctx,
@@ -421,15 +424,12 @@ impl Handler {
 impl EventHandler for Handler {
     fn update(&mut self) {
         loop {
-            match self.stdin_rx.try_recv() {
+            match self.stdin_rx.recv() {
                 Ok((buf, complete)) => {
                     self.cmd(&buf).unwrap();
                     complete.set(()).unwrap();
                 }
-                Err(mpsc::TryRecvError::Empty) => {
-                    break;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
+                Err(mpsc::RecvError) => {
                     self.stdin_thread.take().map(|thread| thread.join());
                     window::order_quit();
                     return;
