@@ -8,6 +8,7 @@ src/default_paths.txt
 
 pytorch/model.pt
 **/__pycache__
+**/.ipynb_checkpoints
 
 /models
 /runs

@@ -39,7 +39,7 @@ impl Handler {
             loop {
                 let mut buf = String::new();
                 if stdin.is_terminal() {
-                    write!(stdout, "> ")?;
+                    write!(stdout, "omclone> ")?;
                     stdout.flush()?;
                 }
                 if stdin.read_line(&mut buf)? == 0 {
