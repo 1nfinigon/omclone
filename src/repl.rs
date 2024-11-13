@@ -7,6 +7,8 @@ use std::thread;
 
 use crate::parser;
 use crate::render_sim;
+#[cfg(feature = "search")]
+use crate::search_state;
 use crate::sim;
 use crate::utils;
 
@@ -20,6 +22,9 @@ struct Handler {
     puzzle: Option<parser::FullPuzzle>,
     solution: Option<parser::FullSolution>,
     world: Option<sim::WorldWithTapes>,
+
+    #[cfg(feature = "search")]
+    search_state: Option<search_state::State>,
 
     stdin_thread: Option<thread::JoinHandle<Result<()>>>,
     stdin_rx: mpsc::Receiver<(String, Arc<OnceCell<()>>)>,
@@ -55,6 +60,8 @@ impl Handler {
             puzzle: None,
             solution: None,
             world: None,
+            #[cfg(feature = "search")]
+            search_state: None,
             stdin_thread: Some(stdin_thread),
             stdin_rx,
         }
@@ -69,11 +76,23 @@ impl Handler {
     }
 
     fn reload(&mut self) -> Result<()> {
-        let init = parser::puzzle_prep(
-            self.puzzle.as_ref().ok_or_eyre("puzzle not loaded")?,
-            self.solution.as_ref().ok_or_eyre("solution not loaded")?,
-        )?;
-        self.world = Some(sim::WorldWithTapes::setup_sim(&init)?);
+        let puzzle = self.puzzle.as_ref().ok_or_eyre("puzzle not loaded")?;
+        let solution = self.solution.as_ref().ok_or_eyre("solution not loaded")?;
+        let init = parser::puzzle_prep(puzzle, solution)?;
+        let world = sim::WorldWithTapes::setup_sim(&init)?;
+        self.world = Some(world.clone());
+
+        #[cfg(feature = "search")]
+        {
+            self.search_state = Some(search_state::State::new(
+                world.world,
+                solution
+                    .stats
+                    .as_ref()
+                    .and_then(|stats| stats.cycles.try_into().ok())
+                    .unwrap_or(u64::MAX),
+            ));
+        }
         Ok(())
     }
 
@@ -123,14 +142,27 @@ impl Handler {
                 }
 
                 let world = self.world.as_mut().ok_or_eyre("world not loaded")?;
+                #[cfg(feature = "search")]
+                let search_state = self.search_state.as_mut().ok_or_eyre("world not loaded")?;
+
                 ensure!(world.world.cycle <= cycle);
                 let mut float_world = sim::FloatWorld::new();
                 let mut motion = sim::WorldStepInfo::new();
                 while world.world.cycle < cycle {
+                    #[cfg(feature = "search")]
+                    for instr in world.get_instructions() {
+                        search_state.update(instr);
+                    }
+
                     world.run_step(false, &mut motion, &mut float_world)?;
                 }
 
                 ensure!(world.world.cycle == cycle);
+                #[cfg(feature = "search")]
+                {
+                    ensure!(search_state.world.cycle == cycle);
+                    ensure!(!search_state.errored);
+                }
 
                 Ok(())
             }
@@ -224,6 +256,31 @@ impl Handler {
         Ok(())
     }
 
+    #[cfg(feature = "torch")]
+    fn cmd_nn_save_input<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
+        use crate::{eval, nn};
+
+        let tracy_client = tracy_client::Client::start();
+
+        let search_state = self.search_state.as_ref().ok_or_eyre("world not loaded")?;
+
+        match args {
+            [output_filename] => {
+                let model_input_tensors = nn::ModelInputTensors::from_eval_input_batched(
+                    &[eval::EvalInput {
+                        state: search_state.clone(),
+                        is_root: true,
+                    }],
+                    (tch::Kind::Float, tch::Device::Cpu),
+                    tracy_client,
+                )?;
+                model_input_tensors.save(output_filename.as_ref())?;
+                Ok(())
+            }
+            _ => Err(eyre!("expected filename")),
+        }
+    }
+
     fn cmd(&mut self, input: &str) -> Result<()> {
         let mut shlex = shlex::Shlex::new(input);
         if let Some(cmd) = shlex.next() {
@@ -235,6 +292,8 @@ impl Handler {
                     "load" => self.cmd_load(&args),
                     "render" => self.cmd_render(&args),
                     "cycle" => self.cmd_cycle(&args),
+                    #[cfg(feature = "torch")]
+                    "nn.save_input" => self.cmd_nn_save_input(&args),
                     _ => Err(eyre!("unknown command {}", cmd)),
                 }
             };

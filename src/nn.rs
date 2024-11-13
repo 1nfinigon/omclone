@@ -1031,6 +1031,22 @@ impl ModelInputTensors {
             policy_softmax_temperature,
         })
     }
+
+    pub fn save(&self, output_filename: impl AsRef<std::path::Path>) -> Result<()> {
+        tch::Tensor::write_npz(
+            &[
+                ("spatial", &self.spatial),
+                ("spatiotemporal", &self.spatiotemporal),
+                ("temporal", &self.temporal),
+                (
+                    "policy_softmax_temperature",
+                    &self.policy_softmax_temperature,
+                ),
+            ],
+            output_filename,
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "torch")]
