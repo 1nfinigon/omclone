@@ -126,6 +126,7 @@ enum TextureId {
     BondRed,
     BondWhite,
     BondYellow,
+    Origin,
 }
 
 impl TextureId {
@@ -151,6 +152,7 @@ impl TextureId {
             Self::BondRed => include_bytes!("../images/BondRed.png"),
             Self::BondWhite => include_bytes!("../images/BondWhite.png"),
             Self::BondYellow => include_bytes!("../images/BondYellow.png"),
+            Self::Origin => include_bytes!("../images/Origin.png"),
         }
     }
 }
@@ -518,7 +520,20 @@ impl RenderDataBase {
         let scale = camera.scale(screen_size);
         let world_offset = camera.offset;
 
-        //Draw input/output atoms
+        // Draw the origin
+        {
+            ctx.apply_pipeline(&self.pipeline_textured);
+            ctx.apply_bindings(&self.shapes.texture_bindings[&TextureId::Origin]);
+            ctx.apply_uniforms(UniformsSource::table(&UvUniforms {
+                offset: [0., 0.],
+                world_offset,
+                angle: 0.,
+                scale,
+            }));
+            ctx.draw(0, 6, 1);
+        }
+
+        // Draw input/output atoms
         let mut temp_atoms_vec: Vec<FloatAtom> = Vec::new();
         for glyph in world.glyphs.iter() {
             use GlyphType::*;
@@ -535,7 +550,8 @@ impl RenderDataBase {
                 _ => continue,
             };
         }
-        //Draw the Hex grid
+
+        // Draw the Hex grid
         if camera.scale_base > 5. {
             let (inv_scale_x, inv_scale_y) = (1. / scale.0, 1. / scale.1);
             let xc = (-world_offset[0] / 2. - 0.25).fract();
@@ -563,7 +579,8 @@ impl RenderDataBase {
             }));
             ctx.draw(0, 6, 1);
         }
-        //Draw glyphs (including half-transparent cover for input/outputs)
+
+        // Draw glyphs (including half-transparent cover for input/outputs)
         ctx.apply_pipeline(&self.pipeline_textured);
         for glyph in world.glyphs.iter() {
             let offset = pos_to_xy(&glyph.pos);
@@ -625,7 +642,8 @@ impl RenderDataBase {
             }));
             ctx.draw(0, 6, 1);
         }
-        //Draw conduit numbers
+
+        // Draw conduit numbers
         self.font.set_pipeline(ctx);
         for glyph in world.glyphs.iter() {
             if let GlyphType::Conduit { id, .. } = glyph.glyph_type {
@@ -635,7 +653,8 @@ impl RenderDataBase {
                     .render_text_centered(ctx, &string, offset, world_offset, scale);
             }
         }
-        //draw area cover
+
+        // Draw area cover
         if show_area {
             ctx.apply_pipeline(&self.pipeline_textured);
             ctx.apply_bindings(&self.shapes.texture_bindings[&TextureId::ShadeAreaFill]);
@@ -651,7 +670,7 @@ impl RenderDataBase {
             }
         }
 
-        //Draw tracks
+        // Draw tracks
         ctx.apply_pipeline(&self.pipeline_tracks);
         ctx.apply_bindings(&tracks.bindings);
         ctx.apply_uniforms(UniformsSource::table(&BasicUniforms {
@@ -663,11 +682,11 @@ impl RenderDataBase {
         }));
         ctx.draw(0, tracks.vert_count as i32, 1);
 
-        //Draw atoms
+        // Draw atoms
         let atoms_slice = &float_world.atoms_xy[..];
         self.draw_atoms(ctx, screen_size, atoms_slice, camera);
 
-        //Draw arms
+        // Draw arms
         ctx.apply_pipeline(&self.pipeline);
         ctx.apply_bindings(&self.shapes.arm_bindings);
         for f_arm in float_world.arms_xy.iter() {
