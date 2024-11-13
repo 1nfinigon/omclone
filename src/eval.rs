@@ -15,12 +15,16 @@ pub struct EvalResult {
     pub policy: [f32; BasicInstr::N_TYPES],
 }
 
+pub struct EvalInput {
+    pub state: State,
+    pub is_root: bool,
+}
+
 pub trait BatchEvaluator: Send + Sync {
     fn model_name(&self) -> &str;
 
-    /// `states` contains a bool `is_root`
-    /// Must return a Vec of the same length
-    fn batch_eval_blocking(&self, states: Vec<(State, bool)>) -> Result<Vec<EvalResult>>;
+    /// Must return a Vec of the same length as `inputs`
+    fn batch_eval_blocking(&self, inputs: Vec<EvalInput>) -> Result<Vec<EvalResult>>;
 }
 
 pub trait AsyncEvaluator: Send + Sync {
@@ -101,7 +105,7 @@ impl<BE: BatchEvaluator> EvalThread<BE> {
                     }
                 };
 
-                batch_to_evaluate.push((state, is_root));
+                batch_to_evaluate.push(EvalInput { state, is_root });
                 result_txs.push(tx);
             }
 
@@ -203,9 +207,9 @@ impl BatchEvaluator for DummyEvaluator {
         "dummy-evaluator"
     }
 
-    fn batch_eval_blocking(&self, states: Vec<(State, bool)>) -> Result<Vec<EvalResult>> {
+    fn batch_eval_blocking(&self, inputs: Vec<EvalInput>) -> Result<Vec<EvalResult>> {
         let mut rng = self.rng.lock().ok().ok_or_eyre("can't lock rng")?;
-        Ok(states
+        Ok(inputs
             .into_iter()
             .map(|_| {
                 let mut policy = [0f32; BasicInstr::N_TYPES];

@@ -1,7 +1,6 @@
 //! NN-specific code: features, tensors, model loading and evaluation
 
 use crate::eval;
-use crate::search_state;
 use crate::sim::{self, BasicInstr};
 use eyre::{ensure, eyre, OptionExt, Result};
 use rand::prelude::*;
@@ -293,6 +292,10 @@ trait SparseCooAsSlice {
     fn set_slice(&mut self, coord: &[usize], value: f32);
 }
 
+/// A generic Rust-native sparse COO representation, stored on CPU and
+/// manipulatable from Rust. Intended to be constructed from scratch, and then
+/// later uploaded to GPU using [`SparseCoo::slice_to_dense_tensor`], or saved
+/// to disk using [`SparseCoo::to_tensors_for_serializing`].
 #[derive(Clone, Debug)]
 pub struct SparseCoo<const N: usize> {
     /// flattened representation; indices.len() == nonzero_count * N
@@ -335,6 +338,8 @@ impl<const N: usize> SparseCoo<N> {
         self.values.truncate(new_i);
     }
 
+    /// Creates a mutable 1D view, fixing all dimension indices except the given
+    /// dimension.
     fn slice_all_but_one_dim(&mut self, dim: usize, other_coords: &[usize]) -> SparseCoo1DSlice {
         assert_eq!(other_coords.len(), N - 1);
         SparseCoo1DSlice {
@@ -361,6 +366,9 @@ impl<const N: usize> SparseCoo<N> {
         Ok(tch::Tensor::f_from_slice(&self.size[..])?)
     }
 
+    /// Converts into a dense [`tch::Tensor`] on the specified device. This
+    /// operation is bandwidth-efficient: it first uploads the data to the
+    /// device as sparse, and then converts into dense on-device directly.
     #[cfg(feature = "torch")]
     fn slice_to_dense_tensor(
         self_: &[&Self],
@@ -452,6 +460,10 @@ impl<const N: usize> SparseCoo<N> {
     }
 }
 
+/// A set of [`tch::Tensor`]s containing the raw commponents of the COO
+/// representation directly. This is useful for serialization purposes, and
+/// manipulation from Python-side code, but not much else, as currently there's
+/// no way to convert this back into a [`SparseCoo`] in Rust code.
 #[cfg(feature = "torch")]
 pub struct SparseCooTensorsForSerializing {
     pub indices: tch::Tensor,
@@ -461,6 +473,7 @@ pub struct SparseCooTensorsForSerializing {
 
 #[cfg(feature = "torch")]
 impl<const N: usize> SparseCoo<N> {
+    /// See [`SparseCooTensorsForSerializing`].
     pub fn to_tensors_for_serializing(&self) -> Result<SparseCooTensorsForSerializing> {
         Ok(SparseCooTensorsForSerializing {
             indices: self.indices_tensor()?,
@@ -476,6 +489,8 @@ impl<const N: usize> SparseCooAsSlice for SparseCoo<N> {
     }
 }
 
+/// A mutable 1D view of an underlying [`SparseCoo`]. Borrows the [`SparseCoo`]
+/// in question.
 struct SparseCoo1DSlice<'a> {
     underlying: &'a mut dyn SparseCooAsSlice,
     dim: usize,
@@ -511,6 +526,7 @@ pub mod features {
         }
     }
 
+    /// Contains spatial and temporal features in sparse format.
     #[derive(Clone)]
     pub struct Features {
         pub spatial: SparseCoo<3>,
@@ -963,57 +979,83 @@ impl Model {
     }
 }
 
+pub struct ModelInputTensors {
+    pub spatial: tch::Tensor,
+    pub spatiotemporal: tch::Tensor,
+    pub temporal: tch::Tensor,
+    pub policy_softmax_temperature: tch::Tensor,
+}
+
+impl ModelInputTensors {
+    pub fn from_eval_input_batched(
+        inputs: &[eval::EvalInput],
+        options: (tch::Kind, tch::Device),
+        tracy_client: tracy_client::Client,
+    ) -> Result<Self> {
+        let _span = tracy_client
+            .clone()
+            .span(tracy_client::span_location!("input munging"), 0);
+
+        let batch_size = inputs.len();
+
+        let spatial: Vec<_> = inputs
+            .iter()
+            .map(|input| &input.state.nn_features.spatial)
+            .collect();
+        let spatial = SparseCoo::slice_to_dense_tensor(&spatial, tracy_client.clone(), options)?;
+        let spatiotemporal: Vec<_> = inputs
+            .iter()
+            .map(|input| &input.state.nn_features.spatiotemporal)
+            .collect();
+        let spatiotemporal =
+            SparseCoo::slice_to_dense_tensor(&spatiotemporal, tracy_client.clone(), options)?;
+        let temporal: Vec<_> = inputs
+            .iter()
+            .map(|input| &input.state.nn_features.temporal)
+            .collect();
+        let temporal = SparseCoo::slice_to_dense_tensor(&temporal, tracy_client.clone(), options)?;
+
+        let policy_softmax_temperature: Vec<_> = inputs
+            .iter()
+            .map(|input| if input.is_root { 1.03 } else { 1. })
+            .collect();
+        let policy_softmax_temperature =
+            tch::Tensor::f_from_slice(&policy_softmax_temperature)?.f_to(options.1)?;
+
+        assert_eq!(policy_softmax_temperature.size1()?, batch_size as i64);
+
+        Ok(Self {
+            spatial,
+            spatiotemporal,
+            temporal,
+            policy_softmax_temperature,
+        })
+    }
+}
+
 #[cfg(feature = "torch")]
 impl eval::BatchEvaluator for Model {
     fn model_name(&self) -> &str {
         &self.name
     }
 
-    fn batch_eval_blocking(
-        &self,
-        states: Vec<(search_state::State, bool)>,
-    ) -> Result<Vec<eval::EvalResult>> {
+    fn batch_eval_blocking(&self, inputs: Vec<eval::EvalInput>) -> Result<Vec<eval::EvalResult>> {
         let rng = &mut rand::thread_rng();
-        let batch_size = states.len();
+        let batch_size = inputs.len();
 
         let options = (tch::Kind::Float, self.device);
 
         let input = {
-            let _span = self
-                .tracy_client
-                .clone()
-                .span(tracy_client::span_location!("input munging"), 0);
-
-            let spatial: Vec<_> = states
-                .iter()
-                .map(|(state, _)| &state.nn_features.spatial)
-                .collect();
-            let spatial =
-                SparseCoo::slice_to_dense_tensor(&spatial, self.tracy_client.clone(), options)?;
-            let spatiotemporal: Vec<_> = states
-                .iter()
-                .map(|(state, _)| &state.nn_features.spatiotemporal)
-                .collect();
-            let spatiotemporal = SparseCoo::slice_to_dense_tensor(
-                &spatiotemporal,
-                self.tracy_client.clone(),
+            let ModelInputTensors {
+                spatial,
+                spatiotemporal,
+                temporal,
+                policy_softmax_temperature,
+            } = ModelInputTensors::from_eval_input_batched(
+                &inputs,
                 options,
+                self.tracy_client.clone(),
             )?;
-            let temporal: Vec<_> = states
-                .iter()
-                .map(|(state, _)| &state.nn_features.temporal)
-                .collect();
-            let temporal =
-                SparseCoo::slice_to_dense_tensor(&temporal, self.tracy_client.clone(), options)?;
-
-            let policy_softmax_temperature: Vec<_> = states
-                .iter()
-                .map(|(_, is_root)| if *is_root { 1.03 } else { 1. })
-                .collect();
-            let policy_softmax_temperature =
-                tch::Tensor::f_from_slice(&policy_softmax_temperature)?.f_to(self.device)?;
-
-            assert_eq!(policy_softmax_temperature.size1()?, batch_size as i64);
 
             [
                 tch::IValue::Tensor(spatial),
@@ -1049,10 +1091,10 @@ impl eval::BatchEvaluator for Model {
             .clone()
             .span(tracy_client::span_location!("output munging"), 0);
 
-        states
+        inputs
             .iter()
             .enumerate()
-            .map(|(batch_index, (state, is_root))| {
+            .map(|(batch_index, eval::EvalInput { state, is_root })| {
                 let (win, mut policy) = {
                     let next_arm_index = state.instr_buffer.len();
                     let next_arm_pos = state.world.arms[next_arm_index].pos;
