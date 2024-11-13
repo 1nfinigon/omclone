@@ -19,3 +19,6 @@ class Repl:
         self.pexpect.sendline(cmd)
         self.pexpect.expect('omclone> ')
         return self.pexpect.before
+
+    def close(self):
+        self.pexpect.close()
