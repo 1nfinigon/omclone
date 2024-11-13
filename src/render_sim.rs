@@ -264,7 +264,11 @@ impl CameraSetup {
         )
     }
     pub fn frame_center(world: &World, screen_size: (f32, f32)) -> Self {
-        let pos_list = world.glyphs.iter().map(|x| pos_to_xy(&x.pos));
+        let pos_list = world
+            .glyphs
+            .iter()
+            .flat_map(|glyph| glyph.positions())
+            .map(|pos| pos_to_xy(&pos));
         let (mut lowx, mut lowy, mut highx, mut highy) = pos_list.fold(
             (
                 f32::INFINITY,
@@ -290,15 +294,6 @@ impl CameraSetup {
         let world_width_scale = screen_size.0 / (highx - lowx);
         let world_height_scale = screen_size.1 / (highy - lowy);
         let scale_base = world_width_scale.min(world_height_scale);
-        println!(
-            "camera debug: screen {:?}, scales {:?},{:?} wh {:?},{:?}",
-            screen_size,
-            world_width_scale,
-            world_height_scale,
-            highx - lowx,
-            highy - lowy
-        );
-        println!("camera: x{}, +{:?}", scale_base, offset);
         CameraSetup { scale_base, offset }
     }
 }
