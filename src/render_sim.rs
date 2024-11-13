@@ -250,6 +250,8 @@ struct ShapeStore {
     circle_bindings: Bindings,
     texture_bindings: BTreeMap<TextureId, Bindings>,
 }
+
+#[derive(Debug)]
 pub struct CameraSetup {
     /// How many screen-pixels is each GFXPos unit (i.e. hexagonal radius)?
     pub scale_base: f32,

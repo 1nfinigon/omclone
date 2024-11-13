@@ -25,6 +25,8 @@ struct Handler {
 
     #[cfg(feature = "search")]
     search_state: Option<search_state::State>,
+    #[cfg(feature = "torch")]
+    recentre_to_fit_within_nn_bounds: bool,
 
     stdin_thread: Option<thread::JoinHandle<Result<()>>>,
     stdin_rx: mpsc::Receiver<(String, Arc<OnceCell<()>>)>,
@@ -62,6 +64,8 @@ impl Handler {
             world: None,
             #[cfg(feature = "search")]
             search_state: None,
+            #[cfg(feature = "torch")]
+            recentre_to_fit_within_nn_bounds: false,
             stdin_thread: Some(stdin_thread),
             stdin_rx,
         }
@@ -78,7 +82,22 @@ impl Handler {
     fn reload(&mut self) -> Result<()> {
         let puzzle = self.puzzle.as_ref().ok_or_eyre("puzzle not loaded")?;
         let solution = self.solution.as_ref().ok_or_eyre("solution not loaded")?;
-        let init = parser::puzzle_prep(puzzle, solution)?;
+        let mut init = parser::puzzle_prep(puzzle, solution)?;
+
+        #[cfg(feature = "torch")]
+        if self.recentre_to_fit_within_nn_bounds {
+            use crate::nn;
+            println!("Recentre: old bounding box {:?}", init.bounding_box());
+            init.recentre_to_fit_within(sim::Pos::new(
+                nn::constants::N_WIDTH as i32,
+                nn::constants::N_HEIGHT as i32,
+            ))?;
+            println!("Recentre: new bounding box {:?}", init.bounding_box());
+        }
+
+        // suppress `mut` warning if compiling without feature "torch"
+        let _ = &mut init;
+
         let world = sim::WorldWithTapes::setup_sim(&init)?;
         self.world = Some(world.clone());
 
@@ -96,39 +115,98 @@ impl Handler {
         Ok(())
     }
 
-    fn load(&mut self, puzzle: parser::FullPuzzle, solution: parser::FullSolution) -> Result<()> {
+    fn load(
+        &mut self,
+        puzzle: parser::FullPuzzle,
+        solution: parser::FullSolution,
+        #[cfg(feature = "torch")] recentre_to_fit_within_nn_bounds: bool,
+    ) -> Result<()> {
         self.puzzle = Some(puzzle);
         self.solution = Some(solution);
+        #[cfg(feature = "torch")]
+        {
+            self.recentre_to_fit_within_nn_bounds = recentre_to_fit_within_nn_bounds;
+        }
         self.reload()?;
         Ok(())
     }
 
     fn cmd_load<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
-        match args {
-            [] => {
-                let (puzzle, solution) = utils::get_default_puzzle_solution()?;
-                self.load(puzzle, solution)
+        let mut puzzle_path = None;
+        let mut solution_path = None;
+
+        #[cfg(feature = "torch")]
+        let mut recentre_to_fit_within_nn_bounds = false;
+
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_ref() {
+                "--puzzle" => {
+                    puzzle_path = Some(
+                        args.next()
+                            .ok_or_eyre("--puzzle missing filename")?
+                            .as_ref()
+                            .to_owned(),
+                    );
+                }
+                "--solution" => {
+                    solution_path = Some(
+                        args.next()
+                            .ok_or_eyre("--solution missing filename")?
+                            .as_ref()
+                            .to_owned(),
+                    );
+                }
+                #[cfg(feature = "torch")]
+                "--recentre-to-fit-within-nn-bounds" => {
+                    recentre_to_fit_within_nn_bounds = true;
+                }
+                arg => {
+                    return Err(eyre!("unknown arg {}", arg));
+                }
             }
-            [sol_path] => {
+        }
+
+        match (puzzle_path, solution_path) {
+            (None, None) => {
+                let (puzzle, solution) = utils::get_default_puzzle_solution()?;
+                self.load(
+                    puzzle,
+                    solution,
+                    #[cfg(feature = "torch")]
+                    recentre_to_fit_within_nn_bounds,
+                )
+            }
+            (None, Some(solution_path)) => {
                 let (puzzle, solution) =
-                    utils::get_solution(sol_path.as_ref(), self.get_or_load_puzzle_map())?;
+                    utils::get_solution(&solution_path, self.get_or_load_puzzle_map())?;
                 let puzzle = puzzle
                     .ok_or_eyre(
                         "couldn't find puzzle for the given solution, please specify explicitly",
                     )?
                     .clone();
-                self.load(puzzle.clone(), solution)
+                self.load(
+                    puzzle.clone(),
+                    solution,
+                    #[cfg(feature = "torch")]
+                    recentre_to_fit_within_nn_bounds,
+                )
             }
-            [puz_path, sol_path] => {
-                let f_puz = File::open(puz_path.as_ref())?;
+            (Some(puzzle_path), Some(solution_path)) => {
+                let f_puz = File::open(&puzzle_path)?;
                 let puzzle = parser::parse_puzzle(&mut BufReader::new(f_puz))
-                    .wrap_err(eyre!("Failed to parse puzzle {:?}", puz_path.as_ref()))?;
-                let f_sol = File::open(sol_path.as_ref())?;
+                    .wrap_err(eyre!("Failed to parse puzzle {:?}", &puzzle_path))?;
+                let f_sol = File::open(&solution_path)?;
                 let solution = parser::parse_solution(&mut BufReader::new(f_sol))
-                    .wrap_err(eyre!("Failed to parse solution {:?}", sol_path.as_ref()))?;
-                self.load(puzzle, solution)
+                    .wrap_err(eyre!("Failed to parse solution {:?}", &solution_path))?;
+                self.load(
+                    puzzle,
+                    solution,
+                    #[cfg(feature = "torch")]
+                    recentre_to_fit_within_nn_bounds,
+                )
             }
-            _ => Err(eyre!("bad args to load")),
+            (Some(_), None) => Err(eyre!("when passing --puzzle, need --solution too")),
         }
     }
 
@@ -176,6 +254,8 @@ impl Handler {
         let mut width = 256u32;
         let mut height = 256u32;
         let mut output_filename = "output.png".to_string();
+        let mut offset = None;
+        let mut scale = None;
 
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -187,10 +267,32 @@ impl Handler {
                         .as_ref()
                         .to_owned();
                 }
+                "--offset" => {
+                    let offset_str: Vec<_> = args
+                        .next()
+                        .ok_or_eyre("--offset missing arg")?
+                        .as_ref()
+                        .split(',')
+                        .collect();
+                    let (x, y) = if let [x_str, y_str] = &offset_str[..] {
+                        Ok((x_str.parse::<f32>()?, y_str.parse::<f32>()?))
+                    } else {
+                        Err(eyre!("bad offset string format, expected x,y"))
+                    }?;
+                    offset = Some((x, y));
+                }
+                "--scale" => {
+                    scale = Some(
+                        args.next()
+                            .ok_or_eyre("--scale missing arg")?
+                            .as_ref()
+                            .parse::<f32>()?,
+                    );
+                }
                 "--size" => {
                     let size_str: Vec<_> = args
                         .next()
-                        .ok_or_eyre("--output missing filename")?
+                        .ok_or_eyre("--size missing arg")?
                         .as_ref()
                         .split('x')
                         .collect();
@@ -226,7 +328,15 @@ impl Handler {
             PassAction::clear_color(0.5, 0.5, 0.5, 1.0),
         );
 
-        let camera = render_sim::CameraSetup::frame_center(world, screen_size);
+        let mut camera = render_sim::CameraSetup::frame_center(world, screen_size);
+        println!("Default camera settings: {:?}", camera);
+        if let Some((x, y)) = offset {
+            camera.offset = [x, y];
+        }
+        if let Some(scale) = scale {
+            camera.scale_base = scale;
+        }
+
         let tracks = render_sim::setup_tracks(self.mq_ctx.as_mut(), &world.track_maps);
         let mut float_world = sim::FloatWorld::new();
         float_world.generate_static(world);
@@ -300,7 +410,7 @@ impl Handler {
             match result {
                 Ok(()) => (),
                 Err(e) => {
-                    eprintln!("{:#}", e);
+                    println!("{:#}", e);
                 }
             }
         }

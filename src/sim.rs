@@ -991,6 +991,27 @@ impl InitialWorld {
         let max_y = area_touched.iter().map(|p| p.y).max().unwrap();
         Some((Pos::new(min_x, min_y), Pos::new(max_x, max_y)))
     }
+
+    /// Moves the solution to fit within the bounding box with corners at the
+    /// origin and `outer_bound`. Returns `Err` if this is not possible.
+    pub fn recentre_to_fit_within(&mut self, outer_bound: Pos) -> Result<()> {
+        ensure!(
+            outer_bound.x >= 0 && outer_bound.y >= 0,
+            "bound can't be negative"
+        );
+        if let Some((min, max)) = self.bounding_box() {
+            let self_wh = max - min;
+            ensure!(
+                self_wh.x < outer_bound.x && self_wh.y < outer_bound.y,
+                "solution footprint is too big: {} vs max {}",
+                self_wh,
+                outer_bound
+            );
+            let delta = (outer_bound - (max + min)) / 2;
+            self.move_by(delta);
+        }
+        Ok(())
+    }
 }
 
 pub type TrackMap = FxHashMap<Pos, Pos>;

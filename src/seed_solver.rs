@@ -49,21 +49,17 @@ fn solve_one_puzzle_seeded(
     );
 
     // Recentre the solution so that the bounding box is centred around (w/2, h/2)
-    if let Some((min, max)) = seed_init.bounding_box() {
-        let nn_wh = sim::Pos::new(
-            nn::constants::N_WIDTH as i32,
-            nn::constants::N_HEIGHT as i32,
-        );
-        let seed_wh = max - min;
-        if seed_wh.x >= nn_wh.x || seed_wh.y >= nn_wh.y {
+    match seed_init.recentre_to_fit_within(sim::Pos::new(
+        nn::constants::N_WIDTH as i32,
+        nn::constants::N_HEIGHT as i32,
+    )) {
+        Ok(()) => (),
+        Err(e) => {
             println!(
-                "skipping because solution footprint is too big: {} vs max {}",
-                seed_wh, nn_wh
+                "skipping because can't recentre to fit within NN bounding box: {:?}",
+                e
             );
-            return Ok(());
         }
-        let delta = (nn_wh - (max + min)) / 2;
-        seed_init.move_by(delta);
     }
 
     // TODO: randomly rotate the seed world, then check that the post-rotate
