@@ -249,15 +249,18 @@ struct ShapeStore {
     texture_bindings: BTreeMap<TextureId, Bindings>,
 }
 pub struct CameraSetup {
-    /// How many screen-pixels should separate each adjacent hexagonal centre?
+    /// How many screen-pixels is each GFXPos unit (i.e. hexagonal radius)?
     pub scale_base: f32,
     pub offset: GFXPos,
 }
 impl CameraSetup {
+    /// Returns the coefficient required to convert from GFXPos (where each
+    /// adjacent hexagonal centre is distance 2 from each other) to OpenGL clip
+    /// space (-1, 1)
     pub fn scale(&self, screen_size: (f32, f32)) -> (f32, f32) {
         (
-            self.scale_base / screen_size.0,
-            self.scale_base / screen_size.1,
+            2. * self.scale_base / screen_size.0,
+            2. * self.scale_base / screen_size.1,
         )
     }
     pub fn frame_center(world: &World, screen_size: (f32, f32)) -> Self {
@@ -284,8 +287,8 @@ impl CameraSetup {
         highx += BORDER;
         highy += BORDER;
         let offset = [-(lowx + highx) / 2., -(lowy + highy) / 2.];
-        let world_width_scale = screen_size.0 * 2. / (highx - lowx);
-        let world_height_scale = screen_size.1 * 2. / (highy - lowy);
+        let world_width_scale = screen_size.0 / (highx - lowx);
+        let world_height_scale = screen_size.1 / (highy - lowy);
         let scale_base = world_width_scale.min(world_height_scale);
         println!(
             "camera debug: screen {:?}, scales {:?},{:?} wh {:?},{:?}",
@@ -538,7 +541,7 @@ impl RenderDataBase {
             };
         }
         //Draw the Hex grid
-        if camera.scale_base > 10. {
+        if camera.scale_base > 5. {
             let (inv_scale_x, inv_scale_y) = (1. / scale.0, 1. / scale.1);
             let xc = (-world_offset[0] / 2. - 0.25).fract();
             let yc = ((-world_offset[1] / 2.) / Y_FACTOR + 0.10).fract();

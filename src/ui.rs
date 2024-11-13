@@ -533,7 +533,7 @@ impl EventHandler for MyMiniquadApp {
                         });
                         ui.horizontal(|ui|{
                             ui.label("zoom:");
-                            ui.add(egui::Slider::new(&mut loaded.camera.scale_base, 2.0..=200.0)
+                            ui.add(egui::Slider::new(&mut loaded.camera.scale_base, 1.0..=100.0)
                                 .logarithmic(true));
                         });
                     });
@@ -812,8 +812,8 @@ impl EventHandler for MyMiniquadApp {
         if let Some(drag_last) = &mut self.dragging {
             if let Loaded(loaded) = &mut self.app_state {
                 let cam = &mut loaded.camera;
-                cam.offset[0] += (x - drag_last[0]) / cam.scale_base * 2.;
-                cam.offset[1] -= (y - drag_last[1]) / cam.scale_base * 2.;
+                cam.offset[0] += (x - drag_last[0]) / cam.scale_base;
+                cam.offset[1] -= (y - drag_last[1]) / cam.scale_base;
                 *drag_last = [x, y];
             }
         }
@@ -824,10 +824,10 @@ impl EventHandler for MyMiniquadApp {
         if !self.egui_mq.egui_ctx().is_pointer_over_area() {
             if let Loaded(loaded) = &mut self.app_state {
                 let cam = &mut loaded.camera;
-                if dy.is_sign_negative() && cam.scale_base > 2. {
+                if dy.is_sign_negative() && cam.scale_base > 1. {
                     cam.scale_base *= 0.9;
                 }
-                if dy.is_sign_positive() && cam.scale_base < 200. {
+                if dy.is_sign_positive() && cam.scale_base < 100. {
                     cam.scale_base *= 1.1;
                 }
             }
