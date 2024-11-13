@@ -163,7 +163,7 @@ Notes:
 -   Both networks train at the same speed, indicating the python dataloader or
     disk->sparse->dense->GPU or loss-computation overheads dominate. The GPU is
     not hitting power usage limits (avg 100W for A and 50W for B), further
-    indicating that some time spent optimizing pytorch/train.py would be
+    indicating that some time spent optimizing python/train.py would be
     fruitful.
 -   I neglected to set a seed, so the random training/validation split is
     different, making validation results hard to compare between the two. This
