@@ -579,6 +579,45 @@ def model_v1_params_v1():
         value_head_channels = HEAD_CHANNELS,
         value_channels = VALUE_CHANNELS)
 
+def model_v1_params_v1_altline():
+    # constants from nn.rs
+    SPATIAL_FEATURES = 141
+    SPATIOTEMPORAL_FEATURES = 72
+    TEMPORAL_FEATURES = 2
+    N_HISTORY_CYCLES = 4
+
+    # tunable constants
+    CHANNELS = 96
+    POOL_CHANNELS = 32
+    HEAD_CHANNELS = 96
+    VALUE_CHANNELS = 48
+    LAYERS = [
+        "res",
+        "res",
+        "respool",
+        "res",
+        "res",
+        "convtime",
+        "res",
+        "res",
+        "respool",
+        "res",
+        "res"
+    ]
+
+    return ModelV1(
+        spatial_features = SPATIAL_FEATURES,
+        spatiotemporal_features = SPATIOTEMPORAL_FEATURES,
+        temporal_features = TEMPORAL_FEATURES,
+        time_size = N_HISTORY_CYCLES,
+        trunk_channels = CHANNELS,
+        pool_channels = POOL_CHANNELS,
+        trunk_layers = LAYERS,
+        policy_head_channels = HEAD_CHANNELS,
+        value_head_channels = HEAD_CHANNELS,
+        value_channels = VALUE_CHANNELS)
+
+
 def run_tests():
     for test in _TESTS:
         test()
