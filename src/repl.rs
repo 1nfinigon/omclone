@@ -19,17 +19,22 @@ use once_cell::sync::OnceCell;
 struct Handler {
     mq_ctx: Box<dyn RenderingBackend>,
     puzzle_map: Option<utils::PuzzleMap>,
-    puzzle: Option<parser::FullPuzzle>,
-    solution: Option<parser::FullSolution>,
-    world: Option<sim::WorldWithTapes>,
+    /// What params to use when (re)loading
+    load_params: Option<LoadParams>,
 
+    world: Option<sim::WorldWithTapes>,
     #[cfg(feature = "search")]
     search_state: Option<search_state::State>,
-    #[cfg(feature = "torch")]
-    recentre_to_fit_within_nn_bounds: bool,
 
     stdin_thread: Option<thread::JoinHandle<Result<()>>>,
     stdin_rx: mpsc::Receiver<(String, Arc<OnceCell<()>>)>,
+}
+
+struct LoadParams {
+    puzzle: parser::FullPuzzle,
+    solution: parser::FullSolution,
+    #[cfg(feature = "torch")]
+    recentre_to_fit_within_nn_bounds: bool,
 }
 
 impl Handler {
@@ -62,13 +67,10 @@ impl Handler {
         Self {
             mq_ctx,
             puzzle_map: None,
-            puzzle: None,
-            solution: None,
+            load_params: None,
             world: None,
             #[cfg(feature = "search")]
             search_state: None,
-            #[cfg(feature = "torch")]
-            recentre_to_fit_within_nn_bounds: false,
             stdin_thread: Some(stdin_thread),
             stdin_rx,
         }
@@ -83,12 +85,19 @@ impl Handler {
     }
 
     fn reload(&mut self) -> Result<()> {
-        let puzzle = self.puzzle.as_ref().ok_or_eyre("puzzle not loaded")?;
-        let solution = self.solution.as_ref().ok_or_eyre("solution not loaded")?;
+        let LoadParams {
+            puzzle,
+            solution,
+            #[cfg(feature = "torch")]
+            recentre_to_fit_within_nn_bounds,
+        } = self
+            .load_params
+            .as_ref()
+            .ok_or_eyre("load parameters not set")?;
         let mut init = parser::puzzle_prep(puzzle, solution)?;
 
         #[cfg(feature = "torch")]
-        if self.recentre_to_fit_within_nn_bounds {
+        if *recentre_to_fit_within_nn_bounds {
             use crate::nn;
             println!("Recentre: old bounding box {:?}", init.bounding_box());
             init.recentre_to_fit_within(sim::Pos::new(
@@ -118,18 +127,8 @@ impl Handler {
         Ok(())
     }
 
-    fn load(
-        &mut self,
-        puzzle: parser::FullPuzzle,
-        solution: parser::FullSolution,
-        #[cfg(feature = "torch")] recentre_to_fit_within_nn_bounds: bool,
-    ) -> Result<()> {
-        self.puzzle = Some(puzzle);
-        self.solution = Some(solution);
-        #[cfg(feature = "torch")]
-        {
-            self.recentre_to_fit_within_nn_bounds = recentre_to_fit_within_nn_bounds;
-        }
+    fn load(&mut self, load_params: LoadParams) -> Result<()> {
+        self.load_params = Some(load_params);
         self.reload()?;
         Ok(())
     }
@@ -173,12 +172,12 @@ impl Handler {
         match (puzzle_path, solution_path) {
             (None, None) => {
                 let (puzzle, solution) = utils::get_default_puzzle_solution()?;
-                self.load(
+                self.load(LoadParams {
                     puzzle,
                     solution,
                     #[cfg(feature = "torch")]
                     recentre_to_fit_within_nn_bounds,
-                )
+                })
             }
             (None, Some(solution_path)) => {
                 let (puzzle, solution) =
@@ -188,12 +187,12 @@ impl Handler {
                         "couldn't find puzzle for the given solution, please specify explicitly",
                     )?
                     .clone();
-                self.load(
-                    puzzle.clone(),
+                self.load(LoadParams {
+                    puzzle,
                     solution,
                     #[cfg(feature = "torch")]
                     recentre_to_fit_within_nn_bounds,
-                )
+                })
             }
             (Some(puzzle_path), Some(solution_path)) => {
                 let f_puz = File::open(&puzzle_path)?;
@@ -202,12 +201,12 @@ impl Handler {
                 let f_sol = File::open(&solution_path)?;
                 let solution = parser::parse_solution(&mut BufReader::new(f_sol))
                     .wrap_err(eyre!("Failed to parse solution {:?}", &solution_path))?;
-                self.load(
+                self.load(LoadParams {
                     puzzle,
                     solution,
                     #[cfg(feature = "torch")]
                     recentre_to_fit_within_nn_bounds,
-                )
+                })
             }
             (Some(_), None) => Err(eyre!("when passing --puzzle, need --solution too")),
         }
