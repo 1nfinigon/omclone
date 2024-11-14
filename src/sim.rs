@@ -972,6 +972,7 @@ impl InitialWorld {
 
     pub fn rot_by(&mut self, rot: RawRot) {
         for glyph in self.glyphs.iter_mut() {
+            glyph.pos = rotate(glyph.pos, rot.normalize());
             glyph.rot_by(rot);
         }
         for arm in self.arms.iter_mut() {

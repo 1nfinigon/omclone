@@ -18,7 +18,7 @@ class Repl:
             cmd = shlex.join(cmd)
         self.pexpect.sendline(cmd)
         self.pexpect.expect('omclone> ')
-        return self.pexpect.before
+        print(self.pexpect.before.decode())
 
     def close(self):
         self.pexpect.close()

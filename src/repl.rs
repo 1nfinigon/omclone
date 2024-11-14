@@ -33,6 +33,7 @@ struct Handler {
 struct LoadParams {
     puzzle: parser::FullPuzzle,
     solution: parser::FullSolution,
+    rotate: Option<sim::RawRot>,
     #[cfg(feature = "torch")]
     recentre_to_fit_within_nn_bounds: bool,
 }
@@ -88,6 +89,7 @@ impl Handler {
         let LoadParams {
             puzzle,
             solution,
+            rotate,
             #[cfg(feature = "torch")]
             recentre_to_fit_within_nn_bounds,
         } = self
@@ -95,6 +97,10 @@ impl Handler {
             .as_ref()
             .ok_or_eyre("load parameters not set")?;
         let mut init = parser::puzzle_prep(puzzle, solution)?;
+
+        if let Some(rot) = rotate {
+            init.rot_by(*rot);
+        }
 
         #[cfg(feature = "torch")]
         if *recentre_to_fit_within_nn_bounds {
@@ -136,7 +142,7 @@ impl Handler {
     fn cmd_load<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
         let mut puzzle_path = None;
         let mut solution_path = None;
-
+        let mut rotate = None;
         #[cfg(feature = "torch")]
         let mut recentre_to_fit_within_nn_bounds = false;
 
@@ -159,6 +165,14 @@ impl Handler {
                             .to_owned(),
                     );
                 }
+                "--rotate" => {
+                    rotate = Some(sim::RawRot(
+                        args.next()
+                            .ok_or_eyre("--rotate missing int")?
+                            .as_ref()
+                            .parse::<i32>()?,
+                    ));
+                }
                 #[cfg(feature = "torch")]
                 "--recentre-to-fit-within-nn-bounds" => {
                     recentre_to_fit_within_nn_bounds = true;
@@ -169,16 +183,8 @@ impl Handler {
             }
         }
 
-        match (puzzle_path, solution_path) {
-            (None, None) => {
-                let (puzzle, solution) = utils::get_default_puzzle_solution()?;
-                self.load(LoadParams {
-                    puzzle,
-                    solution,
-                    #[cfg(feature = "torch")]
-                    recentre_to_fit_within_nn_bounds,
-                })
-            }
+        let (puzzle, solution) = match (puzzle_path, solution_path) {
+            (None, None) => utils::get_default_puzzle_solution()?,
             (None, Some(solution_path)) => {
                 let (puzzle, solution) =
                     utils::get_solution(&solution_path, self.get_or_load_puzzle_map())?;
@@ -187,12 +193,7 @@ impl Handler {
                         "couldn't find puzzle for the given solution, please specify explicitly",
                     )?
                     .clone();
-                self.load(LoadParams {
-                    puzzle,
-                    solution,
-                    #[cfg(feature = "torch")]
-                    recentre_to_fit_within_nn_bounds,
-                })
+                (puzzle, solution)
             }
             (Some(puzzle_path), Some(solution_path)) => {
                 let f_puz = File::open(&puzzle_path)?;
@@ -201,15 +202,18 @@ impl Handler {
                 let f_sol = File::open(&solution_path)?;
                 let solution = parser::parse_solution(&mut BufReader::new(f_sol))
                     .wrap_err(eyre!("Failed to parse solution {:?}", &solution_path))?;
-                self.load(LoadParams {
-                    puzzle,
-                    solution,
-                    #[cfg(feature = "torch")]
-                    recentre_to_fit_within_nn_bounds,
-                })
+                (puzzle, solution)
             }
-            (Some(_), None) => Err(eyre!("when passing --puzzle, need --solution too")),
-        }
+            (Some(_), None) => Err(eyre!("when passing --puzzle, need --solution too"))?,
+        };
+
+        self.load(LoadParams {
+            puzzle,
+            solution,
+            rotate,
+            #[cfg(feature = "torch")]
+            recentre_to_fit_within_nn_bounds,
+        })
     }
 
     fn cmd_cycle<S: AsRef<str>>(&mut self, args: &[S]) -> Result<()> {
