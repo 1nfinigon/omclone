@@ -979,6 +979,7 @@ impl Model {
     }
 }
 
+#[cfg(feature = "torch")]
 pub struct ModelInputTensors {
     pub spatial: tch::Tensor,
     pub spatiotemporal: tch::Tensor,
@@ -986,6 +987,7 @@ pub struct ModelInputTensors {
     pub policy_softmax_temperature: tch::Tensor,
 }
 
+#[cfg(feature = "torch")]
 impl ModelInputTensors {
     pub fn from_eval_input_batched(
         inputs: &[eval::EvalInput],
